@@ -4,7 +4,8 @@ import type { RuntimeEvent } from './event-store.js'
 /** Creates read models which are deliberately disposable: runtime_events is authoritative. */
 export function createProjectionSchema(db: DatabaseSync): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, pause_reason TEXT);
+    CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, control_revision INTEGER NOT NULL DEFAULT 0, workspace_scope TEXT, pause_reason TEXT);
+    CREATE TABLE IF NOT EXISTS task_session_links (goal_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, session_id, kind));
     CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
     CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, created_order INTEGER NOT NULL);
@@ -20,6 +21,9 @@ export function createProjectionSchema(db: DatabaseSync): void {
   `)
   const planColumns = db.prepare('PRAGMA table_info(plan_revisions)').all() as Array<{ name: string }>
   if (!planColumns.some(column => column.name === 'metadata_json')) db.exec("ALTER TABLE plan_revisions ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+  const goalColumns = db.prepare('PRAGMA table_info(goals)').all() as Array<{ name: string }>
+  if (!goalColumns.some(column => column.name === 'control_revision')) db.exec('ALTER TABLE goals ADD COLUMN control_revision INTEGER NOT NULL DEFAULT 0')
+  if (!goalColumns.some(column => column.name === 'workspace_scope')) db.exec('ALTER TABLE goals ADD COLUMN workspace_scope TEXT')
 }
 
 /** Applies exactly one durable event to materialized views. */
@@ -28,7 +32,16 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
   const taskId = event.taskId
   switch (event.type) {
     case 'GoalCreated':
-      db.prepare('INSERT INTO goals (id, objective, constraints_json, planning_mode, state, revision) VALUES (?, ?, ?, ?, ?, 0)').run(event.goalId, String(p.objective), JSON.stringify(p.constraints ?? []), String(p.planningMode ?? 'auto'), 'DRAFT')
+      db.prepare('INSERT INTO goals (id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope) VALUES (?, ?, ?, ?, ?, 0, 0, ?)').run(event.goalId, String(p.objective), JSON.stringify(p.constraints ?? []), String(p.planningMode ?? 'auto'), 'DRAFT', p.workspaceScope == null ? null : String(p.workspaceScope))
+      break
+    case 'TaskSessionAttached':
+      db.prepare('INSERT OR IGNORE INTO task_session_links (goal_id, session_id, kind, created_order) VALUES (?, ?, ?, ?)').run(event.goalId, String(p.sessionId), String(p.kind), seq)
+      break
+    case 'TaskControlRevisionAdvanced':
+      db.prepare('UPDATE goals SET control_revision = ? WHERE id = ?').run(Number(p.controlRevision), event.goalId)
+      break
+    case 'ExecutionInterrupted':
+      db.prepare('UPDATE goals SET state = ?, pause_reason = ? WHERE id = ?').run('PAUSED', `interrupted:${String(p.cause)}:${String(p.recoveryOutcome)}`, event.goalId)
       break
     case 'PlanProposed':
       db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [] }))

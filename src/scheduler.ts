@@ -95,6 +95,11 @@ export class Scheduler {
     if (this.store?.getGoal(goalId)?.state !== 'CANCELLED') this.store?.transaction(() => this.store!.append([{ type: 'GoalCancelled', goalId, payload: {} }]))
   }
 
+  /** Stop in-flight child work without choosing a durable lifecycle transition. */
+  interrupt(goalId: string): void {
+    for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); this.adapter.cancel?.(attemptId) }
+  }
+
   private dependenciesSatisfied(goalId: string, task: TaskNode, tasks: readonly TaskNode[]): boolean {
     const byId = new Map(tasks.map(item => [item.id, item]))
     if (!task.dependsOn.every(id => byId.get(id)?.state === 'SUCCEEDED')) return false

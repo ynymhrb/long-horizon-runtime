@@ -7,6 +7,10 @@ export type TaskState = 'PENDING' | 'READY' | 'RUNNING' | 'BLOCKED' | 'SUCCEEDED
 /** How a scheduler may recover an interrupted task. */
 export type SideEffectClass = 'read_only' | 'idempotent' | 'external_effect'
 
+/** Durable observation, separate from the policy chosen for what happens next. */
+export type InterruptionCause = 'user_stop' | 'timeout' | 'process_loss' | 'child_failure'
+export type RecoveryPolicyOutcome = 'requeue' | 'wait_for_live_parent' | 'require_resolution' | 'terminate'
+
 /** Retry limits are per logical task; attempts are never overwritten. */
 export interface RetryPolicy { readonly maxAttempts: number }
 

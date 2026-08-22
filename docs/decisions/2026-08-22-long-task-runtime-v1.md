@@ -39,3 +39,9 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **External recovery authority:** an indeterminate external effect remains `BLOCKED` and its Goal remains paused. `resume` must explicitly choose `retry` or `confirmed_succeeded`, records that decision, and activation recovery never infers the choice from the existence of a live parent Agent.
 * **Deterministic scheduling:** equal-priority tasks use planner-array creation order, stored in the projection, rather than lexical task IDs as the stable scheduling tie-break.
 * **Bounded contextual layers:** execution contexts retain direct prerequisite summaries at L1 and goal constraints, decisions, and evidence at L2. Raw artifact handoff remains limited to validated direct dependencies.
+
+## V1.1 control-plane decisions
+
+* **Two revision counters:** `revision` remains the immutable plan/DAG revision. `controlRevision` advances for session attachment and control actions, and is the compare-and-swap value exposed to task UI and tools. This prevents a pause from looking like a graph rewrite.
+* **Cross-session scope:** task IDs use the `lt_` prefix and session links are durable profile-local provenance records. `workspaceScope` is a compatibility guard, not an authorization system; multi-user access control remains explicitly out of scope.
+* **Interruption policy:** `ExecutionInterrupted` records only the observed cause plus a selected recovery outcome. The runtime therefore does not impose a universal "Stop means pause" rule; callers can choose requeue, wait for a live parent, require resolution, or terminate.
