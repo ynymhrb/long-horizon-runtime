@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from '../src/dsh-adapters.js'
 
 describe('DSH adapters', () => {
@@ -29,6 +30,7 @@ describe('DSH adapters', () => {
 
     expect(plan).toMatchObject({ goalId: 'goal-1', revision: 1 })
     expect(request).toMatchObject({ parent: { id: 'parent' } })
+    expect(() => assertObjectJsonSchema(request!.outputSchema)).not.toThrow()
     expect(disposed).toBe(true)
   })
 

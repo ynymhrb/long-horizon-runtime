@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-long-task-runtime",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Durable long-horizon task runtime plugin for DeepSeek Harness",
   "license": "MIT",
   "type": "module",
