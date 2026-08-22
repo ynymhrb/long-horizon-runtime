@@ -1,5 +1,6 @@
 import type { GoalView, CreateGoalRequest, LongTaskRuntime, RecoveryResolution } from './runtime.js'
 import type { InterruptionCause, RecoveryPolicyOutcome } from './domain.js'
+import type { GraphMutation } from './domain.js'
 
 export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }
 export interface CreateTaskRequest extends CreateGoalRequest { readonly workspaceScope: string }
@@ -12,7 +13,7 @@ export class TaskControlApi {
 
   async create(request: CreateTaskRequest, invocation: TaskInvocation): Promise<GoalView> {
     this.assertScope(request.workspaceScope, invocation.workspaceScope)
-    const task = await this.runtime.createGoal({ ...request, planningMode: request.planningMode ?? 'require_confirmation' }, invocation.parent)
+    const task = await this.runtime.createGoal({ ...request, planningMode: request.planningMode ?? 'require_confirmation' }, invocation.parent, invocation.signal)
     return invocation.sessionId === undefined ? task : this.runtime.attachSession(task.id, invocation.sessionId, 'origin')
   }
 
@@ -28,8 +29,8 @@ export class TaskControlApi {
     if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
     let task: GoalView
     switch (request.action) {
-      case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent); break
-      case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution); break
+      case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal); break
+      case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal); break
       case 'cancel': task = this.runtime.cancelGoal(request.taskId); break
       case 'pause': task = this.pause(request.taskId); break
     }
@@ -44,6 +45,8 @@ export class TaskControlApi {
   interrupt(taskId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView {
     return this.runtime.interruptGoal(taskId, cause, recoveryOutcome)
   }
+  proposeReplan(taskId: string, mutation: GraphMutation): GoalView { return this.runtime.proposeReplan(taskId, mutation) }
+  rejectReplan(taskId: string): GoalView { return this.runtime.rejectReplan(taskId) }
 
   private pause(taskId: string): GoalView {
     const task = this.requireTask(taskId)

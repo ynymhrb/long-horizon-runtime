@@ -45,3 +45,10 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **Two revision counters:** `revision` remains the immutable plan/DAG revision. `controlRevision` advances for session attachment and control actions, and is the compare-and-swap value exposed to task UI and tools. This prevents a pause from looking like a graph rewrite.
 * **Cross-session scope:** task IDs use the `lt_` prefix and session links are durable profile-local provenance records. `workspaceScope` is a compatibility guard, not an authorization system; multi-user access control remains explicitly out of scope.
 * **Interruption policy:** `ExecutionInterrupted` records only the observed cause plus a selected recovery outcome. The runtime therefore does not impose a universal "Stop means pause" rule; callers can choose requeue, wait for a live parent, require resolution, or terminate.
+
+## V2–V4 delivery decisions
+
+* **Context manifest:** immediately before `TaskAttemptStarted`, the scheduler records a durable `ContextManifestRecorded` event. It stores the selected context and the selection rule, making the prompt assembly auditable without storing a live parent Agent.
+* **Replanning authority:** a runtime graph change can be represented as `PlanProposed` with `baseRevision` and trigger evidence. Rejection restores the prior runnable state; acceptance continues through the existing confirmation path. This keeps replan review explicit while retaining the V1 append-only plan history.
+* **Non-invasive task UI:** the published package exposes `./client` and a `dsh.client` web declaration. Its Task Area button, chat-only current-task strip, and overlay use only additive DSH slots (`sidebar.footer.action`, `conversation.input.dock`, `shell.overlay`). The UI bridge is a small host-provided `longTaskUi` façade; no DSH application files are patched.
+* **Stop propagation:** the current DSH tool `AbortSignal` is relayed to the child attempt controller. The durable state transition remains policy-driven (`ExecutionInterrupted`) so a cancelled interaction never silently determines how work should recover.

@@ -46,7 +46,7 @@ export class Scheduler {
   }
 
   /** Dispatch one bounded ready set. Legacy map mode is retained for a narrow unit-test boundary. */
-  async runRound(goalId: string, legacyTasks?: Map<string, TaskNode>, executionParent?: unknown): Promise<boolean> {
+  async runRound(goalId: string, legacyTasks?: Map<string, TaskNode>, executionParent?: unknown, executionSignal?: AbortSignal): Promise<boolean> {
     if (this.store === undefined) { if (legacyTasks === undefined) throw new Error('legacy scheduler requires tasks'); await this.runLegacyRound(goalId, legacyTasks); return true }
     const goal = this.store.getGoal(goalId)
     if (goal?.state !== 'RUNNING') return false
@@ -54,7 +54,7 @@ export class Scheduler {
     const ready = tasks.filter(task => task.state === 'PENDING' && this.dependenciesSatisfied(goalId, task, tasks))
       .sort((a, b) => b.priority - a.priority || (a.createdOrder ?? Number.MAX_SAFE_INTEGER) - (b.createdOrder ?? Number.MAX_SAFE_INTEGER)).slice(0, this.maxConcurrentTasks)
     this.store.transaction(() => this.store!.append(ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} }))))
-    await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent)))
+    await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent, executionSignal)))
     this.store.transaction(() => {
       const events: Array<{ type: string; goalId: string; payload: Record<string, unknown> }> = [{ type: 'CheckpointCreated', goalId, payload: { eventSeq: this.store!.latestSeq(goalId), revision: goal.revision, readySet: ready.map(task => task.id), maxConcurrentTasks: this.maxConcurrentTasks, verifiedArtifactIds: this.store!.listActiveValidatedArtifacts(goalId).map(artifact => artifact.id), environmentSnapshotRef: null } }]
       const latest = this.store!.listTasks(goalId)
@@ -120,9 +120,12 @@ export class Scheduler {
     })
     return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store!.listDecisions(goalId), evidence: this.store!.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) }
   }
-  private async executeOne(goalId: string, task: TaskNode, executionParent: unknown): Promise<void> {
+  private async executeOne(goalId: string, task: TaskNode, executionParent: unknown, executionSignal?: AbortSignal): Promise<void> {
     const attemptId = randomUUID()
     const controller = new AbortController()
+    const relayAbort = () => controller.abort()
+    if (executionSignal?.aborted === true) controller.abort()
+    else executionSignal?.addEventListener('abort', relayAbort, { once: true })
     const attemptRevision = this.store!.getGoal(goalId)?.revision ?? 1
     const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`
     this.aborters.set(attemptId, { goalId, controller })
@@ -132,18 +135,25 @@ export class Scheduler {
       // A corrupt/missing dependency artifact is a deterministic failed attempt,
       // not an exception that strands the goal in RUNNING.
       context = { objective: goalId, task: { id: task.id, objective: task.objective }, artifacts: [] }
-      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
+      this.store!.transaction(() => this.store!.append([
+        { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
+        { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
+      ]))
       this.aborters.delete(attemptId)
       this.terminalFailure(goalId, task, attemptId, failureMessage(error))
       return
     }
-    this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
+    this.store!.transaction(() => this.store!.append([
+      { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
+      { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
+    ]))
     let result
     try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
     this.aborters.delete(attemptId)
+    executionSignal?.removeEventListener('abort', relayAbort)
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
     if (this.store!.getGoal(goalId)?.revision !== attemptRevision) {
       this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } }]))

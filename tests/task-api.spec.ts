@@ -63,4 +63,25 @@ describe('TaskControlApi', () => {
     expect(interrupted.recentEvents.some(event => event.type === 'ExecutionInterrupted')).toBe(true)
     expect(interrupted.pauseReason).toContain('user_stop')
   })
+
+  test('records a context manifest before a worker receives the attempt context', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const goal = await runtime.createGoal({ objective: 'manifest', planningMode: 'auto' }, {})
+    const manifest = runtime.store.listContextManifests(goal.id)
+    expect(manifest).toHaveLength(1)
+    expect(manifest[0]?.taskId).toBe('research')
+    expect(manifest[0]?.selectionReason).toBe('direct_dependencies_and_durable_l2')
+  })
+
+  test('keeps a replan proposal pending until it is explicitly accepted or rejected', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const task = await runtime.createGoal({ objective: 'replan', planningMode: 'auto' })
+    const proposed = api.proposeReplan(task.id, { kind: 'addTask', task: { id: 'review', objective: 'review', dependsOn: ['research'], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }, reason: 'review needed', evidenceRefs: [] })
+    expect(proposed.state).toBe('AWAITING_CONFIRMATION')
+    expect(proposed.pendingProposal?.baseRevision).toBe(1)
+    const rejected = api.rejectReplan(task.id)
+    expect(rejected.state).toBe('RUNNING')
+    expect(rejected.pendingProposal).toBeUndefined()
+  })
 })

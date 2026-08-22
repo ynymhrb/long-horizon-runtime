@@ -6,9 +6,9 @@
 
 Install this package alongside a compatible DSH deployment, then add the configuration shown in [examples/cordis.yml](examples/cordis.yml). `plannerProvider` and `executionProvider` are names from `ctx.subagents.list()` (for example, an installed `spawn` provider). The package declares its DSH dependencies as peer dependencies so the host controls the compatible harness version.
 
-Required settings are `databasePath`, `artifactDirectory`, `plannerProvider`, and `executionProvider`. Optional settings are `maxConcurrentTasks` (default 1), `defaultPlanningMode` (`auto` by default), `executionTimeoutMs` (default 300000), `retryPolicy.maxAttempts` (default 1), `artifactInlineLimitBytes` (default 65536), and `defaultAgentProfile`.
+Required settings are `databasePath`, `artifactDirectory`, `plannerProvider`, and `executionProvider`. Optional settings are `maxConcurrentTasks` (default 1), `defaultPlanningMode` (`auto` by default), `executionTimeoutMs` (default 300000), `retryPolicy.maxAttempts` (default 1), `artifactInlineLimitBytes` (default 65536), `defaultAgentProfile`, and profile-local `workspaceScope`.
 
-The plugin exports `apply(ctx, config)`. It calls `ctx.provide('longTaskRuntime', runtime)` so other DSH plugins can use the same durable service. It also registers six stateless model tools:
+The plugin exports `apply(ctx, config)`. It calls `ctx.provide('longTaskRuntime', runtime)` so other DSH plugins can use the same durable service. It registers the six V1 compatibility tools plus the V1.1 task-ID control API:
 
 - `long_task_create`
 - `long_task_confirm`
@@ -16,6 +16,12 @@ The plugin exports `apply(ctx, config)`. It calls `ctx.provide('longTaskRuntime'
 - `long_task_resume`
 - `long_task_cancel`
 - `long_task_invalidate`
+- `long_task_get`
+- `long_task_update`
+
+New tasks use an `lt_` ID. `long_task_get` supports a new chat continuing a task by ID; `long_task_update` uses `controlRevision` as its compare-and-swap guard. This is separate from the plan/DAG `revision`.
+
+The package also exposes a DSH web client at `@deepseek-ai/dsh-long-task-runtime/client`. The loader discovers it from `dsh.client`; it adds a global Task Area action, a task strip only for chats with a current task, and an additive overlay. No `apps/web` source modification is needed.
 
 Each tool requires a current DSH parent Agent. Planner and worker children are started with `ctx.subagents.start(providerName, request)`, receive a structured JSON schema, and are always disposed after settlement. A missing parent Agent is rejected rather than creating an orphan child.
 

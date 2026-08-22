@@ -6,6 +6,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, control_revision INTEGER NOT NULL DEFAULT 0, workspace_scope TEXT, pause_reason TEXT);
     CREATE TABLE IF NOT EXISTS task_session_links (goal_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, session_id, kind));
+    CREATE TABLE IF NOT EXISTS context_manifests (attempt_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, selection_reason TEXT NOT NULL, context_json TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
     CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, created_order INTEGER NOT NULL);
@@ -43,9 +44,17 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'ExecutionInterrupted':
       db.prepare('UPDATE goals SET state = ?, pause_reason = ? WHERE id = ?').run('PAUSED', `interrupted:${String(p.cause)}:${String(p.recoveryOutcome)}`, event.goalId)
       break
+    case 'ContextManifestRecorded':
+      if (taskId === undefined) throw new Error('ContextManifestRecorded requires taskId')
+      db.prepare('INSERT OR REPLACE INTO context_manifests (attempt_id, goal_id, task_id, revision, selection_reason, context_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision), String(p.selectionReason), JSON.stringify(p.context ?? {}), seq)
+      break
     case 'PlanProposed':
-      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [] }))
+      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [], ...(p.baseRevision === undefined ? {} : { baseRevision: p.baseRevision }), ...(p.trigger === undefined ? {} : { trigger: p.trigger }) }))
       db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('AWAITING_CONFIRMATION', event.goalId)
+      break
+    case 'PlanRejected':
+      db.prepare('UPDATE plan_revisions SET state = ? WHERE goal_id = ? AND revision = ?').run('REJECTED', event.goalId, Number(p.revision))
+      db.prepare('UPDATE goals SET state = ?, pause_reason = NULL WHERE id = ?').run(String(p.restoreState ?? 'RUNNING'), event.goalId)
       break
     case 'PlanConfirmed':
       db.prepare('UPDATE plan_revisions SET state = ? WHERE goal_id = ? AND revision = ?').run('APPLIED', event.goalId, Number(p.revision))

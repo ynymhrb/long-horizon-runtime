@@ -9,6 +9,8 @@ export type { CreateTaskRequest, TaskInvocation, TaskUpdateAction, TaskUpdateRes
 export { RuntimeEventStore } from './event-store.js'
 export { validatePlan, applyMutation } from './graph.js'
 export type { InterruptionCause, RecoveryPolicyOutcome } from './domain.js'
+export { toTaskAreaItem, currentTaskStrip } from './task-ui.js'
+export type { TaskAreaItem } from './task-ui.js'
 export type { Config } from './tools.js'
 export { apply } from './tools.js'
 export { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from './dsh-adapters.js'

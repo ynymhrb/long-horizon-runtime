@@ -3,6 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from './dsh-adapters.js'
 import { LongTaskRuntime } from './runtime.js'
+import { TaskControlApi } from './task-api.js'
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -15,6 +16,8 @@ export interface Config {
   readonly executionTimeoutMs?: number
   readonly retryPolicy?: { readonly maxAttempts: number }
   readonly artifactInlineLimitBytes?: number
+  /** Profile-local compatibility scope for tasks resumed from another chat. */
+  readonly workspaceScope?: string
   readonly defaultAgentProfile?: Record<string, unknown>
   /** Test/composition seam; normal deployments use the configured DSH adapters. */
   readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime
@@ -45,6 +48,7 @@ export function apply(ctx: Context, input: Config): void {
     databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy,
   })
   ctx.provide('longTaskRuntime', runtime)
+  const taskApi = new TaskControlApi(runtime)
   ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')
   // Reconcile persisted attempts at activation. Execution itself remains tied to a later live tool parent.
   void runtime.recover().catch(() => undefined)
@@ -52,11 +56,20 @@ export function apply(ctx: Context, input: Config): void {
   ctx.tools.register(defineTool({
     name: 'long_task_create', description: 'Create and plan a durable long-running goal.',
     parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
-    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.createGoal({ objective: args.objective, ...(args.constraints === undefined ? {} : { constraints: args.constraints }), planningMode: args.planning_mode ?? config.defaultPlanningMode }, exec.agent))),
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.createGoal({ objective: args.objective, ...(args.constraints === undefined ? {} : { constraints: args.constraints }), planningMode: args.planning_mode ?? config.defaultPlanningMode }, exec.agent, exec.signal))),
   }))
-  ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.confirmGoal(args.goal_id, exec.agent))) }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_get', description: 'Read a long task by its durable lt_ task ID, including cross-session continuation state.', parameters: goalParameter, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.get(args.goal_id, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }) ?? { task: null })),
+  }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_update', description: 'Apply a compare-and-swap task action. On conflict, reread its current control revision before retrying.',
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, action: { type: 'string', required: true, enum: ['confirm', 'resume', 'pause', 'cancel'] }, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.update({ taskId: args.goal_id, expectedRevision: args.expected_revision, action: args.action as 'confirm' | 'resume' | 'pause' | 'cancel', ...(args.recovery_resolution === undefined ? {} : { recoveryResolution: args.recovery_resolution }) }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+  }))
+  ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.confirmGoal(args.goal_id, exec.agent, exec.signal))) }))
   ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }))
-  ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused durable long-task goal. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.resumeGoal(args.goal_id, exec.agent, args.recovery_resolution))) }))
+  ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused durable long-task goal. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.resumeGoal(args.goal_id, exec.agent, args.recovery_resolution, exec.signal))) }))
   ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }))
   ctx.tools.register(defineTool({
     name: 'long_task_invalidate', description: 'Invalidate one task and its reachable downstream work using recorded evidence.',
