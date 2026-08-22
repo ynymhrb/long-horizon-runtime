@@ -344,9 +344,17 @@ pnpm --dir D:\code_github\deepseek-harness dsh web
 
 Expected: profile composition resolves this plugin package, default configuration originates from this repository's `cordis.patch.yml`, and no DSH source file changes are needed.
 
-- [ ] **Step 4: Perform browser acceptance against a seeded task**
+- [ ] **Step 4: Perform browser acceptance using a model-created, non-executing task**
 
-Verify in the actual browser: a non-blank conversation exposes the session-header Task Area action; an unbound chat has no strip; attaching/setting a task produces one strip after the native GoalBar; the overview opens the Cockpit; the SVG has correctly ordered DAG nodes; selection updates the inspector/timeline; pan/zoom/fit work; pause/resume conflict/error states render; and a linked live child session opens through normal DSH navigation.
+In the actual DSH Web UI, ask the model to create a long task with
+`planning_mode: require_confirmation` and explicitly do not confirm it. This
+uses the real agent/tool/SQLite/UI path without dispatching a worker attempt.
+Verify: a non-blank conversation exposes the session-header Task Area action;
+the created task produces one strip after the native GoalBar; the overview
+opens the Cockpit; the SVG has correctly ordered DAG nodes; selecting a node
+updates its inspector/timeline; pan/zoom/fit work; the `AWAITING_CONFIRMATION`
+state and confirm/cancel controls render; and a second ordinary conversation
+can attach that Task ID and set it as current without executing it.
 
 - [ ] **Step 5: Commit release-facing completion**
 
