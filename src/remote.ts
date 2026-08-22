@@ -18,7 +18,7 @@ export class LongTaskRemote extends TypertRemoteService {
 
   get(taskId: string): unknown { return this.runtime.getStatus(taskId) ?? null }
   list(): unknown { return this.runtime.listGoals() }
-  listTasks(input: { cursor?: number; filter?: { state?: string; query?: string } } = {}): unknown { return this.ui.listTasks(input as Parameters<TaskUiApi['listTasks']>[0]) }
+  listTasks(input: { cursor?: number; filter?: { state?: string; query?: string } }): unknown { return this.ui.listTasks(input as Parameters<TaskUiApi['listTasks']>[0]) }
   getTask(input: { taskId: string }): unknown { return this.ui.getTask(input) }
   getTaskGraph(input: { taskId: string; revision?: number }): unknown { return this.ui.getTaskGraph(input) }
   listTaskEvents(input: { taskId: string; cursor?: number; taskNodeId?: string }): unknown { return this.ui.listTaskEvents(input) }
