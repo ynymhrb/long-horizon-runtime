@@ -6,6 +6,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, control_revision INTEGER NOT NULL DEFAULT 0, workspace_scope TEXT, pause_reason TEXT);
     CREATE TABLE IF NOT EXISTS task_session_links (goal_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, session_id, kind));
+    CREATE TABLE IF NOT EXISTS current_task_bindings (session_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, control_revision INTEGER NOT NULL, updated_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS context_manifests (attempt_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, selection_reason TEXT NOT NULL, context_json TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
@@ -37,6 +38,13 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       break
     case 'TaskSessionAttached':
       db.prepare('INSERT OR IGNORE INTO task_session_links (goal_id, session_id, kind, created_order) VALUES (?, ?, ?, ?)').run(event.goalId, String(p.sessionId), String(p.kind), seq)
+      break
+    case 'TaskSessionCurrentSet':
+      db.prepare(`INSERT INTO current_task_bindings (session_id, goal_id, control_revision, updated_order) VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET goal_id=excluded.goal_id, control_revision=excluded.control_revision, updated_order=excluded.updated_order`).run(String(p.sessionId), event.goalId, Number(p.controlRevision), seq)
+      break
+    case 'TaskSessionCurrentCleared':
+      db.prepare('DELETE FROM current_task_bindings WHERE session_id = ?').run(String(p.sessionId))
       break
     case 'TaskControlRevisionAdvanced':
       db.prepare('UPDATE goals SET control_revision = ? WHERE id = ?').run(Number(p.controlRevision), event.goalId)

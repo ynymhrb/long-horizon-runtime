@@ -54,6 +54,21 @@ describe('TaskControlApi', () => {
     expect(conflict.current.state).toBe('AWAITING_CONFIRMATION')
   })
 
+  test('binds an origin and attached task as the session current task', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const created = await api.create({ objective: 'current task', workspaceScope: 'D:/repo' }, { sessionId: 'origin', workspaceScope: 'D:/repo' })
+
+    expect(runtime.store.getCurrentTaskForSession('origin')?.taskId).toBe(created.id)
+
+    const attached = await api.attachSession(created.id, { sessionId: 'next', workspaceScope: 'D:/repo' })
+    expect(attached.kind).toBe('applied')
+    expect(runtime.store.getCurrentTaskForSession('next')?.taskId).toBe(created.id)
+
+    await api.clearCurrentSessionTask('next')
+    expect(runtime.store.getCurrentTaskForSession('next')).toBeUndefined()
+  })
+
   test('records an interruption as a durable fact and applies the configured recovery outcome', async () => {
     const runtime = new LongTaskRuntime(planner, execution)
     const api = new TaskControlApi(runtime)

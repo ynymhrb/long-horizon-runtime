@@ -61,4 +61,20 @@ describe('RuntimeEventStore', () => {
     ])
     expect(runtime.listAttempts('same', 'g-1').map(item => item.id)).toEqual(['a-1'])
   })
+
+  test('replays one current task per session without deleting historic links', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'TaskSessionAttached', goalId: 'lt_a', payload: { sessionId: 'session-1', kind: 'attached' } },
+      { type: 'TaskSessionAttached', goalId: 'lt_b', payload: { sessionId: 'session-1', kind: 'attached' } },
+      { type: 'TaskSessionCurrentSet', goalId: 'lt_a', payload: { sessionId: 'session-1', controlRevision: 1 } },
+      { type: 'TaskSessionCurrentSet', goalId: 'lt_b', payload: { sessionId: 'session-1', controlRevision: 2 } },
+    ])
+
+    expect(runtime.getCurrentTaskForSession('session-1')).toEqual({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
+    expect(runtime.listSessionLinks('lt_a')).toContainEqual({ sessionId: 'session-1', kind: 'attached' })
+
+    runtime.rebuild()
+    expect(runtime.getCurrentTaskForSession('session-1')).toEqual({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
+  })
 })

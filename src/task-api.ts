@@ -14,13 +14,41 @@ export class TaskControlApi {
   async create(request: CreateTaskRequest, invocation: TaskInvocation): Promise<GoalView> {
     this.assertScope(request.workspaceScope, invocation.workspaceScope)
     const task = await this.runtime.createGoal({ ...request, planningMode: request.planningMode ?? 'require_confirmation' }, invocation.parent, invocation.signal)
-    return invocation.sessionId === undefined ? task : this.runtime.attachSession(task.id, invocation.sessionId, 'origin')
+    if (invocation.sessionId === undefined) return task
+    this.runtime.attachSession(task.id, invocation.sessionId, 'origin')
+    return this.setCurrentSessionTask(task.id, { sessionId: invocation.sessionId, workspaceScope: request.workspaceScope }).task
   }
 
   async attachSession(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId' | 'workspaceScope'>>): Promise<TaskUpdateResult> {
     const current = this.requireTask(taskId)
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
-    return { kind: 'applied', task: this.runtime.attachSession(taskId, invocation.sessionId) }
+    this.runtime.attachSession(taskId, invocation.sessionId)
+    return this.setCurrentSessionTask(taskId, invocation)
+  }
+
+  /** Explicitly choose which linked task occupies this conversation's one task-strip slot. */
+  setCurrentSessionTask(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId' | 'workspaceScope'>>): Extract<TaskUpdateResult, { kind: 'applied' }> {
+    const current = this.requireTask(taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (!current.sessionLinks.some(link => link.sessionId === invocation.sessionId)) throw new Error(`session ${invocation.sessionId} is not attached to task ${taskId}`)
+    const nextControlRevision = current.controlRevision + 1
+    this.runtime.store.transaction(() => this.runtime.store.append([
+      { type: 'TaskSessionCurrentSet', goalId: taskId, payload: { sessionId: invocation.sessionId, controlRevision: nextControlRevision } },
+      { type: 'TaskControlRevisionAdvanced', goalId: taskId, payload: { controlRevision: nextControlRevision } },
+    ]))
+    return { kind: 'applied', task: this.requireTask(taskId) }
+  }
+
+  /** Remove only the conversation display binding; its durable task links remain available for later selection. */
+  clearCurrentSessionTask(sessionId: string): void {
+    const binding = this.runtime.store.getCurrentTaskForSession(sessionId)
+    if (binding === undefined) return
+    const current = this.requireTask(binding.taskId)
+    const nextControlRevision = current.controlRevision + 1
+    this.runtime.store.transaction(() => this.runtime.store.append([
+      { type: 'TaskSessionCurrentCleared', goalId: binding.taskId, payload: { sessionId } },
+      { type: 'TaskControlRevisionAdvanced', goalId: binding.taskId, payload: { controlRevision: nextControlRevision } },
+    ]))
   }
 
   async update(request: { readonly taskId: string; readonly expectedRevision: number; readonly action: TaskUpdateAction; readonly recoveryResolution?: RecoveryResolution }, invocation: TaskInvocation): Promise<TaskUpdateResult> {

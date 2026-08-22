@@ -49,6 +49,8 @@ export class LongTaskRuntime {
     return this.view(goalId)
   }
   getStatus(goalId: string): GoalView | undefined { return this.store.getGoal(goalId) === undefined ? undefined : this.view(goalId) }
+  /** Profile-local task inventory for the cross-session Task Area. */
+  listGoals(): GoalView[] { return this.store.listGoals().map(goal => this.view(goal.id)) }
   attachSession(goalId: string, sessionId: string, kind: TaskSessionLink['kind'] = 'attached'): GoalView {
     if (sessionId.trim().length === 0) throw new Error('session id must not be empty')
     const goal = this.requireGoal(goalId)
