@@ -1,0 +1,90 @@
+import type { TaskNode } from './domain.js'
+import type { RuntimeEvent } from './event-store.js'
+import type { GoalView, LongTaskRuntime } from './runtime.js'
+import type { TaskControlApi, TaskUpdateResult } from './task-api.js'
+
+export interface CursorPage<T> { readonly items: readonly T[]; readonly nextCursor?: number }
+export interface TaskListFilter { readonly state?: GoalView['state']; readonly query?: string }
+export interface TaskProgress { readonly succeeded: number; readonly total: number }
+export interface TaskSummary {
+  readonly id: string
+  readonly objective: string
+  readonly state: GoalView['state']
+  readonly revision: number
+  readonly controlRevision: number
+  readonly workspaceScope?: string
+  readonly progress: TaskProgress
+  readonly currentOrLastNode?: { readonly id: string; readonly objective: string; readonly state: string }
+  readonly reason?: string
+  readonly latestEventCursor: number
+}
+export interface TaskStripView extends TaskSummary { readonly availableActions: readonly string[] }
+export interface TaskGraphView { readonly taskId: string; readonly revision: number; readonly nodes: readonly TaskNode[]; readonly edges: readonly { readonly from: string; readonly to: string }[] }
+
+const terminalStates = new Set<GoalView['state']>(['SUCCEEDED', 'FAILED', 'CANCELLED'])
+
+/** Browser read model. It derives compact JSON DTOs from durable runtime projections only. */
+export class TaskUiApi {
+  constructor(private readonly runtime: LongTaskRuntime, private readonly control: TaskControlApi) {}
+
+  listTasks(input: { readonly cursor?: number; readonly filter?: TaskListFilter } = {}): CursorPage<TaskSummary> {
+    const cursor = input.cursor ?? 0
+    const all = this.runtime.listGoals().filter(task => matches(task, input.filter)).map(task => this.summary(task))
+    const items = all.slice(cursor, cursor + 50)
+    return { items, ...(cursor + items.length < all.length ? { nextCursor: cursor + items.length } : {}) }
+  }
+
+  getTask(input: { readonly taskId: string }): GoalView | null { return this.runtime.getStatus(input.taskId) ?? null }
+
+  getTaskGraph(input: { readonly taskId: string; readonly revision?: number }): TaskGraphView | null {
+    const task = this.runtime.getStatus(input.taskId)
+    if (task === undefined) return null
+    const plan = this.runtime.store.getPlan(input.taskId, input.revision)
+    if (plan === undefined) return null
+    const nodes = input.revision === undefined && task.tasks.length > 0 ? task.tasks : plan.tasks
+    return { taskId: input.taskId, revision: plan.revision, nodes, edges: nodes.flatMap(node => node.dependsOn.map(from => ({ from, to: node.id }))) }
+  }
+
+  listTaskEvents(input: { readonly taskId: string; readonly cursor?: number; readonly taskNodeId?: string }): CursorPage<RuntimeEvent> {
+    const items = this.runtime.store.listEvents(input.taskId, input.cursor ?? 0, 50, input.taskNodeId)
+    return { items, ...(items.length === 50 ? { nextCursor: items[items.length - 1]!.seq } : {}) }
+  }
+
+  getCurrentTaskForSession(input: { readonly sessionId: string }): TaskStripView | null {
+    const binding = this.runtime.store.getCurrentTaskForSession(input.sessionId)
+    if (binding === undefined) return null
+    const task = this.runtime.getStatus(binding.taskId)
+    return task === undefined || terminalStates.has(task.state) ? null : { ...this.summary(task), availableActions: task.availableActions }
+  }
+
+  async updateTask(input: { readonly taskId: string; readonly expectedRevision: number; readonly action: 'confirm' | 'resume' | 'pause' | 'cancel'; readonly sessionId?: string; readonly workspaceScope?: string; readonly recoveryResolution?: 'retry' | 'confirmed_succeeded'; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
+    return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+  }
+
+  private summary(task: GoalView): TaskSummary {
+    const nodes = currentNodes(this.runtime, task)
+    const current = nodes.find(node => node.state === 'RUNNING') ?? nodes.find(node => !['SUCCEEDED', 'FAILED', 'CANCELLED', 'INVALIDATED', 'SUPERSEDED'].includes(node.state)) ?? nodes.at(-1)
+    return {
+      id: task.id,
+      objective: task.objective,
+      state: task.state,
+      revision: task.revision,
+      controlRevision: task.controlRevision,
+      ...(task.workspaceScope === undefined ? {} : { workspaceScope: task.workspaceScope }),
+      progress: { succeeded: nodes.filter(node => node.state === 'SUCCEEDED').length, total: nodes.length },
+      ...(current === undefined ? {} : { currentOrLastNode: { id: current.id, objective: current.objective, state: current.state } }),
+      ...(task.pauseReason === undefined ? {} : { reason: task.pauseReason }),
+      latestEventCursor: this.runtime.store.latestSeq(task.id),
+    }
+  }
+}
+
+function currentNodes(runtime: LongTaskRuntime, task: GoalView): readonly TaskNode[] {
+  return task.tasks.length > 0 ? task.tasks : runtime.store.getPlan(task.id)?.tasks ?? []
+}
+
+function matches(task: GoalView, filter: TaskListFilter | undefined): boolean {
+  if (filter?.state !== undefined && task.state !== filter.state) return false
+  const query = filter?.query?.trim().toLowerCase()
+  return query === undefined || query === '' || task.id.toLowerCase().includes(query) || task.objective.toLowerCase().includes(query)
+}
