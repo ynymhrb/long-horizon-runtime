@@ -74,7 +74,7 @@ export class Scheduler {
     const context = this.context(goalId, task)
     this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: this.store!.getGoal(goalId)?.revision ?? 1, context, executionParentPresent: executionParent !== undefined } }]))
     let result
-    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: new AbortController().signal }) } catch (error) { result = { status: 'failed' as const, summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [] } }
+    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: new AbortController().signal, ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) { result = { status: 'failed' as const, summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [] } }
     const contract = validateExecutionResult(result)
     const attemptCount = this.store!.listAttempts(task.id).length
     const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)

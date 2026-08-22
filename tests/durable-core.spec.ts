@@ -94,4 +94,16 @@ describe('durable runtime core', () => {
     expect(store.getTask(goal.id, 'a')?.state).toBe('FAILED')
     expect(store.getTask(goal.id, 'b')?.state).toBe('BLOCKED')
   })
+
+  test('forwards a live execution parent to the adapter without storing it', async () => {
+    const store = createStore()
+    const parent = { ephemeral: true }
+    let received: unknown
+    const execution: ExecutionAdapter = { async execute(input) { received = input.parent; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { store })
+    const goal = await runtime.createGoal({ objective: 'ship' }, parent)
+    expect(received).toBe(parent)
+    expect(JSON.stringify(store.listAttempts('a')[0]?.context)).not.toContain('ephemeral')
+    expect(goal.state).toBe('RUNNING')
+  })
 })
