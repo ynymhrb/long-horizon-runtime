@@ -2,9 +2,13 @@ import { describe, expect, test } from 'vitest'
 import { LongTaskRuntime } from '../src/runtime.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
 
+function strictTask(id: string, objective: string, dependsOn: string[] = []) {
+  return { id, objective, dependsOn, priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only' as const, validator: 'required' }
+}
+
 describe('LongTaskRuntime', () => {
   test('holds a valid initial plan until explicit confirmation', async () => {
-    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [] }] } } }
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
     const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
     const runtime = new LongTaskRuntime(planner, execution)
     const goal = await runtime.createGoal({ objective: 'ship', planningMode: 'require_confirmation' })
@@ -15,7 +19,7 @@ describe('LongTaskRuntime', () => {
 
   test('runs every superstep and terminalizes a successful goal', async () => {
     const calls: string[] = []
-    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'first', dependsOn: [] }, { id: 'b', objective: 'second', dependsOn: ['a'] }] } } }
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'first'), strictTask('b', 'second', ['a'])] } } }
     const execution: ExecutionAdapter = { async execute(input) { calls.push(input.taskId); return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
     const runtime = new LongTaskRuntime(planner, execution)
     const goal = await runtime.createGoal({ objective: 'ship' })

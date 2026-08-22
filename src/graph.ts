@@ -11,6 +11,7 @@ export function validatePlan(draft: PlanDraft): ValidatedPlan {
   const tasks = new Map<string, TaskNode>()
   for (const task of draft.tasks) {
     if (!task || typeof task !== 'object') throw new PlanValidationError('task must be an object')
+    for (const field of ['priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'] as const) if (task[field] === undefined) throw new PlanValidationError(`task ${String(task.id)} ${field} is required`)
     if (!Array.isArray(task.dependsOn) || task.dependsOn.some(id => typeof id !== 'string' || id.trim().length === 0)) throw new PlanValidationError(`task ${String(task.id)} has invalid dependencies`)
     if (task.id.trim().length === 0) throw new PlanValidationError('task id must not be empty')
     if (tasks.has(task.id)) throw new PlanValidationError(`duplicate task id: ${task.id}`)
@@ -82,6 +83,17 @@ export function applyMutation(current: ValidatedPlan, mutation: GraphMutation): 
     for (const id of reachableFrom(current.tasks, mutation.taskId)) {
       const task = withInvalidation.get(id)
       if (task !== undefined) withInvalidation.set(id, { ...task, state: 'INVALIDATED' })
+    }
+  }
+  // A changed task's prior output cannot satisfy the changed graph.  The
+  // affected downstream region is reset while unrelated completed work keeps
+  // its projected state and artifacts.  They are PENDING in the new revision
+  // (not INVALIDATED), so the replacement graph can actually rerun them.
+  if (mutation.kind === 'replaceTask' || mutation.kind === 'addEdge') {
+    const root = mutation.kind === 'replaceTask' ? mutation.taskId : mutation.taskId
+    for (const id of reachableFrom(current.tasks, root)) {
+      const task = withInvalidation.get(id)
+      if (task !== undefined) withInvalidation.set(id, { ...task, state: 'PENDING' })
     }
   }
   return { ...validated, tasks: withInvalidation }

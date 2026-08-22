@@ -22,7 +22,7 @@ export class ArtifactStore {
 
   /** Store an artifact without trusting a path supplied by the caller. */
   put(input: { id: string; taskId: string; type: string; content: string; mimeType?: string }): StoredArtifact {
-    if (!/^[A-Za-z][A-Za-z0-9._/-]{0,127}$/.test(input.type)) throw new TypeError('artifact type must be a non-empty safe identifier')
+    if (!new Set(['plan', 'analysis', 'code_patch', 'command_result', 'test_report', 'review', 'note']).has(input.type)) throw new TypeError('artifact type must be one of the V1 artifact types')
     if (input.mimeType !== undefined && !/^[\w.+-]+\/[\w.+-]+$/.test(input.mimeType)) throw new TypeError('artifact mimeType must be type/subtype')
     const bytes = Buffer.from(input.content, 'utf8')
     const contentHash = createHash('sha256').update(bytes).digest('hex')

@@ -5,21 +5,20 @@ import type { PlanDraft } from '../src/domain.js'
 function plan(tasks: PlanDraft['tasks'], revision = 1): PlanDraft {
   return { goalId: 'goal-1', revision, tasks }
 }
+function strictTask(id: string, objective: string, dependsOn: string[] = []) {
+  return { id, objective, dependsOn, priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only' as const, validator: 'required' }
+}
 
 describe('plan validation', () => {
   test('rejects a cyclic dependency before the plan can run', () => {
     expect(() => validatePlan(plan([
-      { id: 'a', objective: 'first', dependsOn: ['b'] },
-      { id: 'b', objective: 'second', dependsOn: ['a'] },
+      strictTask('a', 'first', ['b']), strictTask('b', 'second', ['a']),
     ]))).toThrow(/cycle/i)
   })
 
   test('invalidates a task and only its reachable descendants in a new revision', () => {
     const current = validatePlan(plan([
-      { id: 'a', objective: 'root', dependsOn: [] },
-      { id: 'b', objective: 'bad branch', dependsOn: ['a'] },
-      { id: 'c', objective: 'dependent', dependsOn: ['b'] },
-      { id: 'd', objective: 'independent child', dependsOn: ['a'] },
+      strictTask('a', 'root'), strictTask('b', 'bad branch', ['a']), strictTask('c', 'dependent', ['b']), strictTask('d', 'independent child', ['a']),
     ]))
 
     const next = applyMutation(current, {
@@ -31,5 +30,9 @@ describe('plan validation', () => {
     expect(next.tasks.get('c')?.state).toBe('INVALIDATED')
     expect(next.tasks.get('d')?.state).toBe('PENDING')
     expect(current.tasks.get('b')?.state).toBe('PENDING')
+  })
+
+  test('rejects a planner task missing a required durable execution field', () => {
+    expect(() => validatePlan(plan([{ id: 'a', objective: 'first', dependsOn: [] }]))).toThrow(/priority.*required/i)
   })
 })

@@ -37,7 +37,10 @@ export class Scheduler {
     this.defaultAttempts = typeof options === 'number' ? 1 : options.defaultRetryPolicy?.maxAttempts ?? 1
     this.recoveryValidator = typeof options === 'number' ? undefined : options.recoveryValidator
     this.validator = typeof options === 'number' ? undefined : options.validator
-    this.validators = typeof options === 'number' ? {} : options.validators ?? {}
+    // `required` is the portable validator emitted by the built-in planner prompt.
+    // It deliberately adds no deployment-specific policy beyond the structural
+    // result/output contract checks performed below.
+    this.validators = { required: async () => ({ ok: true }), ...(typeof options === 'number' ? {} : options.validators ?? {}) }
     this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
@@ -53,10 +56,10 @@ export class Scheduler {
     this.store.transaction(() => this.store!.append(ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} }))))
     await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent)))
     this.store.transaction(() => {
-      const events: Array<{ type: string; goalId: string; payload: Record<string, unknown> }> = [{ type: 'CheckpointCreated', goalId, payload: { eventSeq: this.store!.latestSeq(goalId), revision: goal.revision, readySet: ready.map(task => task.id), environmentSnapshotRef: null } }]
+      const events: Array<{ type: string; goalId: string; payload: Record<string, unknown> }> = [{ type: 'CheckpointCreated', goalId, payload: { eventSeq: this.store!.latestSeq(goalId), revision: goal.revision, readySet: ready.map(task => task.id), maxConcurrentTasks: this.maxConcurrentTasks, verifiedArtifactIds: this.store!.listActiveValidatedArtifacts(goalId).map(artifact => artifact.id), environmentSnapshotRef: null } }]
       const latest = this.store!.listTasks(goalId)
       if (latest.length > 0 && latest.every(task => task.state === 'SUCCEEDED')) events.push({ type: 'GoalSucceeded', goalId, payload: {} })
-      else if (latest.some(task => task.state === 'FAILED')) events.push({ type: 'GoalFailed', goalId, payload: {} })
+      else if (latest.some(task => task.state === 'FAILED') && !latest.some(task => ['PENDING', 'READY', 'RUNNING'].includes(task.state))) events.push({ type: 'GoalFailed', goalId, payload: {} })
       this.store!.append(events)
     })
     return ready.length > 0
@@ -76,18 +79,30 @@ export class Scheduler {
         if (verdict === 'succeeded') this.store.transaction(() => this.store!.append([{ type: 'ValidationRecorded', goalId: attempt.goalId, taskId: task.id, payload: { attemptId: attempt.id, ok: true, validator: 'recovery' } }, { type: 'TaskCompleted', goalId: attempt.goalId, taskId: task.id, payload: { attemptId: attempt.id, summary: 'recovery confirmed effect' } }]))
         else if (verdict === 'indeterminate') this.store.transaction(() => this.store!.append([{ type: 'TaskRecoveryBlocked', goalId: attempt.goalId, taskId: task.id, payload: { attemptId: attempt.id, reason: 'external effect is indeterminate; operator must invalidate or resolve it' } }, { type: 'GoalPaused', goalId: attempt.goalId, payload: { reason: `external effect for ${task.id} is indeterminate` } }]))
       }
+      // A process-local parent Agent cannot survive restart.  Safe attempts are
+      // eligible to retry, but only after a later resume supplies a live parent.
+      if (this.store.getGoal(attempt.goalId)?.state === 'RUNNING') this.store.transaction(() => this.store!.append([{ type: 'GoalPaused', goalId: attempt.goalId, payload: { reason: `attempt ${attempt.id} was interrupted; resume with a live parent` } }]))
+    }
+    for (const goalId of recoveredGoals) {
+      const tasks = this.store.listTasks(goalId)
+      if (tasks.length > 0 && tasks.every(task => task.state === 'SUCCEEDED')) this.store.transaction(() => this.store!.append([{ type: 'GoalSucceeded', goalId, payload: { recovered: true } }]))
     }
     return [...recoveredGoals]
   }
 
   cancel(goalId: string): void {
     for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); this.adapter.cancel?.(attemptId) }
-    this.store?.transaction(() => this.store!.append([{ type: 'GoalCancelled', goalId, payload: {} }]))
+    if (this.store?.getGoal(goalId)?.state !== 'CANCELLED') this.store?.transaction(() => this.store!.append([{ type: 'GoalCancelled', goalId, payload: {} }]))
   }
 
   private dependenciesSatisfied(goalId: string, task: TaskNode, tasks: readonly TaskNode[]): boolean {
     const byId = new Map(tasks.map(item => [item.id, item]))
-    return task.dependsOn.every(id => byId.get(id)?.state === 'SUCCEEDED')
+    if (!task.dependsOn.every(id => byId.get(id)?.state === 'SUCCEEDED')) return false
+    const requiredTypes = task.inputContract?.requiredArtifactTypes
+    if (requiredTypes === undefined) return true
+    if (!Array.isArray(requiredTypes) || requiredTypes.some(type => typeof type !== 'string')) return false
+    const artifacts = this.store!.listActiveValidatedArtifacts(goalId, task.dependsOn)
+    return requiredTypes.every(type => artifacts.some(artifact => artifact.type === type))
   }
   private context(goalId: string, task: TaskNode): ContextView {
     const artifacts = this.store!.listActiveValidatedArtifacts(goalId, task.dependsOn).map(artifact => ({ id: artifact.id, taskId: artifact.taskId, type: artifact.type, content: artifact.content ?? (artifact.path === undefined ? '' : this.artifactStore?.read(artifact) ?? ''), validated: true }))
@@ -98,27 +113,38 @@ export class Scheduler {
   private async executeOne(goalId: string, task: TaskNode, executionParent: unknown): Promise<void> {
     const attemptId = randomUUID()
     const controller = new AbortController()
-    const context = this.context(goalId, task)
     const idempotencyKey = `${goalId}:${task.id}:${this.store!.getGoal(goalId)?.revision ?? 1}`
     this.aborters.set(attemptId, { goalId, controller })
+    let context: ContextView
+    try { context = this.context(goalId, task) }
+    catch (error) {
+      // A corrupt/missing dependency artifact is a deterministic failed attempt,
+      // not an exception that strands the goal in RUNNING.
+      context = { objective: goalId, task: { id: task.id, objective: task.objective }, artifacts: [] }
+      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: this.store!.getGoal(goalId)?.revision ?? 1, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
+      this.aborters.delete(attemptId)
+      this.terminalFailure(goalId, task, attemptId, failureMessage(error))
+      return
+    }
     this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: this.store!.getGoal(goalId)?.revision ?? 1, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
     let result
-    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
+    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
     this.aborters.delete(attemptId)
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
-    const baseContract = validateExecutionResult(result)
-    const outputContract = validateOutputContract(task, result)
-    const selectedValidator = task.validator === undefined ? this.validator : this.validators[task.validator]
-    const namedValidatorResult = task.validator !== undefined && selectedValidator === undefined
-      ? { ok: false as const, reason: `unknown task validator: ${task.validator}` }
-      : baseContract.ok && outputContract.ok && selectedValidator !== undefined ? await selectedValidator({ goalId, task, attemptId, result }) : undefined
-    const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
-    const attemptCount = this.store!.listAttempts(task.id, goalId).length
-    const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
-    this.store!.transaction(() => {
+    try {
+      const baseContract = validateExecutionResult(result)
+      const outputContract = validateOutputContract(task, result)
+      const selectedValidator = task.validator === undefined ? this.validator : this.validators[task.validator]
+      const namedValidatorResult = task.validator !== undefined && selectedValidator === undefined
+        ? { ok: false as const, reason: `unknown task validator: ${task.validator}` }
+        : baseContract.ok && outputContract.ok && selectedValidator !== undefined ? await selectedValidator({ goalId, task, attemptId, result }) : undefined
+      const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
+      const attemptCount = this.store!.listAttempts(task.id, goalId).length
+      const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
+      this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
       if (result.dshSessionId !== undefined) events.push({ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId: result.dshSessionId } })
       for (const [index, artifact] of result.artifacts.entries()) {
@@ -138,7 +164,19 @@ export class Scheduler {
         else events.push({ type: 'TaskFailed', goalId, taskId: task.id, payload: { attemptId, reason } })
       }
       this.store!.append(events)
-    })
+      })
+    } catch (error) { this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId) }
+  }
+  private terminalFailure(goalId: string, task: TaskNode, attemptId: string, reason: string, dshSessionId?: string): void {
+    if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
+    const attemptCount = this.store!.listAttempts(task.id, goalId).length
+    const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
+    this.store!.transaction(() => this.store!.append([
+      ...(dshSessionId === undefined ? [] : [{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]),
+      { type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: false, validator: task.validator ?? 'runtime', reason } },
+      { type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason } },
+      ...(attemptCount < maxAttempts ? [{ type: 'TaskRetryScheduled', goalId, taskId: task.id, payload: { attemptId } }] : [{ type: 'TaskFailed', goalId, taskId: task.id, payload: { attemptId, reason } }]),
+    ]))
   }
   private async runLegacyRound(goalId: string, tasks: Map<string, TaskNode>): Promise<void> {
     const ready = [...tasks.values()].filter(task => task.state === 'PENDING' && task.dependsOn.every(id => tasks.get(id)?.state === 'SUCCEEDED')).sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
@@ -150,6 +188,9 @@ export class Scheduler {
 
 function validateOutputContract(task: TaskNode, result: import('./adapters.js').ExecutionResult): { readonly ok: boolean; readonly reason?: string } {
   if (result.status === 'failed') return { ok: false, reason: result.summary }
+  const allowedTypes = new Set(['plan', 'analysis', 'code_patch', 'command_result', 'test_report', 'review', 'note'])
+  if (result.artifacts.some(artifact => !allowedTypes.has(artifact.type))) return { ok: false, reason: 'result artifact type is not a V1 artifact type' }
+  if (result.artifacts.some(artifact => artifact.mimeType !== undefined && !/^[\w.+-]+\/[\w.+-]+$/.test(artifact.mimeType))) return { ok: false, reason: 'result artifact MIME type must be type/subtype' }
   const contract = task.outputContract ?? {}
   const types = contract.artifactTypes
   if (types !== undefined) {
@@ -159,7 +200,9 @@ function validateOutputContract(task: TaskNode, result: import('./adapters.js').
   const mimeTypes = contract.mimeTypes
   if (mimeTypes !== undefined) {
     if (!Array.isArray(mimeTypes) || mimeTypes.some(type => typeof type !== 'string')) return { ok: false, reason: 'outputContract.mimeTypes must be a string array' }
-    if (result.artifacts.some(artifact => artifact.mimeType !== undefined && !mimeTypes.includes(artifact.mimeType))) return { ok: false, reason: 'result artifact MIME type violates output contract' }
+    if (result.artifacts.some(artifact => artifact.mimeType === undefined || !mimeTypes.includes(artifact.mimeType))) return { ok: false, reason: 'result artifact MIME type violates output contract' }
   }
   return { ok: true }
 }
+
+function failureMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }

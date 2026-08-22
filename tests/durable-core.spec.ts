@@ -28,14 +28,78 @@ const planner: PlannerAdapter = {
       goalId: input.goalId,
       revision: 1,
       tasks: [
-        { id: 'a', objective: 'first', dependsOn: [], inputContract: {}, outputContract: {}, completionCriteria: 'done' },
-        { id: 'b', objective: 'second', dependsOn: ['a'], inputContract: {}, outputContract: {}, completionCriteria: 'done' },
+        { id: 'a', objective: 'first', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+        { id: 'b', objective: 'second', dependsOn: ['a'], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
       ],
     }
   },
 }
 
 describe('durable runtime core', () => {
+  test('uses the built-in required validator without deployment-specific validator registration', async () => {
+    const store = createStore()
+    const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const strictPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+    const runtime = new LongTaskRuntime(strictPlanner, execution, { store })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(goal.state).toBe('SUCCEEDED')
+  })
+
+  test('pauses a recovered safe attempt until a live parent resumes it without rerunning completed work', async () => {
+    const store = createStore()
+    store.append([
+      { type: 'GoalCreated', goalId: 'g', payload: { objective: 'ship', planningMode: 'auto' } },
+      { type: 'PlanRevisionApplied', goalId: 'g', payload: { revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 2 }, sideEffectClass: 'idempotent', validator: 'required' }] } },
+      { type: 'TaskAttemptStarted', goalId: 'g', taskId: 'a', payload: { attemptId: 'lost', revision: 1, context: {} } },
+    ])
+    let executions = 0
+    const runtime = new LongTaskRuntime(planner, { async execute() { executions += 1; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })
+    await runtime.recover()
+    expect(store.getGoal('g')?.state).toBe('PAUSED')
+    await runtime.resumeGoal('g', {})
+    expect(store.getGoal('g')?.state).toBe('SUCCEEDED')
+    expect(executions).toBe(1)
+  })
+
+  test('terminalizes an attempt when artifact persistence throws after it started', async () => {
+    const store = createStore()
+    const strictPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+    const runtime = new LongTaskRuntime(strictPlanner, { async execute() { return { status: 'succeeded', summary: 'done', artifacts: [{ type: 'analysis', content: 'x', mimeType: 'not a mime' }], evidence: [] } } }, { store, artifactDirectory: directories[0]! })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.listAttempts('a', goal.id)[0]?.state).toBe('FAILED')
+    expect(goal.state).toBe('FAILED')
+  })
+
+  test('continues an independent branch after another branch exhausts retries', async () => {
+    const store = createStore()
+    const twoBranchPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [
+      { id: 'bad', objective: 'bad', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+      { id: 'good', objective: 'good', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+    ] } } }
+    const runtime = new LongTaskRuntime(twoBranchPlanner, { async execute(input) { return input.taskId === 'bad' ? { status: 'failed', summary: 'no', artifacts: [], evidence: [] } : { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.getTask(goal.id, 'good')?.state).toBe('SUCCEEDED')
+    expect(goal.state).toBe('FAILED')
+  })
+
+  test('a graph replacement resets only the replaced branch and deactivates its old artifact', async () => {
+    const store = createStore()
+    store.append([
+      { type: 'GoalCreated', goalId: 'g2', payload: { objective: 'ship', planningMode: 'auto' } },
+      { type: 'PlanRevisionApplied', goalId: 'g2', payload: { revision: 1, tasks: [
+        { id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', state: 'SUCCEEDED' },
+        { id: 'b', objective: 'b', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', state: 'SUCCEEDED' },
+      ] } },
+      { type: 'ArtifactProduced', goalId: 'g2', taskId: 'a', payload: { id: 'old-a', attemptId: 'old', type: 'analysis', contentHash: 'a', storage: 'inline', content: 'a' } },
+      { type: 'ValidationRecorded', goalId: 'g2', taskId: 'a', payload: { attemptId: 'old', ok: true, validator: 'required' } },
+    ])
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })
+    runtime.mutatePlan('g2', { kind: 'replaceTask', taskId: 'a', replacement: { id: 'a', objective: 'new a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }, reason: 'corrected', evidenceRefs: [] })
+    expect(store.getTask('g2', 'a')?.state).toBe('PENDING')
+    expect(store.getTask('g2', 'b')?.state).toBe('SUCCEEDED')
+    expect(store.listActiveValidatedArtifacts('g2')).toEqual([])
+    expect(store.getPlan('g2', 1)?.tasks.find(task => task.id === 'a')?.state).toBe('SUCCEEDED')
+  })
   test('persists a complete plan and rebuilds task and artifact projections', () => {
     const store = createStore()
     store.append([
@@ -109,10 +173,10 @@ describe('durable runtime core', () => {
     const store = createStore()
     store.append([
       { type: 'GoalCreated', goalId: 'g', payload: { objective: 'ship', planningMode: 'auto' } },
-      { type: 'PlanRevisionApplied', goalId: 'g', payload: { revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, sideEffectClass: 'read_only', state: 'SUCCEEDED' }, { id: 'b', objective: 'b', dependsOn: [], priority: 0, sideEffectClass: 'read_only', state: 'SUCCEEDED' }] } },
-      { type: 'ArtifactProduced', goalId: 'g', taskId: 'a', payload: { id: 'aa', attemptId: 'x', type: 'report', contentHash: 'a', storage: 'inline', content: 'a' } },
+      { type: 'PlanRevisionApplied', goalId: 'g', payload: { revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, sideEffectClass: 'read_only', inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, validator: 'required', state: 'SUCCEEDED' }, { id: 'b', objective: 'b', dependsOn: [], priority: 0, sideEffectClass: 'read_only', inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, validator: 'required', state: 'SUCCEEDED' }] } },
+      { type: 'ArtifactProduced', goalId: 'g', taskId: 'a', payload: { id: 'aa', attemptId: 'x', type: 'analysis', contentHash: 'a', storage: 'inline', content: 'a' } },
       { type: 'ValidationRecorded', goalId: 'g', taskId: 'a', payload: { attemptId: 'x', ok: true, validator: 'x' } },
-      { type: 'ArtifactProduced', goalId: 'g', taskId: 'b', payload: { id: 'bb', attemptId: 'y', type: 'report', contentHash: 'b', storage: 'inline', content: 'b' } },
+      { type: 'ArtifactProduced', goalId: 'g', taskId: 'b', payload: { id: 'bb', attemptId: 'y', type: 'analysis', contentHash: 'b', storage: 'inline', content: 'b' } },
       { type: 'ValidationRecorded', goalId: 'g', taskId: 'b', payload: { attemptId: 'y', ok: true, validator: 'x' } },
     ])
     const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })

@@ -22,3 +22,12 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **Cancellation:** cancellation terminalizes every active attempt and all nonterminal nodes in the current revision. A late child result is ignored after the durable goal cancellation event.
 * **Artifact handoff:** file-backed artifacts are SHA-256 verified before their text is included in a child context. Output contracts may constrain `artifactTypes` and `mimeTypes`, and validation failures cannot activate task output.
 * **Startup recovery:** plugin activation reconciles persisted attempts immediately, but does not execute a DSH child without a live parent Agent. Read-only/idempotent attempts become eligible for the next explicit resume; indeterminate external effects pause the goal.
+
+## Final hardening rulings
+
+* **Portable validation:** the built-in planner emits the `required` validator, which validates the runtime result and output contracts without requiring an operator-defined validator registry. Other names remain explicit deployment policy and reject when unregistered.
+* **Interrupted work:** every replayable interrupted attempt pauses its Goal after reconciliation. A subsequent `resume` carrying a live parent creates a fresh attempt; no previous successful node is replayed.
+* **Revision semantics:** mutations are derived from current task projections, never stale serialized plan input. Replace/add-edge reset their affected downstream region to `PENDING` in the new revision and deactivate its old artifacts; unrelated successes remain active and historical revisions remain immutable.
+* **Attempt safety:** context assembly, adapters, validators, and artifact persistence all run behind durable attempt terminalization. A failure after `TaskAttemptStarted` records a failed attempt rather than leaving a RUNNING orphan.
+* **DSH provenance:** child Session IDs are recorded immediately when `subagents.start` returns, before awaiting child output, and are retained for stopped or malformed outputs.
+* **Artifact boundary:** V1 accepts only the seven documented artifact types. MIME strings are syntactically checked and `outputContract.mimeTypes` requires a matching declared MIME value.

@@ -51,8 +51,10 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       const invalidated = Array.isArray(p.invalidatedTaskIds) ? p.invalidatedTaskIds.map(String) : tasks.filter(task => String(task.state) === 'INVALIDATED').map(task => String(task.id))
       for (const invalidatedTaskId of invalidated) {
         db.prepare('UPDATE artifacts SET active = 0 WHERE goal_id = ? AND task_id = ? AND active = 1').run(event.goalId, invalidatedTaskId)
-        db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('INVALIDATED', event.goalId, invalidatedTaskId)
+        db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ? AND revision = ?').run('INVALIDATED', event.goalId, invalidatedTaskId, revision)
       }
+      const stale = Array.isArray(p.staleTaskIds) ? p.staleTaskIds.map(String) : []
+      for (const staleTaskId of stale) db.prepare('UPDATE artifacts SET active = 0 WHERE goal_id = ? AND task_id = ? AND active = 1').run(event.goalId, staleTaskId)
       db.prepare('UPDATE goals SET state = ?, revision = ?, pause_reason = NULL WHERE id = ?').run('RUNNING', revision, event.goalId)
       break
     }

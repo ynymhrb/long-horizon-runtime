@@ -34,23 +34,23 @@ const PLAN_SCHEMA = {
         type: 'object', properties: {
           id: { type: 'string' }, objective: { type: 'string' },
           dependsOn: { type: 'array', items: { type: 'string' } },
-          priority: { type: 'number' }, sideEffectClass: { type: 'string' },
+          priority: { type: 'number' },
           inputContract: { type: 'object' }, outputContract: { type: 'object' },
           completionCriteria: { type: 'string' },
-          retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer' } } },
-          validator: { type: 'string' },
-        }, required: ['id', 'objective', 'dependsOn', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'],
+          retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer', minimum: 1 } }, required: ['maxAttempts'], additionalProperties: false },
+          sideEffectClass: { type: 'string', enum: ['read_only', 'idempotent', 'external_effect'] }, validator: { type: 'string', minLength: 1 },
+        }, required: ['id', 'objective', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
       },
     },
-  }, required: ['revision', 'tasks'],
+  }, required: ['revision', 'tasks'], additionalProperties: false,
 } as const
 
 const RESULT_SCHEMA = {
   type: 'object', properties: {
     summary: { type: 'string' },
-    artifacts: { type: 'array', items: { type: 'object', properties: { type: { type: 'string' }, content: { type: 'string' } }, required: ['type', 'content'] } },
+    artifacts: { type: 'array', items: { type: 'object', properties: { type: { type: 'string' }, content: { type: 'string' }, mimeType: { type: 'string' } }, required: ['type', 'content'], additionalProperties: false } },
     evidence: { type: 'array', items: { type: 'string' } },
-  }, required: ['summary', 'artifacts', 'evidence'],
+  }, required: ['summary', 'artifacts', 'evidence'], additionalProperties: false,
 } as const
 
 /** Build an initial-plan adapter backed by a configured DSH one-shot provider. */
@@ -74,24 +74,27 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       const timeout = options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs)
       const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
       let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }
-      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal) }
+      let dshSessionId: string | undefined
+      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId) }) }
       catch (error) {
         const failure = error as Error & { dshSessionId?: string }
-        return { status: 'failed', summary: failure.message, artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
+        return { status: 'failed', summary: failure.message, artifacts: [], evidence: [], ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId! }) }
       }
       if (settled.stopReason !== 'completed') {
-        return { status: 'failed', summary: `DSH child stopped: ${settled.stopReason}`, artifacts: [], evidence: [] }
+        return { status: 'failed', summary: `DSH child stopped: ${settled.stopReason}`, artifacts: [], evidence: [], dshSessionId: settled.dshSessionId }
       }
-      const value = objectValue(settled.value, 'execution result')
-      return {
+      try {
+        const value = objectValue(settled.value, 'execution result')
+        return {
         status: 'succeeded', summary: string(value.summary, 'execution summary'),
         artifacts: array(value.artifacts, 'execution artifacts').map((artifact) => {
           const item = objectValue(artifact, 'artifact')
-          return { type: string(item.type, 'artifact type'), content: string(item.content, 'artifact content') }
+          return { type: string(item.type, 'artifact type'), content: string(item.content, 'artifact content'), ...(item.mimeType === undefined ? {} : { mimeType: string(item.mimeType, 'artifact mimeType') }) }
         }),
         evidence: array(value.evidence, 'execution evidence').map(item => string(item, 'evidence')),
         dshSessionId: settled.dshSessionId,
-      } as ExecutionResult
+        } as ExecutionResult
+      } catch (error) { return { status: 'failed', summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId } }
     },
   }
 }
@@ -103,6 +106,7 @@ async function runStructured(
   prompt: string,
   outputSchema: Record<string, unknown>,
   signal: AbortSignal = new AbortController().signal,
+  onStarted?: (dshSessionId: string) => void,
 ): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }> {
   const run = await subagents.start(options.providerName, {
     label,
@@ -112,6 +116,7 @@ async function runStructured(
     ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions as never }),
     outputSchema: outputSchema as never,
   })
+  onStarted?.(String(run.id))
   return settleAndDispose(run)
 }
 
@@ -135,7 +140,7 @@ function parseJsonOutput(output: readonly ContentBlock[]): unknown {
 }
 
 function plannerPrompt(input: { readonly objective: string; readonly constraints: readonly string[] }): string {
-  return `Create a dependency DAG for this long-running objective. Every task must declare inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and a named validator. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}`
+  return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}`
 }
 
 function executionPrompt(input: Parameters<ExecutionAdapter['execute']>[0]): string {
