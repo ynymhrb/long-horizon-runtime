@@ -60,6 +60,9 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       if (taskId === undefined) throw new Error('ArtifactProduced requires taskId')
       db.prepare('INSERT INTO artifacts (id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.id), event.goalId, taskId, String(p.attemptId), String(p.type), String(p.contentHash), String(p.storage), p.content == null ? null : String(p.content), p.path == null ? null : String(p.path), p.mimeType == null ? null : String(p.mimeType))
       break
+    case 'TaskAttemptSessionRecorded':
+      db.prepare('UPDATE task_attempts SET dsh_session_id = ? WHERE id = ?').run(String(p.dshSessionId), String(p.attemptId))
+      break
     case 'EvidenceRecorded':
       db.prepare('INSERT INTO evidence (goal_id, task_id, attempt_id, value_json) VALUES (?, ?, ?, ?)').run(event.goalId, taskId ?? null, p.attemptId == null ? null : String(p.attemptId), JSON.stringify(p.evidence ?? p))
       break

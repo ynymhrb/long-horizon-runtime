@@ -106,4 +106,13 @@ describe('durable runtime core', () => {
     expect(JSON.stringify(store.listAttempts('a')[0]?.context)).not.toContain('ephemeral')
     expect(goal.state).toBe('RUNNING')
   })
+
+  test('records the child DSH session after an attempt starts', async () => {
+    const store = createStore()
+    const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [], dshSessionId: 'child-session-42' } } }
+    const runtime = new LongTaskRuntime(planner, execution, { store })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.listAttempts('a')[0]?.dshSessionId).toBe('child-session-42')
+    expect(store.listRecentEvents(goal.id).map(event => event.type)).toContain('TaskAttemptSessionRecorded')
+  })
 })

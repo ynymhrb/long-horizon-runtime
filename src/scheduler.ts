@@ -80,6 +80,7 @@ export class Scheduler {
     const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
     this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
+      if (result.dshSessionId !== undefined) events.push({ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId: result.dshSessionId } })
       for (const [index, artifact] of result.artifacts.entries()) events.push({ type: 'ArtifactProduced', goalId, taskId: task.id, payload: { id: `${attemptId}:artifact:${index}`, attemptId, type: artifact.type, contentHash: createHash('sha256').update(artifact.content).digest('hex'), storage: 'inline', content: artifact.content } })
       for (const evidence of result.evidence) events.push({ type: 'EvidenceRecorded', goalId, taskId: task.id, payload: { attemptId, evidence } })
       events.push({ type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: contract.ok, validator: task.validator ?? 'result-contract', reason: contract.reason } })

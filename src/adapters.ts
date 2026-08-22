@@ -8,6 +8,8 @@ export interface ExecutionResult {
   readonly summary: string
   readonly artifacts: readonly { readonly type: string; readonly content: string }[]
   readonly evidence: readonly string[]
+  /** Durable reference to the child created by the DSH execution adapter. */
+  readonly dshSessionId?: string
 }
 
 /** Boundary for deriving the first graph from a user goal. */
