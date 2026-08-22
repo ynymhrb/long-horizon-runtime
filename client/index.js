@@ -1,39 +1,16 @@
 import React from 'react'
-
-/**
- * Browser half of the out-of-tree task UI.  The DSH client loader discovers
- * this module from package.json; it only occupies additive slots and never
- * modifies the harness shell. Host applications may provide `longTaskUi`
- * (list/open/current) as a bridge service.
- */
-export const inject = ['slots']
-
+import { z } from 'zod'
+import { TaskArea } from './TaskArea.js'
+import { TaskStrip } from './TaskStrip.js'
+export const inject = ['slots', 'remote']
 const e = React.createElement
-const bridge = ctx => ctx.longTaskUi
-
-function TaskAreaButton({ open }) {
-  return e('button', { type: 'button', onClick: open, className: 'dsh-long-task-area-button' }, '任务区')
-}
-
-function TaskOverlay({ close, ui }) {
-  const items = ui?.list?.() ?? []
-  return e('section', { className: 'dsh-long-task-overlay', role: 'dialog', 'aria-label': '任务区' },
-    e('header', null, e('strong', null, '任务区'), e('button', { type: 'button', onClick: close }, '关闭')),
-    e('p', { className: 'dsh-long-task-caption' }, '跨会话任务 · 输入 lt_ 任务 ID 可继续'),
-    e('ol', null, ...items.map(item => e('li', { key: item.id }, e('button', { type: 'button', onClick: () => ui?.open?.(item.id) }, `${item.id} · ${item.objective} · ${item.state}`))))
-  )
-}
-
-function CurrentTaskStrip({ ui }) {
-  const task = ui?.current?.()
-  if (task == null) return null
-  return e('button', { type: 'button', className: 'dsh-long-task-strip', onClick: () => ui.open?.(task.id) }, `当前任务 ${task.id} · ${task.objective} · ${task.state}`)
-}
-
-export function apply(ctx) {
-  let open = false
-  const renderOverlay = () => open ? e(TaskOverlay, { ui: bridge(ctx), close: () => { open = false; ctx.slots.refresh?.('shell.overlay') } }) : null
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'long-task-area', order: 90 }, () => e(TaskAreaButton, { open: () => { open = true; ctx.slots.refresh?.('shell.overlay') } })))
-  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'long-task-current', order: 20 }, () => e(CurrentTaskStrip, { ui: bridge(ctx) })))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'long-task-overlay', order: 90 }, renderOverlay))
-}
+const CSS = `.ltr-modal-layer{position:absolute;inset:0;z-index:50}.ltr-mask{position:absolute;inset:0;background:#0008}.ltr-modal{position:relative;margin:24px auto;width:min(1220px,calc(100vw - 48px));height:calc(100vh - 48px);overflow:auto;border:1px solid #777;border-radius:16px;background:#202124;color:#eee;padding:20px}.ltr-close{float:right}.ltr-task-list{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}.ltr-task-list button{width:100%;min-height:92px;text-align:left;padding:14px;border:1px solid #666;border-radius:12px;background:#292a2d;color:inherit}.ltr-task-list small,.ltr-cockpit small{display:block;margin-top:7px;color:#aaa}.ltr-strip{display:flex;gap:10px;align-items:center;width:calc(100% - 48px);margin:0 auto 8px;padding:8px 12px;border:1px solid #666;border-radius:12px;background:#292a2d;color:#eee;text-align:left}.ltr-strip strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid #555}.ltr-cockpit-header>div{flex:1}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:#79a8ff}.tone-done{color:#42ca8b}.tone-warning{color:#efb943}.tone-error{color:#ff776d}.tone-muted{color:#999}.ltr-cockpit-body{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;margin-top:16px}.ltr-dag-wrap{min-width:0;border:1px solid #555;border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #555}.ltr-dag{display:block;width:100%;height:570px;background:#18191b;touch-action:none}.ltr-edge{stroke:#666;stroke-width:2}.ltr-edge.is-selected{stroke:#79a8ff;stroke-width:3}.ltr-node rect{fill:#292a2d;stroke:#777;stroke-width:1.5}.ltr-node.is-selected rect{stroke:#79a8ff;stroke-width:3}.ltr-node.tone-done rect{stroke:#42ca8b}.ltr-node.tone-error rect{stroke:#ff776d}.ltr-node.tone-warning rect{stroke:#efb943}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:#eee}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px}.ltr-inspector{border:1px solid #555;border-radius:12px;padding:12px}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-warning,.ltr-error{color:#ff776d}@media(max-width:800px){.ltr-cockpit-body{grid-template-columns:1fr}.ltr-modal{width:calc(100vw - 20px);height:calc(100vh - 20px);margin:10px}.ltr-dag{height:420px}}`
+if (typeof document !== 'undefined' && !document.querySelector('style[data-plugin-css="long-task-runtime"]')) { const tag = document.createElement('style'); tag.dataset.pluginCss = 'long-task-runtime'; tag.textContent = CSS; document.head.appendChild(tag) }
+let opened = false; let selectedTaskId = null; const listeners = new Set(); const notify = () => listeners.forEach(listener => listener()); const openTaskArea = taskId => { selectedTaskId = taskId ?? null; opened = true; notify() }; const closeTaskArea = () => { opened = false; notify() }
+function useOpen() { return React.useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener) }, () => opened, () => false) }
+function HeaderAction() { const open = useOpen(); return e('button', { type: 'button', className: 'dsh-long-task-header-button', onClick: () => open ? closeTaskArea() : openTaskArea() }, '任务区') }
+function Overlay({ props, remote }) { return e(TaskArea, { open: useOpen(), onClose: closeTaskArea, remote, initialTaskId: selectedTaskId, useSessions: props?.useSessions }) }
+function Dock({ useSessions, remote }) { const sessions = typeof useSessions === 'function' ? useSessions(value => value) : undefined; const id = sessions?.current; const session = id === undefined ? undefined : sessions?.byId?.[id]; return session?.blank === false ? e(TaskStrip, { sessionId: id, remote, onOpen: openTaskArea }) : null }
+const descriptor = (method, schema) => ({ id: `@deepseek-ai/dsh-long-task-runtime#longTasks/${method}`, service: 'longTasks', namespace: 'longTasks', method, invocation: { kind: 'direct' }, parameters: [{ name: 'input', wire: 'input', source: 'json', codec: { mode: 'strict', typeSymbol: method, schema } }], result: { mode: 'strict', typeSymbol: method, schema: z.unknown() } })
+const longTaskRemote = { package: '@deepseek-ai/dsh-long-task-runtime', descriptors: [descriptor('listTasks', z.object({ cursor: z.number().optional(), filter: z.object({ state: z.string().optional(), query: z.string().optional() }).optional() }).optional()), descriptor('getTask', z.object({ taskId: z.string() })), descriptor('getTaskGraph', z.object({ taskId: z.string(), revision: z.number().optional() })), descriptor('listTaskEvents', z.object({ taskId: z.string(), cursor: z.number().optional(), taskNodeId: z.string().optional() })), descriptor('getCurrentTaskForSession', z.object({ sessionId: z.string() })), descriptor('updateTask', z.object({ taskId: z.string(), expectedRevision: z.number(), action: z.enum(['confirm', 'resume', 'pause', 'cancel']), sessionId: z.string().optional(), workspaceScope: z.string().optional(), recoveryResolution: z.enum(['retry', 'confirmed_succeeded']).optional() }))] }
+export async function apply(ctx) { await ctx.remote.$mount(longTaskRemote); const remote = ctx.get('remote.longTasks'); ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({ name: 'conversation.session.header.actions', id: 'long-task-header', order: 30, label: '任务区' }, () => e(HeaderAction))); ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'long-task-current', order: 20 }, props => e(Dock, { ...props, remote }))); ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'long-task-overlay', order: 90 }, props => e(Overlay, { props, remote }))) }
