@@ -225,9 +225,101 @@ SQLite.
 
 - `conversation.input.dock`: current-session task strip, rendered only for an
   attached task;
-- `sidebar.footer.action`: an always-visible Task Area entry;
+- `conversation.session.header.actions`: a Task Area entry for every
+  non-blank conversation; it is the entry point when the session has no
+  current long task;
 - `shell.overlay`: the full Task Area overlay, which preserves the underlying
   conversation when opened and closed.
+
+The plugin does not add a sidebar Task Area action. A new ordinary chat has no
+long-task strip, but its session-header Task Area action still opens the
+profile-wide inventory. This keeps the long-task UI additive and avoids
+changing DSH Web source.
+
+### Task UI read and control contract
+
+The browser uses one versioned `TaskUiApi` remote surface. It is the only
+source of Task Area data and the only route for browser mutations; browser
+code never reads SQLite or reaches `LongTaskRuntime` directly.
+
+| Method | Result and purpose |
+| --- | --- |
+| `listTasks({ filter, cursor })` | Cursor page of compact task summaries for the profile-wide overview. A summary contains Task ID, objective, task state, current revision, progress counts, current/last node, waiting reason, last activity, and workspace label. |
+| `getTask({ taskId })` | Full current task snapshot for the Cockpit. |
+| `getTaskGraph({ taskId, revision? })` | Immutable graph snapshot for the requested revision, including nodes, `dependsOn` edges, and revision metadata. |
+| `listTaskEvents({ taskId, cursor, taskNodeId? })` | Cursor page of durable task events, optionally narrowed to one selected node. |
+| `getCurrentTaskForSession({ sessionId })` | The nullable authoritative current-task projection used by the conversation strip. |
+| `updateTask({ taskId, expectedRevision, action, payload, sessionId })` | Revision-fenced browser control command. It returns either the updated task snapshot or a conflict carrying the newest snapshot. |
+
+The remote host validates the Task ID, state transition, workspace
+compatibility, and expected control revision. The client submits no local
+state transition. Every mutation is single-flight per task, disables its
+originating controls while pending, displays a rejected remote error inline,
+and replaces stale UI state with the returned snapshot or conflict snapshot.
+
+`TaskControlApi` remains the domain implementation behind `updateTask`.
+Its browser actions are: `confirm`, `attach_current_session`,
+`set_current_for_session`, `pause`, `resume`, `cancel`,
+`resolve_external_effect`, `accept_replan`, and `reject_replan`. No direct
+browser mutation edits a node or rewires an edge. A plan change begins as a
+V3 replan proposal and applies only through its revision-fenced decision.
+
+### Session binding and navigation
+
+`TaskSessionLink` is durable provenance, while `currentTaskId` is the
+conversation's one nullable display binding. The binding is persisted through
+explicit `TaskSessionCurrentSet` and `TaskSessionCurrentCleared` events and
+is projected by session ID. A task may have many links; changing the current
+binding never deletes them.
+
+The following flows are normative:
+
+1. Creating a long task records the origin link and sets it as that
+   conversation's current task.
+2. In a new conversation, “continue `lt_xxx`” attaches the session after the
+   workspace check, then sets the task as current before the caller submits a
+   revision-fenced resume.
+3. In the Task Area, “attach to this conversation” first creates the link and
+   then sets the binding. “Set as current” requires an existing compatible
+   link.
+4. The task strip opens its bound task's Cockpit. The Cockpit can switch the
+   current binding but cannot silently do so while merely inspecting another
+   task.
+5. A Cockpit session link uses DSH's ordinary `ctx.sessions.open(sessionId)`
+   only when that session is present in the browser's live session list. A
+   terminal or absent child session remains inspectable text, not a false
+   navigation button.
+
+### Task strip and state presentation
+
+The long-task strip is a dock card after DSH's native GoalBar. It is rendered
+only when `getCurrentTaskForSession` yields a non-terminal task. It contains
+the long-task glyph, a concise task-state label, truncated objective, progress
+`succeeded / total`, and either the running node or the durable pause/block
+reason. Clicking its body opens the bound task Cockpit; controls expose only
+the actions currently advertised by the authoritative task snapshot.
+
+Task state is presentation data, not a client inference:
+
+| Durable value | UI label and treatment |
+| --- | --- |
+| `AWAITING_CONFIRMATION` | Awaiting confirmation; amber and confirmation action. |
+| `RUNNING` | Running; blue, with active node when one exists. |
+| `PAUSED` | Paused; amber, with the durable pause/interruption reason. |
+| `SUCCEEDED` | Completed; green; hidden from the strip by default but retained in the overview. |
+| `FAILED` | Failed; red; hidden from the strip by default but retained in the overview. |
+| `CANCELLED` | Cancelled; neutral; hidden from the strip by default but retained in the overview. |
+
+Node colors use their durable state independently: `PENDING`/`READY` neutral,
+`RUNNING` blue, `BLOCKED` amber, `SUCCEEDED` green, `FAILED` red, and
+`INVALIDATED`/`SUPERSEDED`/`CANCELLED` muted. A selected node highlights its
+direct incoming and outgoing dependency edges.
+
+The DSH composer Stop button retains its native meaning: it aborts the current
+conversation generation. It is not rendered as a long-task pause control and
+does not itself claim to alter durable task state. Long-task pause/resume is
+always explicit through `TaskUiApi`; an interrupted task is displayed only
+after its durable interruption/recovery state is recorded.
 
 ### Task Area
 
@@ -275,9 +367,12 @@ Every write presents the target revision; a conflict refreshes the displayed
 snapshot rather than retrying silently.
 
 The client consumes committed event increments by cursor through subscription
-or polling. During a connection failure it retains the last valid snapshot and
-marks it stale; after reconnect it catches up from the cursor. It never derives
-scheduler state or makes local state transitions.
+or polling. V4 uses bounded polling while the Task Area or a task strip is
+visible: refresh the compact current-task projection and selected task
+snapshot, then fetch events after the newest stored cursor. During a connection
+failure it retains the last valid snapshot and marks it stale; after reconnect
+it catches up from the cursor. It never derives scheduler state or makes local
+state transitions.
 
 ## Parallel implementation and acceptance
 
