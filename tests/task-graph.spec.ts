@@ -1,0 +1,35 @@
+import { describe, expect, test } from 'vitest'
+import { layoutTaskGraph } from '../client/task-graph.js'
+import { taskStatePresentation } from '../client/task-presentation.js'
+
+describe('long task DAG layout', () => {
+  test('places dependencies in increasing stable ranks', () => {
+    const graph = layoutTaskGraph([
+      { id: 'review', objective: 'review', dependsOn: ['research'], state: 'PENDING' },
+      { id: 'research', objective: 'research', dependsOn: [], state: 'SUCCEEDED' },
+    ])
+
+    const research = graph.nodes.find(node => node.id === 'research')!
+    const review = graph.nodes.find(node => node.id === 'review')!
+    expect(research.x).toBeLessThan(review.x)
+    expect(graph.nodes.map(node => node.id)).toEqual(['research', 'review'])
+    expect(graph.edges).toEqual([{ from: 'research', to: 'review' }])
+  })
+
+  test('keeps same-rank ordering stable and reports dangling dependencies', () => {
+    const graph = layoutTaskGraph([
+      { id: 'zeta', objective: 'zeta', dependsOn: [], state: 'PENDING' },
+      { id: 'alpha', objective: 'alpha', dependsOn: [], state: 'PENDING' },
+      { id: 'dangling', objective: 'dangling', dependsOn: ['missing'], state: 'PENDING' },
+    ])
+
+    expect(graph.nodes.map(node => node.id)).toEqual(['alpha', 'dangling', 'zeta'])
+    expect(graph.danglingDependencyIds).toEqual(['missing'])
+  })
+})
+
+test('maps durable states to a closed visual vocabulary', () => {
+  expect(taskStatePresentation('BLOCKED')).toMatchObject({ tone: 'warning', label: '受阻' })
+  expect(taskStatePresentation('INVALIDATED')).toMatchObject({ tone: 'muted', label: '已失效' })
+  expect(taskStatePresentation('UNKNOWN')).toMatchObject({ tone: 'muted', label: '未知状态' })
+})
