@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
@@ -21,6 +21,15 @@ afterEach(() => {
 })
 
 describe('RuntimeEventStore', () => {
+  test('creates a missing parent directory for a file-backed database', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'long-task-runtime-'))
+    directories.push(directory)
+    const databasePath = join(directory, 'state', 'runtime.sqlite')
+    const runtime = new RuntimeEventStore(databasePath)
+    stores.push(runtime)
+    expect(existsSync(databasePath)).toBe(true)
+  })
+
   test('rebuilds the same goal projection from append-only events', () => {
     const events = [
       { type: 'GoalCreated', goalId: 'g-1', payload: { objective: 'ship' } },

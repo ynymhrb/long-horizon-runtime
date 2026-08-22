@@ -1,4 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { createProjectionSchema, projectEvent } from './projections.js'
 import type { GoalState, TaskNode, TaskState } from './domain.js'
 
@@ -15,6 +17,7 @@ export interface CheckpointProjection { readonly eventSeq?: number; readonly rev
 export class RuntimeEventStore {
   private readonly db: DatabaseSync
   constructor(path: string) {
+    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS runtime_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, type TEXT NOT NULL, goal_id TEXT NOT NULL, task_id TEXT, payload_json TEXT NOT NULL); CREATE INDEX IF NOT EXISTS runtime_events_goal_seq ON runtime_events(goal_id, seq);')
     createProjectionSchema(this.db)
