@@ -178,15 +178,36 @@ reason, latest activity, and workspace.
 
 Selecting a task opens its cockpit:
 
-- the left pane renders the versioned DAG and allows historical-revision
+- the cockpit header renders Task ID, workspace, revision, progress,
+  execution observation, and a return to the overview;
+- the main pane renders the versioned DAG and allows historical-revision
   selection;
-- the centre pane renders the selected node's objective, attempts,
-  `ContextManifest`, artifacts, evidence, validation, and child sessions;
-- the right pane renders a task/node-filtered event and decision timeline.
+- the inspector renders the selected node's objective, attempts,
+  `ContextManifest`, artifacts, evidence, validation, child sessions, and a
+  task/node-filtered event and decision timeline.
 
-Selections are linked between all panes. The header displays Task ID,
-workspace, revision, progress, execution observation, and a return to all
-tasks.
+Selections are linked between the graph and inspector.
+
+### DAG renderer
+
+The V4 renderer is a read-only, dependency-faithful SVG view, not a workflow
+editor. It receives durable task nodes and their `dependsOn` edges only; it
+does not infer delegation, causality, or scheduler state from model text.
+
+Layout is deterministic and ranked left-to-right: a task's topological rank
+sets its horizontal position and Task ID establishes the stable ordering within
+one rank. Reopening a task, polling fresh data, or selecting another node must
+not arbitrarily move unchanged nodes. Nodes use the durable task state
+(`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `BLOCKED`, and terminal
+invalidation states) as their visual status.
+
+The graph supports only the inspection interactions needed for V4: select a
+node, pan the blank canvas, zoom around the pointer, and fit the graph to the
+available viewport. Selecting a node updates the inspector and highlights its
+direct dependency edges. V4 does not permit drag-to-rewire, graph editing,
+manual layout, or a third-party workflow-editor dependency. This keeps the
+out-of-tree client compact and makes the visual projection independently
+testable from durable runtime data.
 
 V4a is read-only. V4b adds confirmation, attach-current-session, pause,
 resume, cancellation, and replan-proposal controls through `TaskControlApi`.
