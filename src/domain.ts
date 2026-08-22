@@ -7,6 +7,9 @@ export type TaskState = 'PENDING' | 'READY' | 'RUNNING' | 'BLOCKED' | 'SUCCEEDED
 /** How a scheduler may recover an interrupted task. */
 export type SideEffectClass = 'read_only' | 'idempotent' | 'external_effect'
 
+/** Retry limits are per logical task; attempts are never overwritten. */
+export interface RetryPolicy { readonly maxAttempts: number }
+
 /** One logical task supplied by a planner. */
 export interface TaskDraft {
   readonly id: string
@@ -14,6 +17,11 @@ export interface TaskDraft {
   readonly dependsOn: readonly string[]
   readonly priority?: number
   readonly sideEffectClass?: SideEffectClass
+  readonly inputContract?: Record<string, unknown>
+  readonly outputContract?: Record<string, unknown>
+  readonly completionCriteria?: string
+  readonly retryPolicy?: RetryPolicy
+  readonly validator?: string
 }
 
 /** Planner output before validation. */
@@ -28,6 +36,10 @@ export interface TaskNode extends TaskDraft {
   readonly priority: number
   readonly sideEffectClass: SideEffectClass
   readonly state: TaskState
+  readonly inputContract?: Record<string, unknown>
+  readonly outputContract?: Record<string, unknown>
+  readonly completionCriteria?: string
+  readonly retryPolicy?: RetryPolicy
 }
 
 /** Immutable validated plan revision. */

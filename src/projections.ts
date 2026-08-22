@@ -1,0 +1,121 @@
+import type { DatabaseSync } from 'node:sqlite'
+import type { RuntimeEvent } from './event-store.js'
+
+/** Creates read models which are deliberately disposable: runtime_events is authoritative. */
+export function createProjectionSchema(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, pause_reason TEXT);
+    CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, PRIMARY KEY(goal_id, revision));
+    CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id));
+    CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, type TEXT NOT NULL, content_hash TEXT NOT NULL, storage TEXT NOT NULL, content TEXT, path TEXT, mime_type TEXT, active INTEGER NOT NULL DEFAULT 1, validated INTEGER NOT NULL DEFAULT 0, superseded_by TEXT);
+    CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT, attempt_id TEXT, value_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS validation_results (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, ok INTEGER NOT NULL, validator TEXT NOT NULL, reason TEXT);
+    CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, type TEXT NOT NULL, payload_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, level TEXT NOT NULL, content TEXT NOT NULL, refs_json TEXT NOT NULL DEFAULT '[]');
+    CREATE TABLE IF NOT EXISTS checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, event_seq INTEGER, revision INTEGER NOT NULL, payload_json TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
+    CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
+    CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
+  `)
+}
+
+/** Applies exactly one durable event to materialized views. */
+export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number): void {
+  const p = event.payload
+  const taskId = event.taskId
+  switch (event.type) {
+    case 'GoalCreated':
+      db.prepare('INSERT INTO goals (id, objective, constraints_json, planning_mode, state, revision) VALUES (?, ?, ?, ?, ?, 0)').run(event.goalId, String(p.objective), JSON.stringify(p.constraints ?? []), String(p.planningMode ?? 'auto'), 'DRAFT')
+      break
+    case 'PlanProposed':
+      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json) VALUES (?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []))
+      db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('AWAITING_CONFIRMATION', event.goalId)
+      break
+    case 'PlanConfirmed':
+      db.prepare('UPDATE plan_revisions SET state = ? WHERE goal_id = ? AND revision = ?').run('APPLIED', event.goalId, Number(p.revision))
+      break
+    case 'PlanApplied':
+    case 'PlanRevisionApplied': {
+      const revision = Number(p.revision)
+      const tasks = Array.isArray(p.tasks) ? p.tasks as Array<Record<string, unknown>> : []
+      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json) VALUES (?, ?, ?, ?)').run(event.goalId, revision, 'APPLIED', JSON.stringify(tasks))
+      for (let i = 0; i < tasks.length; i += 1) {
+        const task = tasks[i]!
+        db.prepare(`INSERT INTO task_nodes (goal_id, task_id, revision, objective, depends_on_json, priority, side_effect_class, state, task_json, created_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(goal_id, task_id) DO UPDATE SET revision=excluded.revision, objective=excluded.objective, depends_on_json=excluded.depends_on_json, priority=excluded.priority, side_effect_class=excluded.side_effect_class, state=excluded.state, task_json=excluded.task_json`).run(
+          event.goalId, String(task.id), revision, String(task.objective), JSON.stringify(task.dependsOn ?? []), Number(task.priority ?? 0), String(task.sideEffectClass ?? 'read_only'), String(task.state ?? 'PENDING'), JSON.stringify(task), seq * 1000 + i,
+        )
+      }
+      db.prepare('UPDATE goals SET state = ?, revision = ?, pause_reason = NULL WHERE id = ?').run('RUNNING', revision, event.goalId)
+      break
+    }
+    case 'TaskAttemptStarted':
+      if (taskId === undefined) throw new Error('TaskAttemptStarted requires taskId')
+      db.prepare('INSERT INTO task_attempts (id, goal_id, task_id, revision, state, dsh_session_id, context_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision ?? 1), 'RUNNING', p.dshSessionId == null ? null : String(p.dshSessionId), JSON.stringify(p.context ?? {}), seq)
+      db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('RUNNING', event.goalId, taskId)
+      break
+    case 'ArtifactProduced':
+      if (taskId === undefined) throw new Error('ArtifactProduced requires taskId')
+      db.prepare('INSERT INTO artifacts (id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.id), event.goalId, taskId, String(p.attemptId), String(p.type), String(p.contentHash), String(p.storage), p.content == null ? null : String(p.content), p.path == null ? null : String(p.path), p.mimeType == null ? null : String(p.mimeType))
+      break
+    case 'EvidenceRecorded':
+      db.prepare('INSERT INTO evidence (goal_id, task_id, attempt_id, value_json) VALUES (?, ?, ?, ?)').run(event.goalId, taskId ?? null, p.attemptId == null ? null : String(p.attemptId), JSON.stringify(p.evidence ?? p))
+      break
+    case 'ValidationRecorded':
+      if (taskId === undefined) throw new Error('ValidationRecorded requires taskId')
+      db.prepare('INSERT INTO validation_results (goal_id, task_id, attempt_id, ok, validator, reason) VALUES (?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), p.ok ? 1 : 0, String(p.validator ?? 'default'), p.reason == null ? null : String(p.reason))
+      if (p.ok) db.prepare('UPDATE artifacts SET validated = 1 WHERE attempt_id = ?').run(String(p.attemptId))
+      break
+    case 'TaskCompleted':
+      if (taskId === undefined) throw new Error('TaskCompleted requires taskId')
+      db.prepare('UPDATE task_attempts SET state = ?, summary = ? WHERE id = ?').run('SUCCEEDED', p.summary == null ? null : String(p.summary), String(p.attemptId))
+      db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('SUCCEEDED', event.goalId, taskId)
+      break
+    case 'TaskFailed':
+      if (taskId === undefined) throw new Error('TaskFailed requires taskId')
+      db.prepare('UPDATE task_attempts SET state = ?, summary = ? WHERE id = ?').run('FAILED', p.reason == null ? null : String(p.reason), String(p.attemptId))
+      db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('FAILED', event.goalId, taskId)
+      blockDependentTasks(db, event.goalId)
+      break
+    case 'TaskRetryScheduled':
+      if (taskId !== undefined) db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('PENDING', event.goalId, taskId)
+      break
+    case 'TaskInterrupted':
+      if (taskId === undefined) throw new Error('TaskInterrupted requires taskId')
+      db.prepare('UPDATE task_attempts SET state = ? WHERE id = ?').run('INTERRUPTED', String(p.attemptId))
+      db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('PENDING', event.goalId, taskId)
+      break
+    case 'TaskInvalidated':
+      if (taskId !== undefined) db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('INVALIDATED', event.goalId, taskId)
+      break
+    case 'GoalPaused': db.prepare('UPDATE goals SET state = ?, pause_reason = ? WHERE id = ?').run('PAUSED', String(p.reason ?? 'paused'), event.goalId); break
+    case 'GoalResumed': db.prepare('UPDATE goals SET state = ?, pause_reason = NULL WHERE id = ?').run('RUNNING', event.goalId); break
+    case 'GoalCancelled':
+      db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('CANCELLED', event.goalId)
+      db.prepare("UPDATE task_nodes SET state = 'CANCELLED' WHERE goal_id = ? AND state IN ('PENDING', 'READY')").run(event.goalId)
+      break
+    case 'CheckpointCreated': db.prepare('INSERT INTO checkpoints (goal_id, event_seq, revision, payload_json) VALUES (?, ?, ?, ?)').run(event.goalId, p.eventSeq == null ? null : Number(p.eventSeq), Number(p.revision), JSON.stringify(p)); break
+    case 'DecisionRecorded': db.prepare('INSERT INTO decisions (goal_id, type, payload_json) VALUES (?, ?, ?)').run(event.goalId, String(p.type ?? 'decision'), JSON.stringify(p)); break
+  }
+}
+
+/** A terminal dependency failure blocks only its downstream pending region. */
+function blockDependentTasks(db: DatabaseSync, goalId: string): void {
+  const rows = db.prepare('SELECT task_id, depends_on_json, state FROM task_nodes WHERE goal_id = ?').all(goalId) as Array<{ task_id: string; depends_on_json: string; state: string }>
+  const states = new Map(rows.map(row => [row.task_id, row.state]))
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const row of rows) {
+      if (states.get(row.task_id) !== 'PENDING') continue
+      const dependencies = JSON.parse(row.depends_on_json) as string[]
+      if (dependencies.some(id => ['FAILED', 'BLOCKED', 'CANCELLED', 'INVALIDATED'].includes(states.get(id) ?? ''))) {
+        states.set(row.task_id, 'BLOCKED')
+        db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('BLOCKED', goalId, row.task_id)
+        changed = true
+      }
+    }
+  }
+}

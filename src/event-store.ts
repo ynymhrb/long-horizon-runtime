@@ -1,129 +1,58 @@
 import { DatabaseSync } from 'node:sqlite'
+import { createProjectionSchema, projectEvent } from './projections.js'
+import type { GoalState, TaskNode, TaskState } from './domain.js'
 
-/** Durable event accepted by the runtime event log. */
-export interface RuntimeEvent {
-  readonly type: string
-  readonly goalId: string
-  readonly taskId?: string
-  readonly payload: Record<string, unknown>
-}
+/** Durable event accepted by the runtime event log. Payloads must be JSON serializable. */
+export interface RuntimeEvent { readonly type: string; readonly goalId: string; readonly taskId?: string; readonly payload: Record<string, unknown> }
+export interface GoalProjection { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly planningMode: 'auto' | 'require_confirmation'; readonly state: GoalState; readonly revision: number; readonly pauseReason?: string }
+export interface AttemptProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly revision: number; readonly state: string; readonly dshSessionId?: string; readonly context: Record<string, unknown>; readonly summary?: string }
+export interface ArtifactProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly attemptId: string; readonly type: string; readonly contentHash: string; readonly storage: 'inline' | 'file'; readonly content?: string; readonly path?: string; readonly mimeType?: string; readonly active: boolean; readonly validated: boolean }
 
-/** Read model for a goal. */
-export interface GoalProjection {
-  readonly id: string
-  readonly objective: string
-  readonly state: string
-  readonly revision: number
-}
-
-/** SQLite append-only event log with rebuildable projections. */
+/** SQLite append-only event log and entirely rebuildable materialized projections. */
 export class RuntimeEventStore {
   private readonly db: DatabaseSync
-
   constructor(path: string) {
     this.db = new DatabaseSync(path)
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS runtime_events (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        type TEXT NOT NULL,
-        goal_id TEXT NOT NULL,
-        task_id TEXT,
-        payload_json TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS goals (
-        id TEXT PRIMARY KEY,
-        objective TEXT NOT NULL,
-        state TEXT NOT NULL,
-        revision INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS task_attempts (
-        id TEXT PRIMARY KEY,
-        goal_id TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        state TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS runtime_events_goal_seq ON runtime_events(goal_id, seq);
-      CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id);
-    `)
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS runtime_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, type TEXT NOT NULL, goal_id TEXT NOT NULL, task_id TEXT, payload_json TEXT NOT NULL); CREATE INDEX IF NOT EXISTS runtime_events_goal_seq ON runtime_events(goal_id, seq);')
+    createProjectionSchema(this.db)
   }
-
-  /** Append events and update projections within the current transaction. */
+  /** Append events and project them within the caller's transaction, if any. */
   append(events: readonly RuntimeEvent[]): void {
     const insert = this.db.prepare('INSERT INTO runtime_events (type, goal_id, task_id, payload_json) VALUES (?, ?, ?, ?)')
-    for (const event of events) {
-      insert.run(event.type, event.goalId, event.taskId ?? null, JSON.stringify(event.payload))
-      this.project(event)
-    }
+    for (const event of events) { const result = insert.run(event.type, event.goalId, event.taskId ?? null, JSON.stringify(event.payload)); projectEvent(this.db, event, Number(result.lastInsertRowid)) }
   }
-
-  /** Run a group of event writes atomically. */
-  transaction<T>(work: () => T): T {
-    this.db.exec('BEGIN IMMEDIATE')
-    try {
-      const result = work()
-      this.db.exec('COMMIT')
-      return result
-    } catch (error) {
-      this.db.exec('ROLLBACK')
-      throw error
-    }
-  }
-
-  /** Rebuild all materialized views exclusively from the append-only log. */
+  /** Run related event writes atomically. Nested transactions are intentionally not supported. */
+  transaction<T>(work: () => T): T { this.db.exec('BEGIN IMMEDIATE'); try { const result = work(); this.db.exec('COMMIT'); return result } catch (error) { this.db.exec('ROLLBACK'); throw error } }
+  /** Rebuild every owned projection from ordered append-only events. */
   rebuild(): void {
     this.transaction(() => {
-      this.db.exec('DELETE FROM goals; DELETE FROM task_attempts;')
-      const events = this.db.prepare('SELECT type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all() as Array<{
-        type: string; goal_id: string; task_id: string | null; payload_json: string
-      }>
-      for (const row of events) this.project({
-        type: row.type,
-        goalId: row.goal_id,
-        ...(row.task_id === null ? {} : { taskId: row.task_id }),
-        payload: JSON.parse(row.payload_json) as Record<string, unknown>,
-      })
+      this.db.exec('DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
+      const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all() as Array<{ seq: number; type: string; goal_id: string; task_id: string | null; payload_json: string }>
+      for (const row of rows) projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }, row.seq)
     })
   }
-
-  /** Query the goal projection. */
   getGoal(goalId: string): GoalProjection | undefined {
-    const row = this.db.prepare('SELECT id, objective, state, revision FROM goals WHERE id = ?').get(goalId) as GoalProjection | undefined
-    return row
+    const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, pause_reason FROM goals WHERE id = ?').get(goalId) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : { id: String(row.id), objective: String(row.objective), constraints: JSON.parse(String(row.constraints_json)) as string[], planningMode: String(row.planning_mode) as GoalProjection['planningMode'], state: String(row.state) as GoalState, revision: Number(row.revision), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }) }
   }
-
-  /** List attempts for a logical task in creation order. */
-  listAttempts(taskId: string): Array<{ id: string; state: string }> {
-    return this.db.prepare('SELECT id, state FROM task_attempts WHERE task_id = ? ORDER BY rowid').all(taskId) as Array<{ id: string; state: string }>
+  getPlan(goalId: string, revision?: number): { readonly revision: number; readonly state: string; readonly tasks: TaskNode[] } | undefined {
+    const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision])) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : { revision: Number(row.revision), state: String(row.state), tasks: JSON.parse(String(row.tasks_json)) as TaskNode[] }
   }
-
-  /** Close the owned SQLite connection. */
-  close(): void {
-    this.db.close()
+  listTasks(goalId: string): TaskNode[] { const rows = this.db.prepare('SELECT task_json, state FROM task_nodes WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<{ task_json: string; state: string }>; return rows.map(row => ({ ...(JSON.parse(row.task_json) as TaskNode), state: row.state as TaskState })) }
+  getTask(goalId: string, taskId: string): TaskNode | undefined { return this.listTasks(goalId).find(task => task.id === taskId) }
+  listAttempts(taskId: string): AttemptProjection[] {
+    const rows = this.db.prepare('SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE task_id = ? ORDER BY created_order').all(taskId) as Array<Record<string, unknown>>
+    return rows.map(row => ({ id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), revision: Number(row.revision), state: String(row.state), ...(row.dsh_session_id == null ? {} : { dshSessionId: String(row.dsh_session_id) }), context: JSON.parse(String(row.context_json)) as Record<string, unknown>, ...(row.summary == null ? {} : { summary: String(row.summary) }) }))
   }
-
-  private project(event: RuntimeEvent): void {
-    switch (event.type) {
-      case 'GoalCreated':
-        this.db.prepare('INSERT INTO goals (id, objective, state, revision) VALUES (?, ?, ?, ?)').run(
-          event.goalId, String(event.payload.objective), 'DRAFT', 0,
-        )
-        return
-      case 'PlanApplied':
-        this.db.prepare('UPDATE goals SET state = ?, revision = ? WHERE id = ?').run('RUNNING', Number(event.payload.revision), event.goalId)
-        return
-      case 'TaskAttemptStarted':
-        if (event.taskId === undefined) throw new Error('TaskAttemptStarted requires taskId')
-        this.db.prepare('INSERT INTO task_attempts (id, goal_id, task_id, state) VALUES (?, ?, ?, ?)').run(
-          String(event.payload.attemptId), event.goalId, event.taskId, 'RUNNING',
-        )
-        return
-      case 'TaskCompleted':
-        this.db.prepare('UPDATE task_attempts SET state = ? WHERE id = ?').run('SUCCEEDED', String(event.payload.attemptId))
-        return
-      default:
-        return
-    }
+  listRunningAttempts(): AttemptProjection[] { return (this.db.prepare("SELECT DISTINCT task_id FROM task_attempts WHERE state = 'RUNNING'").all() as Array<{ task_id: string }>).flatMap(row => this.listAttempts(row.task_id).filter(attempt => attempt.state === 'RUNNING')) }
+  listActiveValidatedArtifacts(goalId: string, taskIds?: readonly string[]): ArtifactProjection[] {
+    const rows = this.db.prepare('SELECT id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type, active, validated FROM artifacts WHERE goal_id = ? AND active = 1 AND validated = 1 ORDER BY rowid').all(goalId) as Array<Record<string, unknown>>
+    const wanted = taskIds === undefined ? undefined : new Set(taskIds)
+    return rows.filter(row => wanted === undefined || wanted.has(String(row.task_id))).map(row => ({ id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), attemptId: String(row.attempt_id), type: String(row.type), contentHash: String(row.content_hash), storage: String(row.storage) as 'inline' | 'file', ...(row.content == null ? {} : { content: String(row.content) }), ...(row.path == null ? {} : { path: String(row.path) }), ...(row.mime_type == null ? {} : { mimeType: String(row.mime_type) }), active: Boolean(row.active), validated: Boolean(row.validated) }))
   }
+  latestSeq(goalId: string): number { const row = this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM runtime_events WHERE goal_id = ?').get(goalId) as { seq: number }; return Number(row.seq) }
+  listRecentEvents(goalId: string, limit = 20): RuntimeEvent[] { const rows = this.db.prepare('SELECT type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? ORDER BY seq DESC LIMIT ?').all(goalId, limit) as Array<{ type: string; goal_id: string; task_id: string | null; payload_json: string }>; return rows.reverse().map(row => ({ type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> })) }
+  snapshot(goalId: string): Record<string, unknown> { return { goal: this.getGoal(goalId), plan: this.getPlan(goalId), tasks: this.listTasks(goalId), attempts: this.listTasks(goalId).flatMap(task => this.listAttempts(task.id)), artifacts: this.listActiveValidatedArtifacts(goalId), events: this.listRecentEvents(goalId, 10000) } }
+  close(): void { this.db.close() }
 }

@@ -18,6 +18,10 @@ export function validatePlan(draft: PlanDraft): ValidatedPlan {
       dependsOn: [...task.dependsOn],
       priority: task.priority ?? 0,
       sideEffectClass: task.sideEffectClass ?? 'read_only',
+      inputContract: task.inputContract ?? {},
+      outputContract: task.outputContract ?? {},
+      completionCriteria: task.completionCriteria ?? 'complete',
+      retryPolicy: task.retryPolicy ?? { maxAttempts: 1 },
       state: 'PENDING',
     })
   }
@@ -78,6 +82,10 @@ function normalizeTask(task: TaskDraft): MutableTaskNode {
     dependsOn: [...task.dependsOn],
     priority: task.priority ?? 0,
     sideEffectClass: task.sideEffectClass ?? 'read_only',
+    inputContract: task.inputContract ?? {},
+    outputContract: task.outputContract ?? {},
+    completionCriteria: task.completionCriteria ?? 'complete',
+    retryPolicy: task.retryPolicy ?? { maxAttempts: 1 },
     state: 'PENDING',
   }
 }
