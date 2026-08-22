@@ -1,0 +1,33 @@
+{
+  "name": "@deepseek-ai/dsh-long-task-runtime",
+  "version": "0.1.0",
+  "description": "Durable long-horizon task runtime plugin for DeepSeek Harness",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-subagent": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:D:/code_github/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-agent": "link:D:/code_github/deepseek-harness/packages/core/agent",
+    "@deepseek-ai/dsh-llm": "link:D:/code_github/deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-subagent": "link:D:/code_github/deepseek-harness/packages/subagent/subagent",
+    "@deepseek-ai/dsh-tools": "link:D:/code_github/deepseek-harness/packages/core/tools",
+    "@types/node": "^22.20.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
