@@ -33,6 +33,66 @@ copyable **Task ID**. Runtime source continues to use `Goal` for the aggregate
 and `TaskNode` for a DAG leaf; this avoids conflating the aggregate with an
 individual planned node.
 
+## Reference model: DSH native same-session Goal
+
+DSH's native `GoalService` is the reference for a *current-session objective*,
+not for the long-task scheduler. Its useful design rules are deliberately
+adopted where they fit; its same-session execution semantics are not copied.
+
+### Native rules worth preserving
+
+- A session has one current Goal slot. It is event-sourced in that session's
+  log as complete post-mutation snapshots; clearing writes a revisioned
+  tombstone rather than deleting history.
+- Every durable change is compare-and-set against an exact `{ id, revision }`.
+  A stale mutation fails rather than applying to a newer state.
+- Durable phase (`active`, `paused`, `blocked`, `complete`) is separate from
+  process-local continuation activation. A resumed session is deliberately
+  disarmed; an explicit resume action is required before another round starts.
+- Its GoalBar reads the host's authoritative session projection instead of
+  owning a second client cache. It shows no strip for absent, cleared, or
+  completed goals; mutations are single-flight and surface rejected Remote
+  errors inline while waiting for the authoritative projection to catch up.
+- The native round driver treats a Stop/cancellation as a lifecycle fact: it
+  prevents automatic continuation and durably pauses a goal that had an
+  admitted/reserved goal round. A human message can preempt the automatic
+  continuation queue.
+
+### Boundary: why long tasks differ
+
+The native Goal belongs to one live Agent and one session log, executes
+sequentially against that conversation's retained history, and has one current
+objective by construction. A long task instead has a profile-local Task ID,
+an SQLite event stream, DAG nodes, isolated child attempts, artifacts, and
+cross-session provenance. Its durable state must never be reconstructed from
+one chat's native Goal projection.
+
+Long-task recovery policy also remains independent: native Goal intentionally
+requires explicit rearming after a session-start edge, whereas a long-task
+deployment may choose policy-driven recovery when it has a suitable live
+parent. The two systems must not silently pause, resume, or complete each
+other.
+
+### Adopted session-binding rule
+
+`TaskSessionLink` remains the complete, many-to-many audit relation: a task
+may be linked to many conversations and a conversation may retain links to
+many tasks. In addition, each conversation owns exactly one nullable
+`currentTaskId` binding for its task strip and default Task Area target.
+
+Changing that binding is an explicit, revisioned long-task event. Attaching or
+continuing a task may set it, and a user may switch it from the Task Area;
+switching never erases older links. A fresh ordinary conversation has no
+binding and therefore no long-task strip. When a task reaches a terminal state
+the strip hides by default, while its link and inspection history remain.
+
+The long-task strip follows native GoalBar interaction discipline: it reads a
+server-owned `currentTaskForSession` projection, never invents local status,
+single-flights controls, sends the current control revision, reports errors
+inline, and refreshes from the authoritative result or projection. It is a
+separate dock card after the native GoalBar, so a native session Goal and a
+linked long task can coexist without either UI replacing the other.
+
 ## V1.1: control plane and cross-session model
 
 ### Durable and live state
