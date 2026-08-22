@@ -1,0 +1,13 @@
+# Long-task Runtime V1. Provider names must match DSH subagent providers already mounted by your deployment.
+plugins:
+  '@deepseek-ai/dsh-long-task-runtime':
+    databasePath: .dsh/long-task-runtime.sqlite
+    artifactDirectory: .dsh/long-task-artifacts
+    plannerProvider: spawn
+    executionProvider: spawn
+    maxConcurrentTasks: 2
+    defaultPlanningMode: require_confirmation
+    executionTimeoutMs: 300000
+    retryPolicy:
+      maxAttempts: 2
+    artifactInlineLimitBytes: 65536

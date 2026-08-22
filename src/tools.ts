@@ -1,31 +1,92 @@
-import type { ExecutionAdapter, PlannerAdapter } from './adapters.js'
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from './dsh-adapters.js'
 import { LongTaskRuntime } from './runtime.js'
 
-/** Deployment configuration supplied from `cordis.yml`. */
+/** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
+  readonly databasePath: string
+  readonly artifactDirectory: string
+  readonly plannerProvider: string
+  readonly executionProvider: string
   readonly maxConcurrentTasks?: number
   readonly defaultPlanningMode?: 'auto' | 'require_confirmation'
-  readonly planner: PlannerAdapter
-  readonly execution: ExecutionAdapter
+  readonly executionTimeoutMs?: number
+  readonly retryPolicy?: { readonly maxAttempts: number }
+  readonly artifactInlineLimitBytes?: number
+  readonly defaultAgentProfile?: Record<string, unknown>
+  /** Test/composition seam; normal deployments use the configured DSH adapters. */
+  readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime
 }
 
-/** Minimal Cordis-compatible context required by the plugin. */
-export interface RuntimeContext {
-  longTaskRuntime?: LongTaskRuntime
-  tools: { register(tool: { readonly name: string; execute(args: Record<string, unknown>): Promise<unknown> }): unknown }
+interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'retryPolicy' | 'artifactInlineLimitBytes'> {
+  readonly maxConcurrentTasks: number
+  readonly defaultPlanningMode: 'auto' | 'require_confirmation'
+  readonly executionTimeoutMs: number
+  readonly retryPolicy: { readonly maxAttempts: number }
+  readonly artifactInlineLimitBytes: number
 }
 
-/** Mount the long-task Runtime service and its stateless chat controls. */
-export function apply(ctx: RuntimeContext, config: Config): void {
-  const runtime = new LongTaskRuntime(config.planner, config.execution, config.maxConcurrentTasks ?? 1)
-  ctx.longTaskRuntime = runtime
-  ctx.tools.register({ name: 'long_task_create', async execute(args) {
-    return runtime.createGoal({
-      objective: String(args.objective),
-      planningMode: args.planningMode === 'require_confirmation' ? 'require_confirmation' : config.defaultPlanningMode ?? 'auto',
-    })
-  } })
-  ctx.tools.register({ name: 'long_task_confirm', async execute(args) { return runtime.confirmGoal(String(args.goalId)) } })
-  ctx.tools.register({ name: 'long_task_status', async execute(args) { return runtime.getStatus(String(args.goalId)) } })
-  ctx.tools.register({ name: 'long_task_cancel', async execute(args) { return runtime.cancelGoal(String(args.goalId)) } })
+declare module '@deepseek-ai/cordis' {
+  interface Context { longTaskRuntime: LongTaskRuntime }
 }
+
+export const name = 'long-task-runtime'
+export const inject = ['tools', 'subagents']
+
+/** Mount the runtime service and six stateless model-facing controls. */
+export function apply(ctx: Context, input: Config): void {
+  const config = resolveConfig(input)
+  const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }
+  const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile })
+  const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, ...profile })
+  const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
+    databasePath: config.databasePath, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy,
+  })
+  ctx.provide('longTaskRuntime', runtime)
+  ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')
+
+  ctx.tools.register(defineTool({
+    name: 'long_task_create', description: 'Create and plan a durable long-running goal.',
+    parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.createGoal({ objective: args.objective, ...(args.constraints === undefined ? {} : { constraints: args.constraints }), planningMode: args.planning_mode ?? config.defaultPlanningMode }, exec.agent))),
+  }))
+  ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.confirmGoal(args.goal_id, exec.agent))) }))
+  ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }))
+  ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused durable long-task goal.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.resumeGoal(args.goal_id, exec.agent))) }))
+  ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_invalidate', description: 'Invalidate one task and its reachable downstream work using recorded evidence.',
+    parameters: { goal_id: { type: 'string', required: true }, task_id: { type: 'string', required: true }, reason: { type: 'string', required: true }, evidence_refs: { type: 'array', items: { type: 'string' } } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.invalidateTask(args.goal_id, args.task_id, args.reason, args.evidence_refs ?? []))),
+  }))
+}
+
+const goalParameter = { goal_id: { type: 'string', required: true } } as const
+const toolOutput = { schema: { type: 'json' as const }, render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: JSON.stringify(value) }] }
+
+function withParent<T>(agent: Agent | undefined, work: () => Promise<T>): Promise<T> {
+  if (agent === undefined) return Promise.reject(new Error('long-task tools require a current parent Agent'))
+  return withDshParent(agent, work)
+}
+
+/** Goal views contain only JSON values, but their narrow TypeScript shape lacks an index signature. */
+async function toolValue<T>(work: () => Promise<T>): Promise<any> { return JSON.parse(JSON.stringify(await work())) }
+
+function resolveConfig(config: Config): ResolvedConfig {
+  requiredText(config.databasePath, 'databasePath'); requiredText(config.artifactDirectory, 'artifactDirectory'); requiredText(config.plannerProvider, 'plannerProvider'); requiredText(config.executionProvider, 'executionProvider')
+  const maxConcurrentTasks = config.maxConcurrentTasks ?? 1
+  const executionTimeoutMs = config.executionTimeoutMs ?? 300_000
+  const artifactInlineLimitBytes = config.artifactInlineLimitBytes ?? 65_536
+  const retryPolicy = config.retryPolicy ?? { maxAttempts: 1 }
+  if (!Number.isSafeInteger(maxConcurrentTasks) || maxConcurrentTasks < 1) throw new TypeError('maxConcurrentTasks must be a positive safe integer')
+  if (!Number.isSafeInteger(executionTimeoutMs) || executionTimeoutMs < 1) throw new TypeError('executionTimeoutMs must be a positive safe integer')
+  if (!Number.isSafeInteger(artifactInlineLimitBytes) || artifactInlineLimitBytes < 0) throw new TypeError('artifactInlineLimitBytes must be a non-negative safe integer')
+  if (!Number.isSafeInteger(retryPolicy.maxAttempts) || retryPolicy.maxAttempts < 1) throw new TypeError('retryPolicy.maxAttempts must be a positive safe integer')
+  const defaultPlanningMode = config.defaultPlanningMode ?? 'auto'
+  if (defaultPlanningMode !== 'auto' && defaultPlanningMode !== 'require_confirmation') throw new TypeError('defaultPlanningMode must be auto or require_confirmation')
+  return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode }
+}
+
+function requiredText(value: string, name: string): void { if (value.trim().length === 0) throw new TypeError(`${name} must be non-empty`) }
