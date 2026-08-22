@@ -52,7 +52,7 @@ export class Scheduler {
     if (goal?.state !== 'RUNNING') return false
     const tasks = this.store.listTasks(goalId)
     const ready = tasks.filter(task => task.state === 'PENDING' && this.dependenciesSatisfied(goalId, task, tasks))
-      .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id)).slice(0, this.maxConcurrentTasks)
+      .sort((a, b) => b.priority - a.priority || (a.createdOrder ?? Number.MAX_SAFE_INTEGER) - (b.createdOrder ?? Number.MAX_SAFE_INTEGER)).slice(0, this.maxConcurrentTasks)
     this.store.transaction(() => this.store!.append(ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} }))))
     await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent)))
     this.store.transaction(() => {
@@ -108,12 +108,18 @@ export class Scheduler {
     const artifacts = this.store!.listActiveValidatedArtifacts(goalId, task.dependsOn).map(artifact => ({ id: artifact.id, taskId: artifact.taskId, type: artifact.type, content: artifact.content ?? (artifact.path === undefined ? '' : this.artifactStore?.read(artifact) ?? ''), validated: true }))
     const goal = this.store!.getGoal(goalId)
     const priorFailure = this.store!.listAttempts(task.id, goalId).filter(attempt => attempt.state === 'FAILED').at(-1)?.summary
-    return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) }
+    const dependencySummaries = task.dependsOn.map(dependencyId => {
+      const dependency = this.store!.getTask(goalId, dependencyId)
+      const summary = this.store!.listAttempts(dependencyId, goalId).filter(attempt => attempt.state === 'SUCCEEDED').at(-1)?.summary
+      return { taskId: dependencyId, objective: dependency?.objective ?? dependencyId, ...(summary === undefined ? {} : { summary }) }
+    })
+    return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store!.listDecisions(goalId), evidence: this.store!.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) }
   }
   private async executeOne(goalId: string, task: TaskNode, executionParent: unknown): Promise<void> {
     const attemptId = randomUUID()
     const controller = new AbortController()
-    const idempotencyKey = `${goalId}:${task.id}:${this.store!.getGoal(goalId)?.revision ?? 1}`
+    const attemptRevision = this.store!.getGoal(goalId)?.revision ?? 1
+    const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`
     this.aborters.set(attemptId, { goalId, controller })
     let context: ContextView
     try { context = this.context(goalId, task) }
@@ -121,12 +127,12 @@ export class Scheduler {
       // A corrupt/missing dependency artifact is a deterministic failed attempt,
       // not an exception that strands the goal in RUNNING.
       context = { objective: goalId, task: { id: task.id, objective: task.objective }, artifacts: [] }
-      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: this.store!.getGoal(goalId)?.revision ?? 1, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
+      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
       this.aborters.delete(attemptId)
       this.terminalFailure(goalId, task, attemptId, failureMessage(error))
       return
     }
-    this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: this.store!.getGoal(goalId)?.revision ?? 1, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
+    this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
     let result
     try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
@@ -134,6 +140,10 @@ export class Scheduler {
     }
     this.aborters.delete(attemptId)
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
+    if (this.store!.getGoal(goalId)?.revision !== attemptRevision) {
+      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } }]))
+      return
+    }
     try {
       const baseContract = validateExecutionResult(result)
       const outputContract = validateOutputContract(task, result)

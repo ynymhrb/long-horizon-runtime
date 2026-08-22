@@ -40,6 +40,8 @@ export interface TaskNode extends TaskDraft {
   readonly outputContract?: Record<string, unknown>
   readonly completionCriteria?: string
   readonly retryPolicy?: RetryPolicy
+  /** Persisted projection ordering; planner task array order is the stable tie-break. */
+  readonly createdOrder?: number
 }
 
 /** Immutable validated plan revision. */

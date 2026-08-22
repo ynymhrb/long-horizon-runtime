@@ -6,6 +6,8 @@ import { RuntimeEventStore } from './event-store.js'
 import { Scheduler, type RecoveryResult } from './scheduler.js'
 import { ArtifactStore } from './artifacts.js'
 
+export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
+
 export interface CreateGoalRequest { readonly objective: string; readonly constraints?: readonly string[]; readonly planningMode?: 'auto' | 'require_confirmation' }
 export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly pauseReason?: string; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[] }
 export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators'] }
@@ -41,13 +43,30 @@ export class LongTaskRuntime {
     if (goal.state !== 'AWAITING_CONFIRMATION') throw new Error(`goal ${goalId} is not awaiting confirmation`)
     const plan = this.store.getPlan(goalId)
     if (plan === undefined) throw new Error(`goal ${goalId} has no proposed plan`)
-    const invalidatedTaskIds = plan.tasks.filter(task => task.state === 'INVALIDATED').map(task => task.id)
-    this.store.transaction(() => this.store.append([{ type: 'PlanConfirmed', goalId, payload: { revision: plan.revision } }, { type: 'PlanRevisionApplied', goalId, payload: { revision: plan.revision, tasks: plan.tasks, invalidatedTaskIds } }]))
+    const invalidatedTaskIds = plan.invalidatedTaskIds.length > 0 ? plan.invalidatedTaskIds : plan.tasks.filter(task => task.state === 'INVALIDATED').map(task => task.id)
+    this.store.transaction(() => this.store.append([{ type: 'PlanConfirmed', goalId, payload: { revision: plan.revision, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }, { type: 'PlanRevisionApplied', goalId, payload: { revision: plan.revision, tasks: plan.tasks, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }]))
     if (executionParent !== undefined) await this.runUntilIdle(goalId, executionParent)
     return this.view(goalId)
   }
   getStatus(goalId: string): GoalView | undefined { return this.store.getGoal(goalId) === undefined ? undefined : this.view(goalId) }
-  async resumeGoal(goalId: string, executionParent?: unknown): Promise<GoalView> { const goal = this.requireGoal(goalId); if (goal.state !== 'PAUSED') throw new Error(`goal ${goalId} is not paused`); this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }])); if (executionParent !== undefined) await this.runUntilIdle(goalId, executionParent); return this.view(goalId) }
+  async resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution): Promise<GoalView> {
+    const goal = this.requireGoal(goalId)
+    if (goal.state !== 'PAUSED') throw new Error(`goal ${goalId} is not paused`)
+    const blockedExternalTask = this.store.listTasks(goalId).find(task => task.state === 'BLOCKED' && task.sideEffectClass === 'external_effect')
+    if (blockedExternalTask !== undefined) {
+      if (recoveryResolution === undefined) throw new Error(`goal ${goalId} requires an explicit recovery resolution for external task ${blockedExternalTask.id}`)
+      this.store.transaction(() => this.store.append([
+        { type: 'DecisionRecorded', goalId, payload: { type: 'external_recovery_resolution', taskId: blockedExternalTask.id, resolution: recoveryResolution } },
+        { type: 'TaskRecoveryResolved', goalId, taskId: blockedExternalTask.id, payload: { resolution: recoveryResolution } },
+        { type: 'GoalResumed', goalId, payload: { recoveryResolution, taskId: blockedExternalTask.id } },
+      ]))
+    } else {
+      if (recoveryResolution !== undefined) throw new Error(`goal ${goalId} has no indeterminate external effect to resolve`)
+      this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]))
+    }
+    if (executionParent !== undefined) await this.runUntilIdle(goalId, executionParent)
+    return this.view(goalId)
+  }
   cancelGoal(goalId: string): GoalView {
     const goal = this.requireGoal(goalId)
     if (!['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state)) throw new Error(`goal ${goalId} cannot be cancelled while ${goal.state}`)
@@ -86,7 +105,10 @@ export class LongTaskRuntime {
   async recover(executionParent?: unknown): Promise<void> {
     const recoveredGoals = await this.scheduler.recover()
     if (executionParent !== undefined) for (const goal of recoveredGoals) {
-      if (this.store.getGoal(goal)?.state === 'PAUSED') await this.resumeGoal(goal, executionParent)
+      // An indeterminate external effect is a durable operator choice.  A
+      // live parent is not authority to silently decide whether to replay it.
+      const requiresResolution = this.store.listTasks(goal).some(task => task.state === 'BLOCKED' && task.sideEffectClass === 'external_effect')
+      if (this.store.getGoal(goal)?.state === 'PAUSED' && !requiresResolution) await this.resumeGoal(goal, executionParent)
     }
   }
   close(): void { if (this.ownsStore) this.store.close() }

@@ -34,4 +34,27 @@ describe('artifacts and execution context', () => {
     })
     expect(broker.build('c').artifacts.map(artifact => artifact.id)).toEqual(['from-b'])
   })
+
+  test('carries L1 dependency summaries and L2 project constraints, decisions, and evidence', () => {
+    const broker = new ContextBroker({
+      objective: 'ship',
+      constraints: ['use TypeScript'],
+      decisions: [{ type: 'scope', payload: { choice: 'v1' } }],
+      evidence: [{ taskId: 'a', value: { source: 'test-report' } }],
+      tasks: new Map([
+        ['a', { id: 'a', objective: 'research', dependsOn: [], summary: 'facts collected' }],
+        ['b', { id: 'b', objective: 'implement', dependsOn: ['a'] }],
+      ]),
+      artifacts: [],
+    })
+
+    expect(broker.build('b')).toMatchObject({
+      l1DependencySummaries: [{ taskId: 'a', objective: 'research', summary: 'facts collected' }],
+      l2ProjectContext: {
+        constraints: ['use TypeScript'],
+        decisions: [{ type: 'scope', payload: { choice: 'v1' } }],
+        evidence: [{ taskId: 'a', value: { source: 'test-report' } }],
+      },
+    })
+  })
 })

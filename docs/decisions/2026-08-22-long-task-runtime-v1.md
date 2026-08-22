@@ -31,3 +31,11 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **Attempt safety:** context assembly, adapters, validators, and artifact persistence all run behind durable attempt terminalization. A failure after `TaskAttemptStarted` records a failed attempt rather than leaving a RUNNING orphan.
 * **DSH provenance:** child Session IDs are recorded immediately when `subagents.start` returns, before awaiting child output, and are retained for stopped or malformed outputs.
 * **Artifact boundary:** V1 accepts only the seven documented artifact types. MIME strings are syntactically checked and `outputContract.mimeTypes` requires a matching declared MIME value.
+
+## Final review decisions
+
+* **Revision fencing:** every attempt is bound to the plan revision written in `TaskAttemptStarted`. A child result from an obsolete revision is retained as `SUPERSEDED`, but it cannot validate artifacts or transition the current logical task. Projection-level completion fencing provides the same protection while replaying an event log.
+* **Confirmed graph mutations:** proposal metadata includes both invalidated and stale task ids. Confirmation carries that metadata into the applied revision, so stale artifacts are deactivated even when a mutation waits for operator approval.
+* **External recovery authority:** an indeterminate external effect remains `BLOCKED` and its Goal remains paused. `resume` must explicitly choose `retry` or `confirmed_succeeded`, records that decision, and activation recovery never infers the choice from the existence of a live parent Agent.
+* **Deterministic scheduling:** equal-priority tasks use planner-array creation order, stored in the projection, rather than lexical task IDs as the stable scheduling tie-break.
+* **Bounded contextual layers:** execution contexts retain direct prerequisite summaries at L1 and goal constraints, decisions, and evidence at L2. Raw artifact handoff remains limited to validated direct dependencies.

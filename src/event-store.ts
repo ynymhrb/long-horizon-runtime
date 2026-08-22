@@ -8,6 +8,7 @@ export interface GoalProjection { readonly id: string; readonly objective: strin
 export interface AttemptProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly revision: number; readonly state: string; readonly dshSessionId?: string; readonly context: Record<string, unknown>; readonly summary?: string }
 export interface ArtifactProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly attemptId: string; readonly type: string; readonly contentHash: string; readonly storage: 'inline' | 'file'; readonly content?: string; readonly path?: string; readonly mimeType?: string; readonly active: boolean; readonly validated: boolean }
 export interface DecisionProjection { readonly type: string; readonly payload: Record<string, unknown> }
+export interface EvidenceProjection { readonly taskId?: string; readonly attemptId?: string; readonly value: unknown }
 export interface CheckpointProjection { readonly eventSeq?: number; readonly revision: number; readonly payload: Record<string, unknown> }
 
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
@@ -37,12 +38,14 @@ export class RuntimeEventStore {
     const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, pause_reason FROM goals WHERE id = ?').get(goalId) as Record<string, unknown> | undefined
     return row === undefined ? undefined : { id: String(row.id), objective: String(row.objective), constraints: JSON.parse(String(row.constraints_json)) as string[], planningMode: String(row.planning_mode) as GoalProjection['planningMode'], state: String(row.state) as GoalState, revision: Number(row.revision), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }) }
   }
-  getPlan(goalId: string, revision?: number): { readonly revision: number; readonly state: string; readonly tasks: TaskNode[] } | undefined {
-    const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision])) as Record<string, unknown> | undefined
-    return row === undefined ? undefined : { revision: Number(row.revision), state: String(row.state), tasks: JSON.parse(String(row.tasks_json)) as TaskNode[] }
+  getPlan(goalId: string, revision?: number): { readonly revision: number; readonly state: string; readonly tasks: TaskNode[]; readonly invalidatedTaskIds: readonly string[]; readonly staleTaskIds: readonly string[] } | undefined {
+    const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision])) as Record<string, unknown> | undefined
+    if (row === undefined) return undefined
+    const metadata = JSON.parse(String(row.metadata_json ?? '{}')) as Record<string, unknown>
+    return { revision: Number(row.revision), state: String(row.state), tasks: JSON.parse(String(row.tasks_json)) as TaskNode[], invalidatedTaskIds: Array.isArray(metadata.invalidatedTaskIds) ? metadata.invalidatedTaskIds.map(String) : [], staleTaskIds: Array.isArray(metadata.staleTaskIds) ? metadata.staleTaskIds.map(String) : [] }
   }
   /** Current task projection only; historical revisions remain queryable through getPlan(). */
-  listTasks(goalId: string): TaskNode[] { const rows = this.db.prepare('SELECT task_json, state FROM task_nodes WHERE goal_id = ? AND revision = (SELECT revision FROM goals WHERE id = ?) ORDER BY created_order').all(goalId, goalId) as Array<{ task_json: string; state: string }>; return rows.map(row => ({ ...(JSON.parse(row.task_json) as TaskNode), state: row.state as TaskState })) }
+  listTasks(goalId: string): TaskNode[] { const rows = this.db.prepare('SELECT task_json, state, created_order FROM task_nodes WHERE goal_id = ? AND revision = (SELECT revision FROM goals WHERE id = ?) ORDER BY created_order').all(goalId, goalId) as Array<{ task_json: string; state: string; created_order: number }>; return rows.map(row => ({ ...(JSON.parse(row.task_json) as TaskNode), state: row.state as TaskState, createdOrder: Number(row.created_order) })) }
   getTask(goalId: string, taskId: string): TaskNode | undefined { return this.listTasks(goalId).find(task => task.id === taskId) }
   listAttempts(taskId: string, goalId?: string): AttemptProjection[] {
     const rows = this.db.prepare(goalId === undefined
@@ -62,6 +65,9 @@ export class RuntimeEventStore {
   }
   listDecisions(goalId: string): DecisionProjection[] {
     return (this.db.prepare('SELECT type, payload_json FROM decisions WHERE goal_id = ? ORDER BY id').all(goalId) as Array<Record<string, unknown>>).map(row => ({ type: String(row.type), payload: JSON.parse(String(row.payload_json)) as Record<string, unknown> }))
+  }
+  listEvidence(goalId: string): EvidenceProjection[] {
+    return (this.db.prepare('SELECT task_id, attempt_id, value_json FROM evidence WHERE goal_id = ? ORDER BY id').all(goalId) as Array<Record<string, unknown>>).map(row => ({ ...(row.task_id == null ? {} : { taskId: String(row.task_id) }), ...(row.attempt_id == null ? {} : { attemptId: String(row.attempt_id) }), value: JSON.parse(String(row.value_json)) }))
   }
   latestCheckpoint(goalId: string): CheckpointProjection | undefined {
     const row = this.db.prepare('SELECT event_seq, revision, payload_json FROM checkpoints WHERE goal_id = ? ORDER BY id DESC LIMIT 1').get(goalId) as Record<string, unknown> | undefined

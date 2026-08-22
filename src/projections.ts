@@ -5,7 +5,7 @@ import type { RuntimeEvent } from './event-store.js'
 export function createProjectionSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, pause_reason TEXT);
-    CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, PRIMARY KEY(goal_id, revision));
+    CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
     CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, type TEXT NOT NULL, content_hash TEXT NOT NULL, storage TEXT NOT NULL, content TEXT, path TEXT, mime_type TEXT, active INTEGER NOT NULL DEFAULT 1, validated INTEGER NOT NULL DEFAULT 0, superseded_by TEXT);
@@ -18,6 +18,8 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
   `)
+  const planColumns = db.prepare('PRAGMA table_info(plan_revisions)').all() as Array<{ name: string }>
+  if (!planColumns.some(column => column.name === 'metadata_json')) db.exec("ALTER TABLE plan_revisions ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
 }
 
 /** Applies exactly one durable event to materialized views. */
@@ -29,7 +31,7 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       db.prepare('INSERT INTO goals (id, objective, constraints_json, planning_mode, state, revision) VALUES (?, ?, ?, ?, ?, 0)').run(event.goalId, String(p.objective), JSON.stringify(p.constraints ?? []), String(p.planningMode ?? 'auto'), 'DRAFT')
       break
     case 'PlanProposed':
-      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json) VALUES (?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []))
+      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [] }))
       db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('AWAITING_CONFIRMATION', event.goalId)
       break
     case 'PlanConfirmed':
@@ -39,7 +41,7 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'PlanRevisionApplied': {
       const revision = Number(p.revision)
       const tasks = Array.isArray(p.tasks) ? p.tasks as Array<Record<string, unknown>> : []
-      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json) VALUES (?, ?, ?, ?)').run(event.goalId, revision, 'APPLIED', JSON.stringify(tasks))
+      db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, revision, 'APPLIED', JSON.stringify(tasks), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [] }))
       for (let i = 0; i < tasks.length; i += 1) {
         const task = tasks[i]!
         db.prepare(`INSERT INTO task_nodes (goal_id, task_id, revision, objective, depends_on_json, priority, side_effect_class, state, task_json, created_order)
@@ -65,7 +67,7 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       break
     case 'ArtifactProduced':
       if (taskId === undefined) throw new Error('ArtifactProduced requires taskId')
-      db.prepare('INSERT INTO artifacts (id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.id), event.goalId, taskId, String(p.attemptId), String(p.type), String(p.contentHash), String(p.storage), p.content == null ? null : String(p.content), p.path == null ? null : String(p.path), p.mimeType == null ? null : String(p.mimeType))
+      db.prepare('INSERT INTO artifacts (id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.id), event.goalId, taskId, String(p.attemptId), String(p.type), String(p.contentHash), String(p.storage), p.content == null ? null : String(p.content), p.path == null ? null : String(p.path), p.mimeType == null ? null : String(p.mimeType), p.active === false ? 0 : 1)
       break
     case 'TaskAttemptSessionRecorded':
       db.prepare('UPDATE task_attempts SET dsh_session_id = ? WHERE id = ?').run(String(p.dshSessionId), String(p.attemptId))
@@ -81,7 +83,11 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'TaskCompleted':
       if (taskId === undefined) throw new Error('TaskCompleted requires taskId')
       db.prepare('UPDATE task_attempts SET state = ?, summary = ? WHERE id = ?').run('SUCCEEDED', p.summary == null ? null : String(p.summary), String(p.attemptId))
-      updateCurrentTask(db, event.goalId, taskId, 'SUCCEEDED')
+      updateCurrentTaskForAttempt(db, event.goalId, taskId, String(p.attemptId), 'SUCCEEDED')
+      break
+    case 'TaskAttemptSuperseded':
+      if (taskId === undefined) throw new Error('TaskAttemptSuperseded requires taskId')
+      db.prepare('UPDATE task_attempts SET state = ?, summary = ? WHERE id = ?').run('SUPERSEDED', p.reason == null ? null : String(p.reason), String(p.attemptId))
       break
     case 'TaskFailed':
       if (taskId === undefined) throw new Error('TaskFailed requires taskId')
@@ -105,6 +111,10 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       if (taskId === undefined) throw new Error('TaskRecoveryBlocked requires taskId')
       updateCurrentTask(db, event.goalId, taskId, 'BLOCKED')
       break
+    case 'TaskRecoveryResolved':
+      if (taskId === undefined) throw new Error('TaskRecoveryResolved requires taskId')
+      updateCurrentTask(db, event.goalId, taskId, p.resolution === 'confirmed_succeeded' ? 'SUCCEEDED' : 'PENDING')
+      break
     case 'TaskInvalidated':
       if (taskId !== undefined) updateCurrentTask(db, event.goalId, taskId, 'INVALIDATED')
       break
@@ -124,6 +134,11 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
 
 function updateCurrentTask(db: DatabaseSync, goalId: string, taskId: string, state: string): void {
   db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ? AND revision = (SELECT revision FROM goals WHERE id = ?)').run(state, goalId, taskId, goalId)
+}
+
+/** Completion may only change the logical task that belongs to the same plan revision as its attempt. */
+function updateCurrentTaskForAttempt(db: DatabaseSync, goalId: string, taskId: string, attemptId: string, state: string): void {
+  db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ? AND revision = (SELECT revision FROM goals WHERE id = ?) AND revision = (SELECT revision FROM task_attempts WHERE id = ?)').run(state, goalId, taskId, goalId, attemptId)
 }
 
 /** A terminal dependency failure blocks only its downstream pending region. */
