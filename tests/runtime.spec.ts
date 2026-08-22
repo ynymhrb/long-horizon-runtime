@@ -24,12 +24,12 @@ describe('LongTaskRuntime', () => {
     expect(runtime.getStatus(goal.id)?.state).toBe('SUCCEEDED')
   })
 
-  test('planner failure is recorded as a durable failed goal', async () => {
+  test('planner failure returns a discoverable durable failed goal', async () => {
     const planner: PlannerAdapter = { async plan() { throw new Error('bad plan') } }
     const execution: ExecutionAdapter = { async execute() { throw new Error('unreachable') } }
     const runtime = new LongTaskRuntime(planner, execution)
-    await expect(runtime.createGoal({ objective: 'ship' })).rejects.toThrow('bad plan')
-    const goal = runtime.store.snapshot('goal-does-not-exist')
-    expect(goal.goal).toBeUndefined()
+    const goal = await runtime.createGoal({ objective: 'ship' })
+    expect(goal.state).toBe('FAILED')
+    expect(goal.recentEvents.at(-1)?.payload).toMatchObject({ phase: 'planning', reason: 'bad plan' })
   })
 })

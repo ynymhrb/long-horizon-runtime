@@ -46,6 +46,8 @@ export function apply(ctx: Context, input: Config): void {
   })
   ctx.provide('longTaskRuntime', runtime)
   ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')
+  // Reconcile persisted attempts at activation. Execution itself remains tied to a later live tool parent.
+  void runtime.recover().catch(() => undefined)
 
   ctx.tools.register(defineTool({
     name: 'long_task_create', description: 'Create and plan a durable long-running goal.',

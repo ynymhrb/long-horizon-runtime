@@ -39,7 +39,8 @@ export class RuntimeEventStore {
     const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision])) as Record<string, unknown> | undefined
     return row === undefined ? undefined : { revision: Number(row.revision), state: String(row.state), tasks: JSON.parse(String(row.tasks_json)) as TaskNode[] }
   }
-  listTasks(goalId: string): TaskNode[] { const rows = this.db.prepare('SELECT task_json, state FROM task_nodes WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<{ task_json: string; state: string }>; return rows.map(row => ({ ...(JSON.parse(row.task_json) as TaskNode), state: row.state as TaskState })) }
+  /** Current task projection only; historical revisions remain queryable through getPlan(). */
+  listTasks(goalId: string): TaskNode[] { const rows = this.db.prepare('SELECT task_json, state FROM task_nodes WHERE goal_id = ? AND revision = (SELECT revision FROM goals WHERE id = ?) ORDER BY created_order').all(goalId, goalId) as Array<{ task_json: string; state: string }>; return rows.map(row => ({ ...(JSON.parse(row.task_json) as TaskNode), state: row.state as TaskState })) }
   getTask(goalId: string, taskId: string): TaskNode | undefined { return this.listTasks(goalId).find(task => task.id === taskId) }
   listAttempts(taskId: string, goalId?: string): AttemptProjection[] {
     const rows = this.db.prepare(goalId === undefined
@@ -59,6 +60,6 @@ export class RuntimeEventStore {
   }
   latestSeq(goalId: string): number { const row = this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM runtime_events WHERE goal_id = ?').get(goalId) as { seq: number }; return Number(row.seq) }
   listRecentEvents(goalId: string, limit = 20): RuntimeEvent[] { const rows = this.db.prepare('SELECT type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? ORDER BY seq DESC LIMIT ?').all(goalId, limit) as Array<{ type: string; goal_id: string; task_id: string | null; payload_json: string }>; return rows.reverse().map(row => ({ type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> })) }
-  snapshot(goalId: string): Record<string, unknown> { return { goal: this.getGoal(goalId), plan: this.getPlan(goalId), tasks: this.listTasks(goalId), attempts: this.listTasks(goalId).flatMap(task => this.listAttempts(task.id)), artifacts: this.listActiveValidatedArtifacts(goalId), events: this.listRecentEvents(goalId, 10000) } }
+  snapshot(goalId: string): Record<string, unknown> { return { goal: this.getGoal(goalId), plan: this.getPlan(goalId), tasks: this.listTasks(goalId), attempts: this.listTasks(goalId).flatMap(task => this.listAttempts(task.id, goalId)), artifacts: this.listActiveValidatedArtifacts(goalId), events: this.listRecentEvents(goalId, 10000) } }
   close(): void { this.db.close() }
 }

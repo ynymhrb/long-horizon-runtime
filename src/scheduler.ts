@@ -15,6 +15,8 @@ export interface SchedulerOptions {
   /** Opaque live parent used only by a DSH adapter; never persisted. */
   readonly executionParent?: unknown
   readonly validator?: (input: { readonly goalId: string; readonly task: TaskNode; readonly attemptId: string; readonly result: import('./adapters.js').ExecutionResult }) => Promise<{ readonly ok: boolean; readonly reason?: string }>
+  /** Named planner validators; unknown names reject the result rather than silently succeeding. */
+  readonly validators?: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   readonly artifactStore?: ArtifactStore
 }
 
@@ -25,6 +27,7 @@ export class Scheduler {
   private readonly defaultAttempts: number
   private readonly recoveryValidator?: SchedulerOptions['recoveryValidator']
   private readonly validator?: SchedulerOptions['validator']
+  private readonly validators: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   private readonly artifactStore: ArtifactStore | undefined
   private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
 
@@ -34,6 +37,7 @@ export class Scheduler {
     this.defaultAttempts = typeof options === 'number' ? 1 : options.defaultRetryPolicy?.maxAttempts ?? 1
     this.recoveryValidator = typeof options === 'number' ? undefined : options.recoveryValidator
     this.validator = typeof options === 'number' ? undefined : options.validator
+    this.validators = typeof options === 'number' ? {} : options.validators ?? {}
     this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
@@ -83,10 +87,10 @@ export class Scheduler {
 
   private dependenciesSatisfied(goalId: string, task: TaskNode, tasks: readonly TaskNode[]): boolean {
     const byId = new Map(tasks.map(item => [item.id, item]))
-    return task.dependsOn.every(id => byId.get(id)?.state === 'SUCCEEDED' && this.store!.listActiveValidatedArtifacts(goalId, [id]).length >= 0)
+    return task.dependsOn.every(id => byId.get(id)?.state === 'SUCCEEDED')
   }
   private context(goalId: string, task: TaskNode): ContextView {
-    const artifacts = this.store!.listActiveValidatedArtifacts(goalId, task.dependsOn).map(artifact => ({ id: artifact.id, taskId: artifact.taskId, type: artifact.type, content: artifact.content ?? '', validated: true }))
+    const artifacts = this.store!.listActiveValidatedArtifacts(goalId, task.dependsOn).map(artifact => ({ id: artifact.id, taskId: artifact.taskId, type: artifact.type, content: artifact.content ?? (artifact.path === undefined ? '' : this.artifactStore?.read(artifact) ?? ''), validated: true }))
     const goal = this.store!.getGoal(goalId)
     const priorFailure = this.store!.listAttempts(task.id, goalId).filter(attempt => attempt.state === 'FAILED').at(-1)?.summary
     return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) }
@@ -99,11 +103,19 @@ export class Scheduler {
     this.aborters.set(attemptId, { goalId, controller })
     this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: this.store!.getGoal(goalId)?.revision ?? 1, context, idempotencyKey, executionParentPresent: executionParent !== undefined } }]))
     let result
-    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) { result = { status: 'failed' as const, summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [] } }
+    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
+      const failure = error as Error & { dshSessionId?: string }
+      result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
+    }
     this.aborters.delete(attemptId)
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
     const baseContract = validateExecutionResult(result)
-    const contract = baseContract.ok && this.validator !== undefined ? await this.validator({ goalId, task, attemptId, result }) : baseContract
+    const outputContract = validateOutputContract(task, result)
+    const selectedValidator = task.validator === undefined ? this.validator : this.validators[task.validator]
+    const namedValidatorResult = task.validator !== undefined && selectedValidator === undefined
+      ? { ok: false as const, reason: `unknown task validator: ${task.validator}` }
+      : baseContract.ok && outputContract.ok && selectedValidator !== undefined ? await selectedValidator({ goalId, task, attemptId, result }) : undefined
+    const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
     const attemptCount = this.store!.listAttempts(task.id, goalId).length
     const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
     this.store!.transaction(() => {
@@ -134,4 +146,20 @@ export class Scheduler {
     await Promise.all(ready.slice(0, this.maxConcurrentTasks).map(async task => { this.setState(tasks, task.id, 'RUNNING'); const result = await this.adapter.execute({ attemptId: `${goalId}:${task.id}:${Date.now()}`, taskId: task.id, context: { objective: goalId, task: { id: task.id, objective: task.objective }, artifacts: [] }, signal: new AbortController().signal }); this.setState(tasks, task.id, validateExecutionResult(result).ok ? 'SUCCEEDED' : 'FAILED') }))
   }
   private setState(tasks: Map<string, TaskNode>, taskId: string, state: TaskState): void { const task = tasks.get(taskId); if (task === undefined) throw new Error(`unknown task ${taskId}`); tasks.set(taskId, { ...(task as MutableTask), state }) }
+}
+
+function validateOutputContract(task: TaskNode, result: import('./adapters.js').ExecutionResult): { readonly ok: boolean; readonly reason?: string } {
+  if (result.status === 'failed') return { ok: false, reason: result.summary }
+  const contract = task.outputContract ?? {}
+  const types = contract.artifactTypes
+  if (types !== undefined) {
+    if (!Array.isArray(types) || types.some(type => typeof type !== 'string')) return { ok: false, reason: 'outputContract.artifactTypes must be a string array' }
+    if (result.artifacts.some(artifact => !types.includes(artifact.type))) return { ok: false, reason: 'result artifact type violates output contract' }
+  }
+  const mimeTypes = contract.mimeTypes
+  if (mimeTypes !== undefined) {
+    if (!Array.isArray(mimeTypes) || mimeTypes.some(type => typeof type !== 'string')) return { ok: false, reason: 'outputContract.mimeTypes must be a string array' }
+    if (result.artifacts.some(artifact => artifact.mimeType !== undefined && !mimeTypes.includes(artifact.mimeType))) return { ok: false, reason: 'result artifact MIME type violates output contract' }
+  }
+  return { ok: true }
 }

@@ -65,6 +65,7 @@ export function applyMutation(current: ValidatedPlan, mutation: GraphMutation): 
     case 'replaceTask': {
       const index = next.findIndex(task => task.id === mutation.taskId)
       if (index < 0) throw new PlanValidationError(`unknown task ${mutation.taskId}`)
+      if (mutation.replacement.id !== mutation.taskId) throw new PlanValidationError('replacement task id must equal the replaced task id')
       next[index] = normalizeTask(mutation.replacement)
       break
     }

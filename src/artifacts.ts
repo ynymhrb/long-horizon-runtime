@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** Artifact value persisted inline or as a content-addressed file. */
@@ -31,4 +31,14 @@ export class ArtifactStore {
     if (!existsSync(path)) writeFileSync(path, bytes, { flag: 'wx' })
     return { id: input.id, taskId: input.taskId, type: input.type, contentHash, storage: 'file', path, ...(input.mimeType === undefined ? {} : { mimeType: input.mimeType }) }
   }
+
+  /** Read an artifact handed off by reference and reject corruption before context injection. */
+  read(artifact: Pick<StoredArtifact, 'storage' | 'content' | 'path' | 'contentHash'>): string {
+    const bytes = artifact.storage === 'inline' ? Buffer.from(artifact.content ?? '', 'utf8') : readFileSync(requiredPath(artifact.path))
+    const value = createHash('sha256').update(bytes).digest('hex')
+    if (value !== artifact.contentHash) throw new Error(`artifact content hash mismatch: ${artifact.contentHash}`)
+    return bytes.toString('utf8')
+  }
 }
+
+function requiredPath(path: string | undefined): string { if (path === undefined) throw new Error('file artifact is missing a path'); return path }

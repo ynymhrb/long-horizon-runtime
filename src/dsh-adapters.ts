@@ -39,7 +39,7 @@ const PLAN_SCHEMA = {
           completionCriteria: { type: 'string' },
           retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer' } } },
           validator: { type: 'string' },
-        }, required: ['id', 'objective', 'dependsOn'],
+        }, required: ['id', 'objective', 'dependsOn', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'],
       },
     },
   }, required: ['revision', 'tasks'],
@@ -73,7 +73,12 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
     async execute(input): Promise<ExecutionResult> {
       const timeout = options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs)
       const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
-      const settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal)
+      let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }
+      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal) }
+      catch (error) {
+        const failure = error as Error & { dshSessionId?: string }
+        return { status: 'failed', summary: failure.message, artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
+      }
       if (settled.stopReason !== 'completed') {
         return { status: 'failed', summary: `DSH child stopped: ${settled.stopReason}`, artifacts: [], evidence: [] }
       }
@@ -114,6 +119,10 @@ async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason
   try {
     const result = await run.result
     return { stopReason: result.stopReason, value: result.structured ?? (result.stopReason === 'completed' ? parseJsonOutput(result.output) : undefined), dshSessionId: String(run.id) }
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error))
+    Object.assign(failure, { dshSessionId: String(run.id) })
+    throw failure
   } finally {
     await run.dispose()
   }
@@ -126,11 +135,11 @@ function parseJsonOutput(output: readonly ContentBlock[]): unknown {
 }
 
 function plannerPrompt(input: { readonly objective: string; readonly constraints: readonly string[] }): string {
-  return `Create a dependency DAG for this long-running objective. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}`
+  return `Create a dependency DAG for this long-running objective. Every task must declare inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and a named validator. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}`
 }
 
 function executionPrompt(input: Parameters<ExecutionAdapter['execute']>[0]): string {
-  return `Execute the assigned task and return only JSON matching the supplied schema.\nTask: ${input.taskId}\nContext: ${JSON.stringify(input.context)}`
+  return `Execute the assigned task and return only JSON matching the supplied schema.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nContext: ${JSON.stringify(input.context)}`
 }
 
 function requireProviderName(value: string): void { if (value.trim().length === 0) throw new TypeError('providerName must be non-empty') }

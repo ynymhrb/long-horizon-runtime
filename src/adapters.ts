@@ -20,7 +20,7 @@ export interface PlannerAdapter {
 /** Boundary for one isolated DSH child attempt. */
 export interface ExecutionAdapter {
   /** parent is a live, opaque DSH Agent supplied by a tool call and is never durable state. */
-  execute(input: { readonly attemptId: string; readonly taskId: string; readonly context: ContextView; readonly signal: AbortSignal; readonly parent?: unknown }): Promise<ExecutionResult>
+  execute(input: { readonly attemptId: string; readonly taskId: string; readonly context: ContextView; readonly signal: AbortSignal; readonly parent?: unknown; /** Always present for runtime dispatch; optional for legacy test adapters. */ readonly idempotencyKey?: string; readonly retryPolicy?: import('./domain.js').RetryPolicy; readonly sideEffectClass?: import('./domain.js').SideEffectClass }): Promise<ExecutionResult>
   cancel?(attemptId: string): void
 }
 
