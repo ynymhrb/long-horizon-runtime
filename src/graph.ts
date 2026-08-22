@@ -5,14 +5,23 @@ type MutableTaskNode = { -readonly [Key in keyof TaskNode]: Key extends 'depends
 
 /** Validate planner output and return a normalized immutable plan revision. */
 export function validatePlan(draft: PlanDraft): ValidatedPlan {
+  if (typeof draft.goalId !== 'string' || draft.goalId.trim().length === 0) throw new PlanValidationError('goal id must not be empty')
   if (!Number.isSafeInteger(draft.revision) || draft.revision < 1) throw new PlanValidationError('revision must be a positive integer')
   if (draft.tasks.length === 0) throw new PlanValidationError('plan must contain at least one task')
   const tasks = new Map<string, TaskNode>()
   for (const task of draft.tasks) {
+    if (!task || typeof task !== 'object') throw new PlanValidationError('task must be an object')
+    if (!Array.isArray(task.dependsOn) || task.dependsOn.some(id => typeof id !== 'string' || id.trim().length === 0)) throw new PlanValidationError(`task ${String(task.id)} has invalid dependencies`)
     if (task.id.trim().length === 0) throw new PlanValidationError('task id must not be empty')
     if (tasks.has(task.id)) throw new PlanValidationError(`duplicate task id: ${task.id}`)
     if (task.objective.trim().length === 0) throw new PlanValidationError(`task ${task.id} has an empty objective`)
     if (task.dependsOn.includes(task.id)) throw new PlanValidationError(`task ${task.id} depends on itself`)
+    if (task.priority !== undefined && (!Number.isSafeInteger(task.priority))) throw new PlanValidationError(`task ${task.id} priority must be a safe integer`)
+    if (task.sideEffectClass !== undefined && !['read_only', 'idempotent', 'external_effect'].includes(task.sideEffectClass)) throw new PlanValidationError(`task ${task.id} has invalid sideEffectClass`)
+    if (task.retryPolicy !== undefined && (!Number.isSafeInteger(task.retryPolicy.maxAttempts) || task.retryPolicy.maxAttempts < 1)) throw new PlanValidationError(`task ${task.id} has invalid retry policy`)
+    for (const [name, contract] of [['inputContract', task.inputContract], ['outputContract', task.outputContract]] as const) if (contract !== undefined && (contract === null || Array.isArray(contract) || typeof contract !== 'object')) throw new PlanValidationError(`task ${task.id} ${name} must be an object`)
+    if (task.completionCriteria !== undefined && task.completionCriteria.trim().length === 0) throw new PlanValidationError(`task ${task.id} completionCriteria must not be empty`)
+    if (task.validator !== undefined && task.validator.trim().length === 0) throw new PlanValidationError(`task ${task.id} validator must not be empty`)
     tasks.set(task.id, {
       ...task,
       dependsOn: [...task.dependsOn],
@@ -61,17 +70,18 @@ export function applyMutation(current: ValidatedPlan, mutation: GraphMutation): 
     }
   }
   const validated = validatePlan({ goalId: current.goalId, revision: current.revision + 1, tasks: next })
-  if (mutation.kind !== 'invalidateTask') return validated
   const withInvalidation = new Map(validated.tasks)
   for (const [id, previous] of current.tasks) {
-    if (previous.state === 'INVALIDATED') {
+    if (mutation.kind !== 'replaceTask' || id !== mutation.taskId) {
+      const task = withInvalidation.get(id)
+      if (task !== undefined) withInvalidation.set(id, { ...task, state: previous.state })
+    }
+  }
+  if (mutation.kind === 'invalidateTask') {
+    for (const id of reachableFrom(current.tasks, mutation.taskId)) {
       const task = withInvalidation.get(id)
       if (task !== undefined) withInvalidation.set(id, { ...task, state: 'INVALIDATED' })
     }
-  }
-  for (const id of reachableFrom(current.tasks, mutation.taskId)) {
-    const task = withInvalidation.get(id)
-    if (task !== undefined) withInvalidation.set(id, { ...task, state: 'INVALIDATED' })
   }
   return { ...validated, tasks: withInvalidation }
 }

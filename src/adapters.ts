@@ -6,7 +6,7 @@ import type { ContextView } from './context.js'
 export interface ExecutionResult {
   readonly status: 'succeeded' | 'failed'
   readonly summary: string
-  readonly artifacts: readonly { readonly type: string; readonly content: string }[]
+  readonly artifacts: readonly { readonly type: string; readonly content: string; readonly mimeType?: string }[]
   readonly evidence: readonly string[]
   /** Durable reference to the child created by the DSH execution adapter. */
   readonly dshSessionId?: string

@@ -40,9 +40,9 @@ export function apply(ctx: Context, input: Config): void {
   const config = resolveConfig(input)
   const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }
   const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile })
-  const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, ...profile })
+  const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.executionTimeoutMs, ...profile })
   const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-    databasePath: config.databasePath, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy,
+    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy,
   })
   ctx.provide('longTaskRuntime', runtime)
   ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')

@@ -4,6 +4,21 @@
   "description": "Durable long-horizon task runtime plugin for DeepSeek Harness",
   "license": "MIT",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./plugin": {
+      "types": "./dist/tools.d.ts",
+      "import": "./dist/tools.js",
+      "default": "./dist/tools.js"
+    }
+  },
+  "files": ["dist", "README.md"],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },

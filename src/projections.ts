@@ -48,6 +48,11 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
           event.goalId, String(task.id), revision, String(task.objective), JSON.stringify(task.dependsOn ?? []), Number(task.priority ?? 0), String(task.sideEffectClass ?? 'read_only'), String(task.state ?? 'PENDING'), JSON.stringify(task), seq * 1000 + i,
         )
       }
+      const invalidated = Array.isArray(p.invalidatedTaskIds) ? p.invalidatedTaskIds.map(String) : []
+      for (const invalidatedTaskId of invalidated) {
+        db.prepare('UPDATE artifacts SET active = 0 WHERE goal_id = ? AND task_id = ? AND active = 1').run(event.goalId, invalidatedTaskId)
+        db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('INVALIDATED', event.goalId, invalidatedTaskId)
+      }
       db.prepare('UPDATE goals SET state = ?, revision = ?, pause_reason = NULL WHERE id = ?').run('RUNNING', revision, event.goalId)
       break
     }
@@ -82,6 +87,10 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('FAILED', event.goalId, taskId)
       blockDependentTasks(db, event.goalId)
       break
+    case 'TaskAttemptFailed':
+      if (taskId === undefined) throw new Error('TaskAttemptFailed requires taskId')
+      db.prepare('UPDATE task_attempts SET state = ?, summary = ? WHERE id = ?').run('FAILED', p.reason == null ? null : String(p.reason), String(p.attemptId))
+      break
     case 'TaskRetryScheduled':
       if (taskId !== undefined) db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('PENDING', event.goalId, taskId)
       break
@@ -89,6 +98,10 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       if (taskId === undefined) throw new Error('TaskInterrupted requires taskId')
       db.prepare('UPDATE task_attempts SET state = ? WHERE id = ?').run('INTERRUPTED', String(p.attemptId))
       db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('PENDING', event.goalId, taskId)
+      break
+    case 'TaskRecoveryBlocked':
+      if (taskId === undefined) throw new Error('TaskRecoveryBlocked requires taskId')
+      db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('BLOCKED', event.goalId, taskId)
       break
     case 'TaskInvalidated':
       if (taskId !== undefined) db.prepare('UPDATE task_nodes SET state = ? WHERE goal_id = ? AND task_id = ?').run('INVALIDATED', event.goalId, taskId)
@@ -99,6 +112,8 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('CANCELLED', event.goalId)
       db.prepare("UPDATE task_nodes SET state = 'CANCELLED' WHERE goal_id = ? AND state IN ('PENDING', 'READY')").run(event.goalId)
       break
+    case 'GoalSucceeded': db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('SUCCEEDED', event.goalId); break
+    case 'GoalFailed': db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('FAILED', event.goalId); break
     case 'CheckpointCreated': db.prepare('INSERT INTO checkpoints (goal_id, event_seq, revision, payload_json) VALUES (?, ?, ?, ?)').run(event.goalId, p.eventSeq == null ? null : Number(p.eventSeq), Number(p.revision), JSON.stringify(p)); break
     case 'DecisionRecorded': db.prepare('INSERT INTO decisions (goal_id, type, payload_json) VALUES (?, ?, ?)').run(event.goalId, String(p.type ?? 'decision'), JSON.stringify(p)); break
   }

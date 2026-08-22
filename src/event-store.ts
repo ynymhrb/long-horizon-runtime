@@ -41,11 +41,17 @@ export class RuntimeEventStore {
   }
   listTasks(goalId: string): TaskNode[] { const rows = this.db.prepare('SELECT task_json, state FROM task_nodes WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<{ task_json: string; state: string }>; return rows.map(row => ({ ...(JSON.parse(row.task_json) as TaskNode), state: row.state as TaskState })) }
   getTask(goalId: string, taskId: string): TaskNode | undefined { return this.listTasks(goalId).find(task => task.id === taskId) }
-  listAttempts(taskId: string): AttemptProjection[] {
-    const rows = this.db.prepare('SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE task_id = ? ORDER BY created_order').all(taskId) as Array<Record<string, unknown>>
+  listAttempts(taskId: string, goalId?: string): AttemptProjection[] {
+    const rows = this.db.prepare(goalId === undefined
+      ? 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE task_id = ? ORDER BY created_order'
+      : 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE task_id = ? AND goal_id = ? ORDER BY created_order')
+      .all(...(goalId === undefined ? [taskId] : [taskId, goalId])) as Array<Record<string, unknown>>
     return rows.map(row => ({ id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), revision: Number(row.revision), state: String(row.state), ...(row.dsh_session_id == null ? {} : { dshSessionId: String(row.dsh_session_id) }), context: JSON.parse(String(row.context_json)) as Record<string, unknown>, ...(row.summary == null ? {} : { summary: String(row.summary) }) }))
   }
-  listRunningAttempts(): AttemptProjection[] { return (this.db.prepare("SELECT DISTINCT task_id FROM task_attempts WHERE state = 'RUNNING'").all() as Array<{ task_id: string }>).flatMap(row => this.listAttempts(row.task_id).filter(attempt => attempt.state === 'RUNNING')) }
+  listRunningAttempts(): AttemptProjection[] {
+    const rows = this.db.prepare("SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE state = 'RUNNING'").all() as Array<Record<string, unknown>>
+    return rows.map(row => ({ id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), revision: Number(row.revision), state: String(row.state), ...(row.dsh_session_id == null ? {} : { dshSessionId: String(row.dsh_session_id) }), context: JSON.parse(String(row.context_json)) as Record<string, unknown>, ...(row.summary == null ? {} : { summary: String(row.summary) }) }))
+  }
   listActiveValidatedArtifacts(goalId: string, taskIds?: readonly string[]): ArtifactProjection[] {
     const rows = this.db.prepare('SELECT id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type, active, validated FROM artifacts WHERE goal_id = ? AND active = 1 AND validated = 1 ORDER BY rowid').all(goalId) as Array<Record<string, unknown>>
     const wanted = taskIds === undefined ? undefined : new Set(taskIds)

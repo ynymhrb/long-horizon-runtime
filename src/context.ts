@@ -10,8 +10,11 @@ export interface ContextArtifact {
 /** Bounded context handed to an execution adapter. */
 export interface ContextView {
   readonly objective: string
-  readonly task: { readonly id: string; readonly objective: string }
+  readonly constraints?: readonly string[]
+  readonly revision?: number
+  readonly task: { readonly id: string; readonly objective: string; readonly inputContract?: Record<string, unknown>; readonly outputContract?: Record<string, unknown>; readonly completionCriteria?: string }
   readonly artifacts: readonly ContextArtifact[]
+  readonly priorFailureSummary?: string
 }
 
 /** Builds child contexts from direct validated task outputs only. */

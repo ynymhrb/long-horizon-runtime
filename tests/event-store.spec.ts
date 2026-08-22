@@ -43,4 +43,13 @@ describe('RuntimeEventStore', () => {
     })).toThrow('abort')
     expect(runtime.listAttempts('t-1')).toEqual([])
   })
+
+  test('scopes task attempts by goal as well as task id', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'TaskAttemptStarted', goalId: 'g-1', taskId: 'same', payload: { attemptId: 'a-1' } },
+      { type: 'TaskAttemptStarted', goalId: 'g-2', taskId: 'same', payload: { attemptId: 'a-2' } },
+    ])
+    expect(runtime.listAttempts('same', 'g-1').map(item => item.id)).toEqual(['a-1'])
+  })
 })

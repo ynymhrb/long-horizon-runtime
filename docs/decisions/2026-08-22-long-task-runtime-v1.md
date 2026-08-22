@@ -9,3 +9,11 @@ The published package declares DSH packages as peer dependencies. Local developm
 The plugin uses `ctx.provide('longTaskRuntime', runtime)` rather than assigning a property, and every model-facing handler requires the current `ToolRunContext.agent`. The agent is retained in an `AsyncLocalStorage` scope only while the tool invokes the runtime, allowing planner and worker adapters to call `ctx.subagents.start(providerName, request)` without persisting a live Agent object.
 
 The adapters request DSH structured output, fall back to parsing a final JSON text response for compatible providers, and always call `run.dispose()` in `finally`. Worker results include the returned child session id as `dshSessionId`; the scheduler must persist that id in a follow-up event because the attempt-start event precedes child creation.
+
+## Final V1 correctness rulings
+
+* **Superstep ownership:** model-facing create, confirm, and resume calls advance the goal through every immediately runnable superstep, rather than stopping after the first ready set. A Goal terminal event is emitted only once all tasks succeed, or after an exhausted task failure. This makes a one-shot DSH tool call complete a finite DAG without a hidden polling loop.
+* **Retry and failure distinction:** a failed *attempt* is recorded independently from a failed logical task. Dependents are blocked only by `TaskFailed` after the retry budget is exhausted; a retry returns the node to `PENDING` and retains its attempt history.
+* **External-effect recovery:** an interrupted external-effect attempt is never replayed automatically when recovery cannot prove its outcome. It becomes `BLOCKED`, the goal is durably paused, and an operator must invalidate/replace it before running a new action.
+* **Idempotency:** every attempt has a deterministic `goalId:taskId:revision` idempotency key in its durable start event. Providers may use this to deduplicate idempotent external calls; the runtime does not claim exactly-once effects.
+* **Artifact lifecycle:** artifacts are stored through the configured `ArtifactStore`; content is inline only below its limit and otherwise content-addressed on disk. Applying an invalidation revision deactivates artifacts only for the invalidated downstream region; unrelated successful nodes and artifacts remain active.

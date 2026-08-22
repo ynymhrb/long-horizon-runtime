@@ -53,4 +53,15 @@ describe('DSH adapters', () => {
 
     expect(result).toMatchObject({ status: 'succeeded', summary: 'complete', artifacts: [{ type: 'report', content: 'result' }], evidence: ['source'], dshSessionId: 'child-session-2' })
   })
+
+  test('maps non-completed DSH stop reasons to a failed execution result', async () => {
+    const adapter = createDshExecutionAdapter({
+      async start() { return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'max-tokens', output: [] }), async dispose() {} } },
+    } as never, { providerName: 'worker' })
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+    expect(result).toMatchObject({ status: 'failed', summary: 'DSH child stopped: max-tokens' })
+  })
 })

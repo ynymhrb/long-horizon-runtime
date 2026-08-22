@@ -95,6 +95,33 @@ describe('durable runtime core', () => {
     expect(store.getTask(goal.id, 'b')?.state).toBe('BLOCKED')
   })
 
+  test('does not block a dependent while a retry remains available', async () => {
+    const store = createStore()
+    let calls = 0
+    const execution: ExecutionAdapter = { async execute(input) { calls += 1; return input.taskId === 'a' && calls === 1 ? { status: 'failed', summary: 'temporary', artifacts: [], evidence: [] } : { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { store, defaultRetryPolicy: { maxAttempts: 2 } })
+    const goal = await runtime.createGoal({ objective: 'ship' })
+    await runtime.runUntilIdle(goal.id)
+    expect(store.getTask(goal.id, 'b')?.state).toBe('SUCCEEDED')
+  })
+
+  test('invalidating a branch deactivates only that branch artifacts', async () => {
+    const store = createStore()
+    store.append([
+      { type: 'GoalCreated', goalId: 'g', payload: { objective: 'ship', planningMode: 'auto' } },
+      { type: 'PlanRevisionApplied', goalId: 'g', payload: { revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, sideEffectClass: 'read_only', state: 'SUCCEEDED' }, { id: 'b', objective: 'b', dependsOn: [], priority: 0, sideEffectClass: 'read_only', state: 'SUCCEEDED' }] } },
+      { type: 'ArtifactProduced', goalId: 'g', taskId: 'a', payload: { id: 'aa', attemptId: 'x', type: 'report', contentHash: 'a', storage: 'inline', content: 'a' } },
+      { type: 'ValidationRecorded', goalId: 'g', taskId: 'a', payload: { attemptId: 'x', ok: true, validator: 'x' } },
+      { type: 'ArtifactProduced', goalId: 'g', taskId: 'b', payload: { id: 'bb', attemptId: 'y', type: 'report', contentHash: 'b', storage: 'inline', content: 'b' } },
+      { type: 'ValidationRecorded', goalId: 'g', taskId: 'b', payload: { attemptId: 'y', ok: true, validator: 'x' } },
+    ])
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })
+    runtime.invalidateTask('g', 'a', 'stale')
+    expect(store.listActiveValidatedArtifacts('g').map(artifact => artifact.id)).toEqual(['bb'])
+    expect(store.getTask('g', 'b')?.state).toBe('SUCCEEDED')
+  })
+
+
   test('forwards a live execution parent to the adapter without storing it', async () => {
     const store = createStore()
     const parent = { ephemeral: true }
@@ -104,7 +131,7 @@ describe('durable runtime core', () => {
     const goal = await runtime.createGoal({ objective: 'ship' }, parent)
     expect(received).toBe(parent)
     expect(JSON.stringify(store.listAttempts('a')[0]?.context)).not.toContain('ephemeral')
-    expect(goal.state).toBe('RUNNING')
+    expect(goal.state).toBe('SUCCEEDED')
   })
 
   test('records the child DSH session after an attempt starts', async () => {

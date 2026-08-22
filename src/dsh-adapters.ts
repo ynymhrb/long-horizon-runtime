@@ -23,6 +23,7 @@ function currentParent(): Agent {
 export interface DshAdapterOptions {
   readonly providerName: string
   readonly agentOptions?: Record<string, unknown>
+  readonly timeoutMs?: number
 }
 
 const PLAN_SCHEMA = {
@@ -58,6 +59,7 @@ export function createDshPlannerAdapter(subagents: Pick<SubagentRuntime, 'start'
   return {
     async plan(input): Promise<PlanDraft> {
       const result = await runStructured(subagents, options, 'Long-task planner', plannerPrompt(input), PLAN_SCHEMA)
+      if (result.stopReason !== 'completed') throw new Error(`DSH planner stopped: ${result.stopReason}`)
       const value = objectValue(result.value, 'planner')
       return { goalId: input.goalId, revision: integer(value.revision, 'planner revision'), tasks: array(value.tasks, 'planner tasks') as PlanDraft['tasks'] }
     },
@@ -69,7 +71,9 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
   requireProviderName(options.providerName)
   return {
     async execute(input): Promise<ExecutionResult> {
-      const settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, input.signal)
+      const timeout = options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs)
+      const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
+      const settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal)
       if (settled.stopReason !== 'completed') {
         return { status: 'failed', summary: `DSH child stopped: ${settled.stopReason}`, artifacts: [], evidence: [] }
       }
@@ -109,7 +113,7 @@ async function runStructured(
 async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }> {
   try {
     const result = await run.result
-    return { stopReason: result.stopReason, value: result.structured ?? parseJsonOutput(result.output), dshSessionId: String(run.id) }
+    return { stopReason: result.stopReason, value: result.structured ?? (result.stopReason === 'completed' ? parseJsonOutput(result.output) : undefined), dshSessionId: String(run.id) }
   } finally {
     await run.dispose()
   }

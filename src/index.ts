@@ -1,5 +1,6 @@
 /** Published package identity. */
 export const pluginName = '@deepseek-ai/dsh-long-task-runtime'
+export { name, inject } from './tools.js'
 
 export { LongTaskRuntime } from './runtime.js'
 export type { CreateGoalRequest, GoalView } from './runtime.js'
