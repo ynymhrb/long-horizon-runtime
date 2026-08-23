@@ -16,18 +16,19 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
   const [error, setError] = React.useState(null)
   const [query, setQuery] = React.useState('')
   const [state, setState] = React.useState('')
+  const [archived, setArchived] = React.useState(false)
   const sessions = typeof useSessions === 'function' ? useSessions(value => value) : undefined
   const sessionId = sessions?.current
   React.useEffect(() => {
     if (!open) return
     let live = true
-    const load = () => Promise.resolve(remote.listTasks({ filter: { ...(query ? { query } : {}), ...(state ? { state } : {}) } }))
+    const load = () => Promise.resolve(remote.listTasks({ filter: { ...(query ? { query } : {}), ...(state ? { state } : {}), ...(archived ? { archived: true } : {}) } }))
       .then(value => { const page = remoteValue(value); if (live) setItems(page?.items ?? []) })
       .catch(reason => { if (live) setError(String(reason)) })
     void load()
     const timer = setInterval(load, 4000)
     return () => { live = false; clearInterval(timer) }
-  }, [open, remote, query, state])
+  }, [open, remote, query, state, archived])
   React.useEffect(() => {
     if (!selectedId) return
     setTask(undefined); setGraph(undefined); setEvents([])
@@ -47,7 +48,8 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
       e('input', { value: query, placeholder: '搜索任务 ID 或目标', onChange: event => setQuery(event.target.value) }),
       e('select', { value: state, onChange: event => setState(event.target.value) },
         e('option', { value: '' }, '全部状态'),
-        ...FILTER_STATES.map(value => e('option', { key: value, value }, taskStatePresentation(value).label)))),
+        ...FILTER_STATES.map(value => e('option', { key: value, value }, taskStatePresentation(value).label))),
+      e('label', null, e('input', { type: 'checkbox', checked: archived, onChange: event => setArchived(event.target.checked) }), ' 已归档')),
     e('h3', { className: 'ltr-task-list-title' }, '任务列表'),
     e('div', { className: 'ltr-task-list-header', 'aria-hidden': true }, e('span', null, '状态'), e('span', null, '任务目标'), e('span', null, '进度 / 当前节点')),
     e('ol', { className: 'ltr-task-list' }, ...items.map(item => {

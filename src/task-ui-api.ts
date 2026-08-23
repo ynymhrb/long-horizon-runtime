@@ -13,6 +13,7 @@ export interface TaskSummary {
   readonly revision: number
   readonly controlRevision: number
   readonly workspaceScope?: string
+  readonly archivedAt?: string
   readonly progress: TaskProgress
   readonly currentOrLastNode?: { readonly id: string; readonly objective: string; readonly state: string }
   readonly reason?: string
@@ -111,6 +112,7 @@ export class TaskUiApi {
       revision: task.revision,
       controlRevision: task.controlRevision,
       ...(task.workspaceScope === undefined ? {} : { workspaceScope: task.workspaceScope }),
+      ...(task.archivedAt === undefined ? {} : { archivedAt: task.archivedAt }),
       progress: { succeeded: nodes.filter(node => node.state === 'SUCCEEDED').length, total: nodes.length },
       ...(current === undefined ? {} : { currentOrLastNode: { id: current.id, objective: current.objective, state: current.state } }),
       ...(task.pauseReason === undefined ? {} : { reason: task.pauseReason }),

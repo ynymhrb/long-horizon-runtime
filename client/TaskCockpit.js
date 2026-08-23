@@ -37,6 +37,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const attach = () => invoke(attached ? 'setCurrentSession' : 'attachCurrentSession', { taskId: task.id, sessionId })
   const edit = () => invoke('editTaskGoal', { taskId: task.id, expectedRevision: task.controlRevision, objective, reason, ...(sessionId ? { sessionId } : {}) })
   const archive = () => { if (window.confirm('删除任务会先取消正在进行的工作，并归档 30 天。是否继续？')) invoke('archiveTask', { taskId: task.id, expectedRevision: task.controlRevision }) }
+  const restore = () => { setPending(true); setError(null); Promise.resolve(remote.restoreTask({ taskId: task.id })).then(result => onTaskChanged(remoteValue(result))).catch(value => setError(String(value))).finally(() => setPending(false)) }
   const jump = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => { const target = remoteValue(result)?.currentSessionId; if (target && typeof openSession === 'function') openSession(target); else setError(target ? '当前 DSH 槽未提供会话跳转能力。' : '此任务尚未关联可跳转的会话。') }).catch(value => setError(String(value)))
   const labels = { confirm: '确认执行', pause: '暂停任务', resume: '继续任务', cancel: '取消任务' }
   const externalResolutionRequired = task.state === 'PAUSED' && task.tasks?.some(node => node.state === 'BLOCKED' && node.sideEffectClass === 'external_effect')
@@ -50,7 +51,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       task.pendingProposal ? e('button', { type: 'button', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
       e('button', { type: 'button', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标'),
       e('button', { type: 'button', disabled: pending, onClick: jump }, '跳转到会话'),
-      e('button', { type: 'button', disabled: pending, onClick: archive }, '删除'),
+      e('button', { type: 'button', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...(task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
         ? [e('button', { key: 'resume-retry', type: 'button', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]
         : [e('button', { key: name, type: 'button', disabled: pending, onClick: () => action(name) }, labels[name])])),

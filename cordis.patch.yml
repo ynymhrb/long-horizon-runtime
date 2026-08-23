@@ -7,6 +7,7 @@
         plannerProvider: spawn
         executionProvider: spawn
         maxConcurrentTasks: 1
+        autoReplan: true
         defaultPlanningMode: require_confirmation
         executionTimeoutMs: 300000
         retryPolicy:
