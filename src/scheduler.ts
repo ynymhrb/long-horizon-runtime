@@ -18,6 +18,7 @@ export interface SchedulerOptions {
   /** Named planner validators; unknown names reject the result rather than silently succeeding. */
   readonly validators?: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   readonly artifactStore?: ArtifactStore
+  readonly onTerminalFailure?: (input: { readonly goalId: string; readonly task: TaskNode; readonly reason: string }) => Promise<void>
 }
 
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
@@ -29,6 +30,7 @@ export class Scheduler {
   private readonly validator?: SchedulerOptions['validator']
   private readonly validators: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   private readonly artifactStore: ArtifactStore | undefined
+  private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
   private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
 
   constructor(private readonly adapter: ExecutionAdapter, options: number | SchedulerOptions) {
@@ -42,6 +44,7 @@ export class Scheduler {
     // result/output contract checks performed below.
     this.validators = { required: async () => ({ ok: true }), ...(typeof options === 'number' ? {} : options.validators ?? {}) }
     this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore
+    this.onTerminalFailure = typeof options === 'number' ? undefined : options.onTerminalFailure
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
 
@@ -190,6 +193,7 @@ export class Scheduler {
       }
       this.store!.append(events)
       })
+      if (!contract.ok && attemptCount >= maxAttempts) await this.onTerminalFailure?.({ goalId, task, reason: contract.reason ?? result.summary })
     } catch (error) { this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId) }
   }
   private terminalFailure(goalId: string, task: TaskNode, attemptId: string, reason: string, dshSessionId?: string): void {

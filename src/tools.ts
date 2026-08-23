@@ -16,6 +16,7 @@ export interface Config {
   readonly executionTimeoutMs?: number
   readonly retryPolicy?: { readonly maxAttempts: number }
   readonly artifactInlineLimitBytes?: number
+  readonly autoReplan?: boolean
   /** Profile-local compatibility scope for tasks resumed from another chat. */
   readonly workspaceScope?: string
   readonly defaultAgentProfile?: Record<string, unknown>
@@ -45,7 +46,7 @@ export function apply(ctx: Context, input: Config): void {
   const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile })
   const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.executionTimeoutMs, ...profile })
   const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy,
+    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true,
   })
   ctx.provide('longTaskRuntime', runtime)
   const taskApi = new TaskControlApi(runtime)

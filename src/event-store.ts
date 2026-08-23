@@ -118,12 +118,12 @@ export class RuntimeEventStore {
   /** Cursor-based event page in append order; the event log remains the only authority. */
   listEvents(goalId: string, afterSeq = 0, limit = 50, taskId?: string): RuntimeEvent[] {
     const rows = this.db.prepare(taskId === undefined
-      ? 'SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? AND seq > ? ORDER BY seq LIMIT ?'
-      : 'SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? AND seq > ? AND task_id = ? ORDER BY seq LIMIT ?')
-      .all(...(taskId === undefined ? [goalId, afterSeq, limit] : [goalId, afterSeq, taskId, limit])) as Array<{ seq: number; type: string; goal_id: string; task_id: string | null; payload_json: string }>
-    return rows.map(row => ({ seq: Number(row.seq), type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }))
+      ? 'SELECT seq, created_at, type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? AND seq > ? ORDER BY seq LIMIT ?'
+      : 'SELECT seq, created_at, type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? AND seq > ? AND task_id = ? ORDER BY seq LIMIT ?')
+      .all(...(taskId === undefined ? [goalId, afterSeq, limit] : [goalId, afterSeq, taskId, limit])) as Array<{ seq: number; created_at: string; type: string; goal_id: string; task_id: string | null; payload_json: string }>
+    return rows.map(row => ({ seq: Number(row.seq), createdAt: row.created_at, type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }))
   }
-  listRecentEvents(goalId: string, limit = 20): RuntimeEvent[] { const rows = this.db.prepare('SELECT type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? ORDER BY seq DESC LIMIT ?').all(goalId, limit) as Array<{ type: string; goal_id: string; task_id: string | null; payload_json: string }>; return rows.reverse().map(row => ({ type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> })) }
+  listRecentEvents(goalId: string, limit = 20): RuntimeEvent[] { const rows = this.db.prepare('SELECT created_at, type, goal_id, task_id, payload_json FROM runtime_events WHERE goal_id = ? ORDER BY seq DESC LIMIT ?').all(goalId, limit) as Array<{ created_at: string; type: string; goal_id: string; task_id: string | null; payload_json: string }>; return rows.reverse().map(row => ({ createdAt: row.created_at, type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> })) }
   snapshot(goalId: string): Record<string, unknown> { return { goal: this.getGoal(goalId), plan: this.getPlan(goalId), tasks: this.listTasks(goalId), attempts: this.listTasks(goalId).flatMap(task => this.listAttempts(task.id, goalId)), artifacts: this.listActiveValidatedArtifacts(goalId), events: this.listRecentEvents(goalId, 10000) } }
   close(): void { this.db.close() }
 }

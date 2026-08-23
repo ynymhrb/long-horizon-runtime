@@ -6,7 +6,7 @@ import { remoteValue } from './remote-value.js'
 const e = React.createElement
 const FILTER_STATES = ['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED', 'SUCCEEDED', 'FAILED', 'CANCELLED']
 
-export function TaskArea({ open, onClose, remote, initialTaskId, useSessions }) {
+export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, openSession }) {
   const [items, setItems] = React.useState([])
   const [selectedId, setSelectedId] = React.useState(initialTaskId ?? null)
   const [task, setTask] = React.useState(undefined)
@@ -62,5 +62,5 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions }) 
     e('section', { className: 'ltr-modal', role: 'dialog', 'aria-label': '任务区' },
       e('button', { className: 'ltr-close', type: 'button', onClick: onClose }, '关闭'),
       error ? e('p', { className: 'ltr-error' }, error) : null,
-      selectedId ? e(TaskCockpit, { task, graph, events, remote, sessionId, isCurrent: selectedId === currentTaskId, onCurrentChanged: setCurrentTaskId, onTaskChanged: setTask, onBack: () => setSelectedId(null) }) : overview))
+      selectedId ? e(TaskCockpit, { task, graph, events, remote, sessionId, openSession, isCurrent: selectedId === currentTaskId, onCurrentChanged: setCurrentTaskId, onTaskChanged: setTask, onBack: () => setSelectedId(null) }) : overview))
 }

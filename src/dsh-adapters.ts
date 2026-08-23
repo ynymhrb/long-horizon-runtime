@@ -139,8 +139,8 @@ function parseJsonOutput(output: readonly ContentBlock[]): unknown {
   try { return JSON.parse(text) } catch { throw new Error('DSH child output must be valid JSON when structured output is absent') }
 }
 
-function plannerPrompt(input: { readonly objective: string; readonly constraints: readonly string[] }): string {
-  return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}`
+function plannerPrompt(input: Parameters<PlannerAdapter['plan']>[0]): string {
+  return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`
 }
 
 function executionPrompt(input: Parameters<ExecutionAdapter['execute']>[0]): string {
