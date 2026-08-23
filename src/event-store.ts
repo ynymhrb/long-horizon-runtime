@@ -7,7 +7,7 @@ import type { GoalState, TaskNode, TaskState } from './domain.js'
 /** Durable event accepted by the runtime event log. Payloads must be JSON serializable. */
 export interface RuntimeEvent { readonly type: string; readonly goalId: string; readonly taskId?: string; readonly payload: Record<string, unknown>; readonly seq?: number; readonly createdAt?: string }
 export interface TaskSessionLink { readonly sessionId: string; readonly kind: 'origin' | 'attached' | 'execution_child' }
-export interface CurrentTaskBinding { readonly sessionId: string; readonly taskId: string; readonly controlRevision: number }
+export interface CurrentTaskBinding { readonly sessionId: string; readonly taskId: string; readonly controlRevision: number; readonly updatedOrder: number }
 export interface GoalProjection { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly planningMode: 'auto' | 'require_confirmation'; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly pauseReason?: string; readonly archivedAt?: string }
 export interface GoalVersion { readonly version: number; readonly objective: string; readonly reason: string; readonly source: string; readonly createdAt: string }
 export interface AttemptProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly revision: number; readonly state: string; readonly dshSessionId?: string; readonly context: Record<string, unknown>; readonly summary?: string }
@@ -82,8 +82,8 @@ export class RuntimeEventStore {
   }
   /** One explicit display binding per conversation; historic task links remain separate. */
   getCurrentTaskForSession(sessionId: string): CurrentTaskBinding | undefined {
-    const row = this.db.prepare('SELECT session_id, goal_id, control_revision FROM current_task_bindings WHERE session_id = ?').get(sessionId) as Record<string, unknown> | undefined
-    return row === undefined ? undefined : { sessionId: String(row.session_id), taskId: String(row.goal_id), controlRevision: Number(row.control_revision) }
+    const row = this.db.prepare('SELECT session_id, goal_id, control_revision, updated_order FROM current_task_bindings WHERE session_id = ?').get(sessionId) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : { sessionId: String(row.session_id), taskId: String(row.goal_id), controlRevision: Number(row.control_revision), updatedOrder: Number(row.updated_order) }
   }
   listContextManifests(goalId: string): ContextManifestProjection[] {
     return (this.db.prepare('SELECT attempt_id, task_id, revision, selection_reason, context_json FROM context_manifests WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<Record<string, unknown>>).map(row => ({ attemptId: String(row.attempt_id), taskId: String(row.task_id), revision: Number(row.revision), selectionReason: String(row.selection_reason), context: JSON.parse(String(row.context_json)) as Record<string, unknown> }))

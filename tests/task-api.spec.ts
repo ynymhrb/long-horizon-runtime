@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { TaskControlApi } from '../src/task-api.js'
-import { LongTaskRuntime } from '../src/runtime.js'
+import { LongTaskRuntime, type GoalView } from '../src/runtime.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
 
 const planner: PlannerAdapter = {
@@ -112,5 +112,58 @@ describe('TaskControlApi', () => {
     expect(accepted.kind).toBe('applied')
     if (accepted.kind !== 'applied') throw new Error('expected accepted replan')
     expect(accepted.task.state).toBe('RUNNING')
+  })
+
+  test('binds the session that confirms or resumes a historical task so its jump target resolves', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const created = await api.create({ objective: 'continue me', planningMode: 'require_confirmation' }, { sessionId: 'origin' })
+
+    // A second conversation confirms the waiting plan and becomes its current binding.
+    const confirmed = await api.update({ taskId: created.id, expectedRevision: created.controlRevision, action: 'confirm' }, { sessionId: 'next' })
+    expect(confirmed.kind).toBe('applied')
+    if (confirmed.kind !== 'applied') throw new Error('expected applied confirm')
+    expect(confirmed.task.state).toBe('RUNNING')
+    expect(runtime.store.getCurrentTaskForSession('next')?.taskId).toBe(created.id)
+    expect(runtime.getStatus(created.id)?.sessionLinks).toContainEqual({ sessionId: 'next', kind: 'attached' })
+
+    // Pausing is a management action: it never rebinds the invoking session.
+    const paused = await api.update({ taskId: created.id, expectedRevision: confirmed.task.controlRevision, action: 'pause' }, { sessionId: 'bystander' })
+    expect(paused.kind).toBe('applied')
+    expect(runtime.store.getCurrentTaskForSession('bystander')).toBeUndefined()
+
+    // Resuming from yet another session links and binds it while preserving origin provenance.
+    const resumed = await api.update({ taskId: created.id, expectedRevision: (paused as { task: GoalView }).task.controlRevision, action: 'resume' }, { sessionId: 'next' })
+    expect(resumed.kind).toBe('applied')
+    if (resumed.kind !== 'applied') throw new Error('expected applied resume')
+    expect(runtime.store.getCurrentTaskForSession('next')?.taskId).toBe(created.id)
+    const links = runtime.getStatus(created.id)?.sessionLinks.map(link => link.sessionId) ?? []
+    expect(links).toContain('origin')
+    expect(links).toContain('next')
+  })
+
+  test('accepting a replan from another session binds that session as current', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const created = await api.create({ objective: 'replan me', planningMode: 'require_confirmation' }, { sessionId: 'origin' })
+    const edited = await api.editGoal({ taskId: created.id, expectedRevision: created.controlRevision, objective: 'revised goal', reason: 'scope change' }, { sessionId: 'editor' })
+    expect(edited.kind).toBe('applied')
+    // Editing alone does not hijack the session binding.
+    expect(runtime.store.getCurrentTaskForSession('editor')).toBeUndefined()
+    const accepted = await api.acceptReplan({ taskId: created.id, expectedRevision: (edited as { task: GoalView }).task.controlRevision }, { sessionId: 'editor' })
+    expect(accepted.kind).toBe('applied')
+    if (accepted.kind !== 'applied') throw new Error('expected applied replan acceptance')
+    expect(runtime.store.getCurrentTaskForSession('editor')?.taskId).toBe(created.id)
+  })
+
+  test('management actions never bind the invoking session', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const created = await api.create({ objective: 'manage me', planningMode: 'require_confirmation' }, { sessionId: 'origin' })
+    const cancelled = await api.update({ taskId: created.id, expectedRevision: created.controlRevision, action: 'cancel' }, { sessionId: 'bystander' })
+    expect(cancelled.kind).toBe('applied')
+    if (cancelled.kind !== 'applied') throw new Error('expected applied cancel')
+    expect(runtime.store.getCurrentTaskForSession('bystander')).toBeUndefined()
+    expect(runtime.getStatus(created.id)?.sessionLinks).toEqual([{ sessionId: 'origin', kind: 'origin' }])
   })
 })

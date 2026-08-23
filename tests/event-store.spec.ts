@@ -71,11 +71,11 @@ describe('RuntimeEventStore', () => {
       { type: 'TaskSessionCurrentSet', goalId: 'lt_b', payload: { sessionId: 'session-1', controlRevision: 2 } },
     ])
 
-    expect(runtime.getCurrentTaskForSession('session-1')).toEqual({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
+    expect(runtime.getCurrentTaskForSession('session-1')).toMatchObject({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
     expect(runtime.listSessionLinks('lt_a')).toContainEqual({ sessionId: 'session-1', kind: 'attached' })
 
     runtime.rebuild()
-    expect(runtime.getCurrentTaskForSession('session-1')).toEqual({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
+    expect(runtime.getCurrentTaskForSession('session-1')).toMatchObject({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
   })
 
   test('projects append-only original-goal versions while retaining its task id', () => {

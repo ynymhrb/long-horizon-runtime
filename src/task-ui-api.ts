@@ -100,8 +100,12 @@ export class TaskUiApi {
     const task = this.runtime.getStatus(input.taskId)
     if (task === undefined) throw new Error(`unknown task ${input.taskId}`)
     const attachedSessionIds = task.sessionLinks.map(link => link.sessionId)
-    const currentSessionId = task.sessionLinks.find(link => this.runtime.store.getCurrentTaskForSession(link.sessionId)?.taskId === task.id)?.sessionId
-    return { attachedSessionIds, ...(currentSessionId === undefined ? {} : { currentSessionId }) }
+    // A task may be bound by several conversations; the most recently bound one is its jump target.
+    const current = task.sessionLinks
+      .map(link => ({ link, binding: this.runtime.store.getCurrentTaskForSession(link.sessionId) }))
+      .filter((entry): entry is { readonly link: import('./event-store.js').TaskSessionLink; readonly binding: import('./event-store.js').CurrentTaskBinding } => entry.binding !== undefined && entry.binding.taskId === task.id)
+      .sort((left, right) => right.binding.updatedOrder - left.binding.updatedOrder)[0]
+    return { attachedSessionIds, ...(current === undefined ? {} : { currentSessionId: current.link.sessionId }) }
   }
 
   private summary(task: GoalView): TaskSummary {

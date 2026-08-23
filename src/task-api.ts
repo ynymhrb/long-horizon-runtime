@@ -62,7 +62,8 @@ export class TaskControlApi {
       case 'cancel': task = this.runtime.cancelGoal(request.taskId); break
       case 'pause': task = this.pause(request.taskId); break
     }
-    return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
+    const bound = this.bindOnContinue(request.taskId, request.action, invocation)
+    return { kind: 'applied', task: this.advance(request.taskId, (bound ?? task).controlRevision) }
   }
 
   async editGoal(request: { readonly taskId: string; readonly expectedRevision: number; readonly objective: string; readonly reason: string }, invocation: TaskInvocation): Promise<TaskUpdateResult> {
@@ -77,7 +78,8 @@ export class TaskControlApi {
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
     const task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal)
-    return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
+    const bound = this.bindOnContinue(request.taskId, 'confirm', invocation)
+    return { kind: 'applied', task: this.advance(request.taskId, (bound ?? task).controlRevision) }
   }
 
   get(taskId: string, invocation?: Pick<TaskInvocation, 'workspaceScope'>): GoalView | undefined {
@@ -105,6 +107,27 @@ export class TaskControlApi {
     this.runtime.store.transaction(() => this.runtime.store.append([{ type: 'GoalPaused', goalId: taskId, payload: { reason: 'user_requested' } }]))
     return this.requireTask(taskId)
   }
+
+  /**
+   * Idempotently ensure a session is durably linked to the task and is its
+   * current binding. Continuing a task from a conversation must make that
+   * conversation the task's jump target (origin provenance is preserved).
+   */
+  continueInSession(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId'>> & Pick<TaskInvocation, 'workspaceScope'>): GoalView {
+    const current = this.requireTask(taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (!current.sessionLinks.some(link => link.sessionId === invocation.sessionId)) this.runtime.attachSession(taskId, invocation.sessionId)
+    if (this.runtime.store.getCurrentTaskForSession(invocation.sessionId)?.taskId !== taskId) return this.setCurrentSessionTask(taskId, invocation).task
+    return this.requireTask(taskId)
+  }
+
+  /** Only actions that continue a task in a conversation (confirm/resume) bind that session; pause/cancel stay explicit-attach-only. */
+  private bindOnContinue(taskId: string, action: TaskUpdateAction, invocation: TaskInvocation): GoalView | undefined {
+    const sessionId = invocation.sessionId
+    if (sessionId === undefined || (action !== 'confirm' && action !== 'resume')) return undefined
+    return this.continueInSession(taskId, { sessionId, ...(invocation.workspaceScope === undefined ? {} : { workspaceScope: invocation.workspaceScope }) })
+  }
+
   private advance(taskId: string, currentRevision: number): GoalView {
     this.runtime.store.transaction(() => this.runtime.store.append([{ type: 'TaskControlRevisionAdvanced', goalId: taskId, payload: { controlRevision: currentRevision + 1 } }]))
     return this.requireTask(taskId)

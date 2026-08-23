@@ -63,6 +63,24 @@ test('clearing a current session task leaves its durable session link intact', a
   expect(runtime.getStatus(created.id)?.sessionLinks).toContainEqual({ sessionId: 'session-1', kind: 'origin' })
 })
 
+test('continuing a historical task from a new session gives it a jumpable current session', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'done', artifacts: [], evidence: [] } } })
+  const control = new TaskControlApi(runtime)
+  const ui = new TaskUiApi(runtime, control)
+  const created = await control.create({ objective: 'jump target', planningMode: 'require_confirmation' }, { sessionId: 'origin' })
+  expect(ui.getTaskNavigation({ taskId: created.id }).currentSessionId).toBe('origin')
+
+  // A second conversation confirms the waiting task: it becomes the current session and the jump target.
+  const confirmed = await ui.updateTask({ taskId: created.id, expectedRevision: created.controlRevision, action: 'confirm', sessionId: 'next' })
+  expect(confirmed.kind).toBe('applied')
+  if (confirmed.kind !== 'applied') throw new Error('expected applied confirm')
+  expect(runtime.store.getCurrentTaskForSession('next')?.taskId).toBe(created.id)
+  const navigation = ui.getTaskNavigation({ taskId: created.id })
+  expect(navigation.currentSessionId).toBe('next')
+  expect(navigation.attachedSessionIds).toEqual(expect.arrayContaining(['origin', 'next']))
+})
+
 test('task overview lists actionable tasks before terminal and failed history', async () => {
   let call = 0
   const planner: PlannerAdapter = { async plan(input) { call++; if (call === 2) throw new Error('planner failure'); return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
