@@ -4,7 +4,7 @@ import type { GoalView, LongTaskRuntime } from './runtime.js'
 import type { TaskControlApi, TaskUpdateResult } from './task-api.js'
 
 export interface CursorPage<T> { readonly items: readonly T[]; readonly nextCursor?: number }
-export interface TaskListFilter { readonly state?: GoalView['state']; readonly query?: string; readonly archived?: boolean }
+export interface TaskListFilter { readonly state?: GoalView['state']; readonly query?: string; readonly archived?: boolean; readonly sessionId?: string }
 export interface TaskProgress { readonly succeeded: number; readonly total: number }
 export interface TaskSummary {
   readonly id: string
@@ -31,7 +31,8 @@ export class TaskUiApi {
   listTasks(input: { readonly cursor?: number; readonly filter?: TaskListFilter } = {}): CursorPage<TaskSummary> {
     this.runtime.purgeExpiredArchives()
     const cursor = input.cursor ?? 0
-    const all = this.runtime.listGoals({ ...(input.filter?.archived === undefined ? {} : { archived: input.filter.archived }) }).filter(task => matches(task, input.filter)).map(task => this.summary(task)).sort(compareTaskSummary)
+    const activeForSession = input.filter?.sessionId === undefined ? undefined : this.runtime.store.getCurrentTaskForSession(input.filter.sessionId)?.taskId
+    const all = this.runtime.listGoals({ ...(input.filter?.archived === undefined ? {} : { archived: input.filter.archived }) }).filter(task => (activeForSession === undefined ? input.filter?.sessionId === undefined : task.id === activeForSession) && matches(task, input.filter)).map(task => this.summary(task)).sort(compareTaskSummary)
     const items = all.slice(cursor, cursor + 50)
     return { items, ...(cursor + items.length < all.length ? { nextCursor: cursor + items.length } : {}) }
   }

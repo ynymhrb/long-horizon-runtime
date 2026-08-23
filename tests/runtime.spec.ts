@@ -47,6 +47,15 @@ describe('LongTaskRuntime', () => {
     expect(runtime.getStatus(goal.id)?.state).toBe('RUNNING')
   })
 
+  test('exposes pause as a running task control', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } })
+    const goal = await runtime.createGoal({ objective: 'pause me', planningMode: 'require_confirmation' })
+    const running = await runtime.confirmGoal(goal.id)
+
+    expect(running.availableActions).toContain('pause')
+  })
+
   test('runs every superstep and terminalizes a successful goal', async () => {
     const calls: string[] = []
     const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'first'), strictTask('b', 'second', ['a'])] } } }
@@ -65,5 +74,45 @@ describe('LongTaskRuntime', () => {
     const goal = await runtime.createGoal({ objective: 'ship' })
     expect(goal.state).toBe('FAILED')
     expect(goal.recentEvents.at(-1)?.payload).toMatchObject({ phase: 'planning', reason: 'bad plan' })
+  })
+
+  test('forwards a stopped conversation signal to initial planning', async () => {
+    let receivedSignal: AbortSignal | undefined
+    const planner: PlannerAdapter = { async plan(input) {
+      receivedSignal = (input as { signal?: AbortSignal }).signal
+      if (receivedSignal?.aborted) throw new Error('conversation stopped')
+      return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] }
+    } }
+    const controller = new AbortController()
+    controller.abort('user stopped generation')
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } })
+
+    const goal = await runtime.createGoal({ objective: 'stop while planning', planningMode: 'require_confirmation' }, {}, controller.signal)
+
+    expect(receivedSignal).toBe(controller.signal)
+    expect(goal.state).toBe('PAUSED')
+    expect(goal.pauseReason).toBe('planning interrupted by conversation stop')
+  })
+
+  test('pauses an executing goal on conversation stop without automatic replanning', async () => {
+    let started!: () => void
+    const running = new Promise<void>(resolve => { started = resolve })
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute(input) {
+      started()
+      await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true }))
+      return { status: 'failed', summary: 'subagent request was aborted before child publication', artifacts: [], evidence: [] }
+    } }
+    const controller = new AbortController()
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const pending = runtime.createGoal({ objective: 'stop running task' }, {}, controller.signal)
+    await running
+    controller.abort('user stopped generation')
+    const goal = await pending
+
+    expect(goal.state).toBe('PAUSED')
+    expect(goal.revision).toBe(1)
+    expect(goal.tasks[0]?.state).toBe('PENDING')
+    expect(goal.decisions.some(decision => decision.type === 'automatic_replan')).toBe(false)
   })
 })

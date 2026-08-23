@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { layoutTaskGraph, stableCanvasSize, truncateGraphText, visibleTaskGraph } from '../client/task-graph.js'
-import { taskStatePresentation } from '../client/task-presentation.js'
+import { formatTaskProgress, taskStatePresentation } from '../client/task-presentation.js'
 
 describe('long task DAG layout', () => {
   test('places dependencies in increasing stable ranks', () => {
@@ -55,4 +55,9 @@ test('maps durable states to a closed visual vocabulary', () => {
   expect(taskStatePresentation('BLOCKED')).toMatchObject({ tone: 'error', label: '受阻' })
   expect(taskStatePresentation('INVALIDATED')).toMatchObject({ tone: 'muted', label: '已失效' })
   expect(taskStatePresentation('UNKNOWN')).toMatchObject({ tone: 'muted', label: '未知状态' })
+})
+
+test('renders progress with the current task objective instead of its internal id', () => {
+  expect(formatTaskProgress({ succeeded: 2, total: 7 }, { objective: '检索并去重资料' })).toBe('2/7 · 当前：检索并去重资料')
+  expect(formatTaskProgress({ succeeded: 2, total: 7 }, { objective: '系统研究影响 RAG 准确率的文档处理因素：数据清洗、去重、元数据，以及需要保留的执行说明。' })).toBe('2/7 · 当前：系统研究影响 RAG 准确率的文档处理因素：数据清洗、去重、元数据…')
 })

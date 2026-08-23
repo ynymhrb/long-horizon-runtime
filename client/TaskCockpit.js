@@ -50,7 +50,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       task.pendingProposal ? e('button', { type: 'button', disabled: pending, onClick: () => invoke('rejectReplan', { taskId: task.id, expectedRevision: task.controlRevision }) }, '拒绝改计划') : null,
       task.pendingProposal ? e('button', { type: 'button', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
       e('button', { type: 'button', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标'),
-      e('button', { type: 'button', disabled: pending, onClick: jump }, '跳转到会话'),
+      e('button', { type: 'button', disabled: pending, onClick: jump }, '当前会话'),
       e('button', { type: 'button', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...(task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
         ? [e('button', { key: 'resume-retry', type: 'button', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]

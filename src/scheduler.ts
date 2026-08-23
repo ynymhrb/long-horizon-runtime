@@ -158,6 +158,15 @@ export class Scheduler {
     this.aborters.delete(attemptId)
     executionSignal?.removeEventListener('abort', relayAbort)
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
+    // A conversation stop is an operator interruption, not a failed unit of
+    // work.  In particular, it must never feed the automatic-replan loop.
+    if (controller.signal.aborted) {
+      this.store!.transaction(() => this.store!.append([
+        { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } },
+        { type: 'GoalPaused', goalId, payload: { reason: 'conversation stopped; resume with a live parent' } },
+      ]))
+      return
+    }
     if (this.store!.getGoal(goalId)?.revision !== attemptRevision) {
       this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } }]))
       return

@@ -74,6 +74,18 @@ test('task overview lists actionable tasks before terminal and failed history', 
   expect(page.items.map(item => item.state)).toEqual(['AWAITING_CONFIRMATION', 'FAILED'])
 })
 
+test('task overview defaults to the one task current for its conversation', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: '正在检索资料', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'done', artifacts: [], evidence: [] } } })
+  const control = new TaskControlApi(runtime)
+  const current = await control.create({ objective: 'current session task', planningMode: 'require_confirmation' }, { sessionId: 'session-current' })
+  await control.create({ objective: 'other session task', planningMode: 'require_confirmation' }, { sessionId: 'session-other' })
+  const page = new TaskUiApi(runtime, control).listTasks({ filter: { sessionId: 'session-current' } } as never)
+
+  expect(page.items).toHaveLength(1)
+  expect(page.items[0]).toMatchObject({ id: current.id, currentOrLastNode: { objective: '正在检索资料' } })
+})
+
 test('declares the Task UI query methods on the DSH remote service', () => {
   const methods = remoteMethods(new LongTaskRemote(new Context(), {} as LongTaskRuntime))
   expect(methods.map(method => method.method)).toEqual(expect.arrayContaining([

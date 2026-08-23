@@ -32,9 +32,12 @@ export class LongTaskRuntime {
     const mode = request.planningMode ?? 'auto'
     this.store.transaction(() => this.store.append([{ type: 'GoalCreated', goalId: id, payload: { objective: request.objective, constraints: request.constraints ?? [], planningMode: mode, workspaceScope: request.workspaceScope } }]))
     let plan
-    try { plan = await planWithValidation(this.planner, { goalId: id, objective: request.objective, constraints: request.constraints ?? [] }) }
+    try { plan = await planWithValidation(this.planner, { goalId: id, objective: request.objective, constraints: request.constraints ?? [], ...(executionSignal === undefined ? {} : { signal: executionSignal }) }) }
     catch (error) {
-      this.store.transaction(() => this.store.append([{ type: 'GoalFailed', goalId: id, payload: { phase: 'planning', reason: error instanceof Error ? error.message : String(error) } }]))
+      const reason = error instanceof Error ? error.message : String(error)
+      this.store.transaction(() => this.store.append([executionSignal?.aborted === true
+        ? { type: 'GoalPaused', goalId: id, payload: { reason: 'planning interrupted by conversation stop' } }
+        : { type: 'GoalFailed', goalId: id, payload: { phase: 'planning', reason } }]))
       return this.view(id)
     }
     this.store.transaction(() => this.store.append([{ type: mode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId: id, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
@@ -91,7 +94,7 @@ export class LongTaskRuntime {
       { type: 'DecisionRecorded', goalId, payload: { type: 'original_goal_edit', baseRevision, reason: input.reason } },
     ]))
     try {
-      const planned = await planWithValidation(this.planner, { goalId, objective: input.objective, constraints: goal.constraints })
+      const planned = await planWithValidation(this.planner, { goalId, objective: input.objective, constraints: goal.constraints, ...(executionSignal === undefined ? {} : { signal: executionSignal }) })
       const revision = baseRevision + 1
       this.store.transaction(() => this.store.append([{ type: 'PlanProposed', goalId, payload: { revision, baseRevision, trigger: { kind: 'original_goal_edit', reason: input.reason }, tasks: [...planned.tasks.values()] } }]))
     } catch (error) {
@@ -135,6 +138,17 @@ export class LongTaskRuntime {
   async resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal): Promise<GoalView> {
     const goal = this.requireGoal(goalId)
     if (goal.state !== 'PAUSED') throw new Error(`goal ${goalId} is not paused`)
+    if (this.store.getPlan(goalId) === undefined) {
+      this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: { reason: 'resume interrupted planning' } }]))
+      try {
+        const plan = await planWithValidation(this.planner, { goalId, objective: goal.objective, constraints: goal.constraints, ...(executionSignal === undefined ? {} : { signal: executionSignal }) })
+        this.store.transaction(() => this.store.append([{ type: goal.planningMode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
+        if (goal.planningMode === 'auto' && executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
+      } catch (error) {
+        this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]))
+      }
+      return this.view(goalId)
+    }
     const blockedExternalTask = this.store.listTasks(goalId).find(task => task.state === 'BLOCKED' && task.sideEffectClass === 'external_effect')
     if (blockedExternalTask !== undefined) {
       if (recoveryResolution === undefined) throw new Error(`goal ${goalId} requires an explicit recovery resolution for external task ${blockedExternalTask.id}`)
@@ -226,7 +240,7 @@ export class LongTaskRuntime {
   private view(goalId: string): GoalView {
     const goal = this.requireGoal(goalId)
     const tasks = this.store.listTasks(goalId)
-    const actions = goal.state === 'AWAITING_CONFIRMATION' ? ['confirm', 'cancel'] : goal.state === 'PAUSED' ? ['resume', 'cancel', 'invalidate'] : goal.state === 'RUNNING' ? ['cancel', 'invalidate'] : []
+    const actions = goal.state === 'AWAITING_CONFIRMATION' ? ['confirm', 'cancel'] : goal.state === 'PAUSED' ? ['resume', 'cancel', 'invalidate'] : goal.state === 'RUNNING' ? ['pause', 'cancel', 'invalidate'] : []
     const attempts = tasks.flatMap(task => this.store.listAttempts(task.id, goalId))
     const plan = this.store.getPlan(goalId)
     return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId)! }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) }

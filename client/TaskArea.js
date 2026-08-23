@@ -1,6 +1,6 @@
 import React from 'react'
 import { TaskCockpit } from './TaskCockpit.js'
-import { taskStatePresentation } from './task-presentation.js'
+import { formatTaskProgress, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 
 const e = React.createElement
@@ -17,18 +17,19 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
   const [query, setQuery] = React.useState('')
   const [state, setState] = React.useState('')
   const [archived, setArchived] = React.useState(false)
+  const [showAll, setShowAll] = React.useState(false)
   const sessions = typeof useSessions === 'function' ? useSessions(value => value) : undefined
   const sessionId = sessions?.current
   React.useEffect(() => {
     if (!open) return
     let live = true
-    const load = () => Promise.resolve(remote.listTasks({ filter: { ...(query ? { query } : {}), ...(state ? { state } : {}), ...(archived ? { archived: true } : {}) } }))
+    const load = () => Promise.resolve(remote.listTasks({ filter: { ...(query ? { query } : {}), ...(state ? { state } : {}), ...(archived ? { archived: true } : {}), ...(!showAll && sessionId ? { sessionId } : {}) } }))
       .then(value => { const page = remoteValue(value); if (live) setItems(page?.items ?? []) })
       .catch(reason => { if (live) setError(String(reason)) })
     void load()
     const timer = setInterval(load, 4000)
     return () => { live = false; clearInterval(timer) }
-  }, [open, remote, query, state, archived])
+  }, [open, remote, query, state, archived, showAll, sessionId])
   React.useEffect(() => {
     if (!selectedId) return
     setTask(undefined); setGraph(undefined); setEvents([])
@@ -43,21 +44,23 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
   }, [open, remote, sessionId])
   if (!open) return null
   const overview = e('section', null,
-    e('h2', null, '任务区'), e('p', null, '跨会话长任务'),
+    e('h2', null, '任务区'), e('p', null, showAll ? '跨会话长任务' : '当前会话任务'),
     e('div', { className: 'ltr-task-filter' },
       e('input', { value: query, placeholder: '搜索任务 ID 或目标', onChange: event => setQuery(event.target.value) }),
       e('select', { value: state, onChange: event => setState(event.target.value) },
         e('option', { value: '' }, '全部状态'),
         ...FILTER_STATES.map(value => e('option', { key: value, value }, taskStatePresentation(value).label))),
-      e('label', null, e('input', { type: 'checkbox', checked: archived, onChange: event => setArchived(event.target.checked) }), ' 已归档')),
+      e('label', { className: 'ltr-check' }, e('input', { type: 'checkbox', checked: showAll, onChange: event => setShowAll(event.target.checked) }), '展示全部任务'),
+      e('label', { className: 'ltr-check' }, e('input', { type: 'checkbox', checked: archived, onChange: event => setArchived(event.target.checked) }), '已归档')),
     e('h3', { className: 'ltr-task-list-title' }, '任务列表'),
     e('div', { className: 'ltr-task-list-header', 'aria-hidden': true }, e('span', null, '状态'), e('span', null, '任务目标'), e('span', null, '进度 / 当前节点')),
+    !items.length ? e('p', { className: 'ltr-empty-task-list' }, showAll ? '没有符合筛选条件的长任务。' : '当前会话尚未关联长任务；勾选“展示全部任务”可查看并附加历史任务。') : null,
     e('ol', { className: 'ltr-task-list' }, ...items.map(item => {
       const presentation = taskStatePresentation(item.state)
       return e('li', { key: item.id }, e('button', { type: 'button', onClick: () => setSelectedId(item.id) },
         e('span', { className: `ltr-state tone-${presentation.tone}` }, presentation.label),
         e('strong', null, item.objective),
-        e('small', null, `${item.id} · ${item.progress.succeeded}/${item.progress.total}${item.currentOrLastNode ? ` · ${item.currentOrLastNode.id}` : ''}`)))
+        e('small', null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)}`)))
     })))
   return e('div', { className: 'ltr-modal-layer' },
     e('div', { className: 'ltr-mask', onClick: onClose }),

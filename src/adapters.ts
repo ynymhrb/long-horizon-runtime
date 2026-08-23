@@ -14,7 +14,7 @@ export interface ExecutionResult {
 
 /** Boundary for deriving the first graph from a user goal. */
 export interface PlannerAdapter {
-  plan(input: { readonly goalId: string; readonly objective: string; readonly constraints: readonly string[]; readonly baseRevision?: number; readonly trigger?: Record<string, unknown>; readonly priorTasks?: readonly import('./domain.js').TaskNode[] }): Promise<PlanDraft>
+  plan(input: { readonly goalId: string; readonly objective: string; readonly constraints: readonly string[]; readonly signal?: AbortSignal; readonly baseRevision?: number; readonly trigger?: Record<string, unknown>; readonly priorTasks?: readonly import('./domain.js').TaskNode[] }): Promise<PlanDraft>
 }
 
 /** Boundary for one isolated DSH child attempt. */

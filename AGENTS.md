@@ -51,6 +51,9 @@ therefore always use one shared durable database.
   expands scope, or cannot establish a bounded affected subgraph must pause
   the task awaiting confirmation. No replan may overwrite the current plan;
   every proposal is a revision-fenced, durable event.
+- A DSH conversation-stop signal is an operator interruption, never failure
+  evidence. It must abort planning/child work, record the active attempt as
+  interrupted, and pause the goal without retrying or automatic replanning.
 
 ### Task Area controls and accessibility
 

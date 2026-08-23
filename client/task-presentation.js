@@ -21,3 +21,9 @@ export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
   return { ...state, progress: `${task.progress.succeeded}/${task.progress.total}`, detail: task.reason ?? task.currentOrLastNode?.objective ?? '' }
 }
+
+export function formatTaskProgress(progress, node) {
+  const objective = node?.objective
+  const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective
+  return `${progress.succeeded}/${progress.total}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
+}

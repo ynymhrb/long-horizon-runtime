@@ -58,7 +58,7 @@ export function createDshPlannerAdapter(subagents: Pick<SubagentRuntime, 'start'
   requireProviderName(options.providerName)
   return {
     async plan(input): Promise<PlanDraft> {
-      const result = await runStructured(subagents, options, 'Long-task planner', plannerPrompt(input), PLAN_SCHEMA)
+      const result = await runStructured(subagents, options, 'Long-task planner', plannerPrompt(input), PLAN_SCHEMA, input.signal)
       if (result.stopReason !== 'completed') throw new Error(`DSH planner stopped: ${result.stopReason}`)
       const value = objectValue(result.value, 'planner')
       return { goalId: input.goalId, revision: integer(value.revision, 'planner revision'), tasks: array(value.tasks, 'planner tasks') as PlanDraft['tasks'] }
