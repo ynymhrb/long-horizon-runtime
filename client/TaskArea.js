@@ -47,6 +47,8 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions }) 
       e('select', { value: state, onChange: event => setState(event.target.value) },
         e('option', { value: '' }, '全部状态'),
         ...FILTER_STATES.map(value => e('option', { key: value, value }, taskStatePresentation(value).label)))),
+    e('h3', { className: 'ltr-task-list-title' }, '任务列表'),
+    e('div', { className: 'ltr-task-list-header', 'aria-hidden': true }, e('span', null, '状态'), e('span', null, '任务目标'), e('span', null, '进度 / 当前节点')),
     e('ol', { className: 'ltr-task-list' }, ...items.map(item => {
       const presentation = taskStatePresentation(item.state)
       return e('li', { key: item.id }, e('button', { type: 'button', onClick: () => setSelectedId(item.id) },

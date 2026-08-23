@@ -3,6 +3,17 @@ export const NODE_HEIGHT = 72
 export const RANK_GAP = 96
 export const LANE_GAP = 28
 
+/** Text in SVG does not naturally ellipsize, so clip labels before rendering. */
+export function truncateGraphText(value, maxCharacters) {
+  return value.length <= maxCharacters ? value : `${value.slice(0, Math.max(0, maxCharacters - 1))}…`
+}
+
+/** Prevent a folded two-node graph from being auto-enlarged to fill the SVG. */
+export function stableCanvasSize({ width, height }) {
+  void width; void height
+  return { width: 1100, height: 640 }
+}
+
 /**
  * Projects a collapsible DAG without pretending that shared downstream work
  * belongs to only one parent. A collapsed node hides descendants that have no

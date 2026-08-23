@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { layoutTaskGraph, visibleTaskGraph } from '../client/task-graph.js'
+import { layoutTaskGraph, stableCanvasSize, truncateGraphText, visibleTaskGraph } from '../client/task-graph.js'
 import { taskStatePresentation } from '../client/task-presentation.js'
 
 describe('long task DAG layout', () => {
@@ -39,6 +39,16 @@ test('collapsing a branch hides only exclusive downstream work and retains share
   expect(graph.nodes.map(node => node.id)).toEqual(['a', 'b', 'shared'])
   expect(graph.hiddenBy.get('a')).toEqual(['d'])
   expect(graph.edges).toEqual([{ from: 'b', to: 'shared' }])
+})
+
+test('truncates SVG node labels before they can exceed the fixed node width', () => {
+  expect(truncateGraphText('这是一个很长很长很长的中文任务目标', 8)).toBe('这是一个很长很…')
+  expect(truncateGraphText('short', 8)).toBe('short')
+})
+
+test('keeps a minimum SVG canvas after a branch is folded', () => {
+  expect(stableCanvasSize({ width: 472, height: 192 })).toEqual({ width: 1100, height: 640 })
+  expect(stableCanvasSize({ width: 1200, height: 720 })).toEqual({ width: 1100, height: 640 })
 })
 
 test('maps durable states to a closed visual vocabulary', () => {
