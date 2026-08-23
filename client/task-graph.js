@@ -4,6 +4,55 @@ export const RANK_GAP = 96
 export const LANE_GAP = 28
 
 /**
+ * Projects a collapsible DAG without pretending that shared downstream work
+ * belongs to only one parent. A collapsed node hides descendants that have no
+ * other visible prerequisite; join nodes remain visible with their surviving
+ * edges, so the rendered graph stays dependency-faithful.
+ */
+export function visibleTaskGraph(inputNodes, collapsedIds = new Set()) {
+  const byId = new Map(inputNodes.map(node => [node.id, node]))
+  const outgoing = new Map(inputNodes.map(node => [node.id, []]))
+  for (const node of inputNodes) for (const dependency of node.dependsOn ?? []) {
+    if (outgoing.has(dependency)) outgoing.get(dependency).push(node.id)
+  }
+  const hidden = new Set()
+  const hiddenBy = new Map()
+  for (const rootId of [...collapsedIds].sort()) {
+    if (!byId.has(rootId)) continue
+    const candidates = descendants(rootId, outgoing)
+    candidates.delete(rootId)
+    const retained = new Set()
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const id of [...candidates].sort()) {
+        if (retained.has(id)) continue
+        const node = byId.get(id)
+        const hasOtherVisibleDependency = (node?.dependsOn ?? []).some(dependency => dependency !== rootId && (!candidates.has(dependency) || retained.has(dependency)))
+        if (hasOtherVisibleDependency) { retained.add(id); changed = true }
+      }
+    }
+    const owned = [...candidates].filter(id => !retained.has(id)).sort()
+    hiddenBy.set(rootId, owned)
+    for (const id of owned) hidden.add(id)
+  }
+  const nodes = inputNodes.filter(node => !hidden.has(node.id))
+  return { nodes, edges: edgesFor(nodes), hiddenBy }
+}
+
+function descendants(rootId, outgoing) {
+  const result = new Set([rootId])
+  const pending = [rootId]
+  while (pending.length) for (const target of outgoing.get(pending.pop()) ?? []) if (!result.has(target)) { result.add(target); pending.push(target) }
+  return result
+}
+
+function edgesFor(nodes) {
+  const ids = new Set(nodes.map(node => node.id))
+  return nodes.flatMap(node => (node.dependsOn ?? []).filter(dependency => ids.has(dependency)).map(from => ({ from, to: node.id }))).sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to))
+}
+
+/**
  * Deterministic left-to-right ranked layout for a read-only task DAG.
  * Missing dependency IDs are reported rather than rendered as invented nodes.
  */

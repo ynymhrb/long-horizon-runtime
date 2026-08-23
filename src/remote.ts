@@ -26,6 +26,7 @@ export class LongTaskRemote extends TypertRemoteService {
   updateTask(input: { taskId: string; expectedRevision: number; action: 'confirm' | 'resume' | 'pause' | 'cancel'; sessionId?: string; workspaceScope?: string; recoveryResolution?: 'retry' | 'confirmed_succeeded' }): Promise<unknown> { return this.ui.updateTask(input) }
   attachCurrentSession(input: { taskId: string; sessionId: string; workspaceScope?: string }): Promise<unknown> { return this.ui.attachCurrentSession(input) }
   setCurrentSession(input: { taskId: string; sessionId: string; workspaceScope?: string }): unknown { return this.ui.setCurrentSession(input) }
+  clearCurrentSession(input: { sessionId: string }): unknown { return this.ui.clearCurrentSession(input) }
   rejectReplan(input: { taskId: string; expectedRevision: number }): unknown { return this.ui.rejectReplan(input) }
 }
 
@@ -93,6 +94,11 @@ Remote('setCurrentSession')(LongTaskRemote.prototype.setCurrentSession, {
   kind: 'method', name: 'setCurrentSession', static: false, private: false,
   addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
   access: { has: () => true, get: (object: LongTaskRemote) => object.setCurrentSession }, metadata: undefined,
+} as never)
+Remote('clearCurrentSession')(LongTaskRemote.prototype.clearCurrentSession, {
+  kind: 'method', name: 'clearCurrentSession', static: false, private: false,
+  addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
+  access: { has: () => true, get: (object: LongTaskRemote) => object.clearCurrentSession }, metadata: undefined,
 } as never)
 Remote('rejectReplan')(LongTaskRemote.prototype.rejectReplan, {
   kind: 'method', name: 'rejectReplan', static: false, private: false,

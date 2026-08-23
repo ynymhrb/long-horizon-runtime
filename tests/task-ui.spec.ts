@@ -52,9 +52,31 @@ test('attaches a cross-session task only on explicit request and can reject a re
   expect(rejected).toMatchObject({ kind: 'applied', task: { state: 'RUNNING' } })
 })
 
+test('clearing a current session task leaves its durable session link intact', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'done', artifacts: [], evidence: [] } } })
+  const control = new TaskControlApi(runtime)
+  const created = await control.create({ objective: 'clear strip', planningMode: 'require_confirmation' }, { sessionId: 'session-1' })
+  const ui = new TaskUiApi(runtime, control)
+  ui.clearCurrentSession({ sessionId: 'session-1' })
+  expect(ui.getCurrentTaskForSession({ sessionId: 'session-1' })).toBeNull()
+  expect(runtime.getStatus(created.id)?.sessionLinks).toContainEqual({ sessionId: 'session-1', kind: 'origin' })
+})
+
+test('task overview lists actionable tasks before terminal and failed history', async () => {
+  let call = 0
+  const planner: PlannerAdapter = { async plan(input) { call++; if (call === 2) throw new Error('planner failure'); return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'done', artifacts: [], evidence: [] } } })
+  const control = new TaskControlApi(runtime)
+  await control.create({ objective: 'awaiting confirmation', planningMode: 'require_confirmation' }, {})
+  await control.create({ objective: 'failed historical task', planningMode: 'require_confirmation' }, {})
+  const page = new TaskUiApi(runtime, control).listTasks({})
+  expect(page.items.map(item => item.state)).toEqual(['AWAITING_CONFIRMATION', 'FAILED'])
+})
+
 test('declares the Task UI query methods on the DSH remote service', () => {
   const methods = remoteMethods(new LongTaskRemote(new Context(), {} as LongTaskRuntime))
   expect(methods.map(method => method.method)).toEqual(expect.arrayContaining([
-    'listTasks', 'getTask', 'getTaskGraph', 'listTaskEvents', 'getCurrentTaskForSession', 'updateTask', 'attachCurrentSession', 'setCurrentSession', 'rejectReplan',
+    'listTasks', 'getTask', 'getTaskGraph', 'listTaskEvents', 'getCurrentTaskForSession', 'updateTask', 'attachCurrentSession', 'setCurrentSession', 'clearCurrentSession', 'rejectReplan',
   ]))
 })

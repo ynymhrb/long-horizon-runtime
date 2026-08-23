@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { layoutTaskGraph } from '../client/task-graph.js'
+import { layoutTaskGraph, visibleTaskGraph } from '../client/task-graph.js'
 import { taskStatePresentation } from '../client/task-presentation.js'
 
 describe('long task DAG layout', () => {
@@ -26,6 +26,19 @@ describe('long task DAG layout', () => {
     expect(graph.nodes.map(node => node.id)).toEqual(['alpha', 'dangling', 'zeta'])
     expect(graph.danglingDependencyIds).toEqual(['missing'])
   })
+})
+
+test('collapsing a branch hides only exclusive downstream work and retains shared joins', () => {
+  const graph = visibleTaskGraph([
+    { id: 'a', objective: 'a', dependsOn: [], state: 'PENDING' },
+    { id: 'b', objective: 'b', dependsOn: [], state: 'PENDING' },
+    { id: 'd', objective: 'd', dependsOn: ['a'], state: 'PENDING' },
+    { id: 'shared', objective: 'shared', dependsOn: ['b', 'd'], state: 'PENDING' },
+  ], new Set(['a']))
+
+  expect(graph.nodes.map(node => node.id)).toEqual(['a', 'b', 'shared'])
+  expect(graph.hiddenBy.get('a')).toEqual(['d'])
+  expect(graph.edges).toEqual([{ from: 'b', to: 'shared' }])
 })
 
 test('maps durable states to a closed visual vocabulary', () => {

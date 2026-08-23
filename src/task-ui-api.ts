@@ -29,7 +29,7 @@ export class TaskUiApi {
 
   listTasks(input: { readonly cursor?: number; readonly filter?: TaskListFilter } = {}): CursorPage<TaskSummary> {
     const cursor = input.cursor ?? 0
-    const all = this.runtime.listGoals().filter(task => matches(task, input.filter)).map(task => this.summary(task))
+    const all = this.runtime.listGoals().filter(task => matches(task, input.filter)).map(task => this.summary(task)).sort(compareTaskSummary)
     const items = all.slice(cursor, cursor + 50)
     return { items, ...(cursor + items.length < all.length ? { nextCursor: cursor + items.length } : {}) }
   }
@@ -71,6 +71,12 @@ export class TaskUiApi {
     return this.control.setCurrentSessionTask(input.taskId, { sessionId: input.sessionId, ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }) })
   }
 
+  /** Hide the strip for this conversation without erasing its task provenance. */
+  clearCurrentSession(input: { readonly sessionId: string }): null {
+    this.control.clearCurrentSessionTask(input.sessionId)
+    return null
+  }
+
   rejectReplan(input: { readonly taskId: string; readonly expectedRevision: number }): TaskUpdateResult {
     return this.control.rejectReplanAtRevision(input.taskId, input.expectedRevision)
   }
@@ -101,4 +107,10 @@ function matches(task: GoalView, filter: TaskListFilter | undefined): boolean {
   if (filter?.state !== undefined && task.state !== filter.state) return false
   const query = filter?.query?.trim().toLowerCase()
   return query === undefined || query === '' || task.id.toLowerCase().includes(query) || task.objective.toLowerCase().includes(query)
+}
+
+/** Operator attention first; activity breaks ties deterministically. */
+const taskStateOrder: Record<GoalView['state'], number> = { RUNNING: 0, AWAITING_CONFIRMATION: 1, PAUSED: 2, DRAFT: 3, FAILED: 4, CANCELLED: 5, SUCCEEDED: 6 }
+function compareTaskSummary(left: TaskSummary, right: TaskSummary): number {
+  return taskStateOrder[left.state] - taskStateOrder[right.state] || right.latestEventCursor - left.latestEventCursor || left.id.localeCompare(right.id)
 }

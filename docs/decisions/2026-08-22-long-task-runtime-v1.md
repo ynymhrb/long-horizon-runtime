@@ -59,3 +59,9 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **Host boundary:** browser code uses only the Typert `longTasks` remote. Every remote method takes a single named input object with no default parameter, because the DSH gateway rejects a source method that uses parameter defaults, destructuring, or rest parameters.
 * **Cross-session intent:** merely viewing a task never changes its links. “附加到当前会话” creates the durable link and current binding together; a linked but non-current task exposes “设为当前任务”, while the actual current task shows a disabled “当前会话任务” state.
 * **V4b controls:** confirmation, pause/resume, cancellation, external-effect resolutions, and replan rejection all use the durable `controlRevision`. Plan edits remain conversation-led: the Cockpit explains that a change request produces a reviewable replan rather than exposing an unsafe in-browser graph editor.
+
+## V4 visual-navigation decisions
+
+* **DAG, not a tree:** `dependsOn` is kept as a true directed acyclic graph. The Cockpit may fold an exclusive downstream subgraph, but a join node with another visible prerequisite is never hidden or duplicated. Folding is therefore a view projection, not a plan rewrite.
+* **Operator-friendly density:** the profile-wide Task Area is a sorted vertical list rather than a card grid. Runnable/awaiting work appears before paused, draft, failed, cancelled, and completed history; newest durable activity breaks ties.
+* **Native visual language:** the current-task strip follows the DSH GoalBar's compact 36px composition and uses host theme tokens rather than fixed dark colors. Its icon actions open the task, pause/resume where valid, and hide only the session display binding; they never delete durable task provenance.

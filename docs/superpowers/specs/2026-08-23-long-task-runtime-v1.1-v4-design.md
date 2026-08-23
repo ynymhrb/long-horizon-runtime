@@ -361,6 +361,11 @@ manual layout, or a third-party workflow-editor dependency. This keeps the
 out-of-tree client compact and makes the visual projection independently
 testable from durable runtime data.
 
+The view may fold an exclusive downstream subgraph. A join node with another
+visible prerequisite remains visible rather than being duplicated into a tree;
+the renderer therefore preserves true DAG semantics while reducing clutter.
+It offers individual fold controls plus expand-all, fold-all, and fit-view.
+
 V4a is read-only. V4b adds confirmation, attach-current-session, pause,
 resume, cancellation, and replan-proposal controls through `TaskControlApi`.
 Every write presents the target revision; a conflict refreshes the displayed
