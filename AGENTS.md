@@ -82,7 +82,7 @@ therefore always use one shared durable database.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add durable goal-version editing, policy-gated automatic replanning,
 archive/purge lifecycle management, and usable Cockpit controls without
@@ -127,7 +127,7 @@ React 18, DSH client slots.
   `archiveGoal(goalId, now)`, `restoreGoal(goalId)`, and
   `purgeArchived(before): PurgedGoal[]`.
 
-- [ ] **Step 1: Write failing projection tests**
+- [x] **Step 1: Write failing projection tests**
 
 ```ts
 test('projects a new original-goal version without changing its task id', () => {
@@ -140,11 +140,11 @@ test('projects a new original-goal version without changing its task id', () => 
 test('hides archived goals from the default inventory and restores them before purge', () => { /* archive, list(false), list(true), restore */ })
 ```
 
-- [ ] **Step 2: Run the focused tests and verify they fail because the APIs and projections do not exist.**
+- [x] **Step 2: Run the focused tests and verify they fail because the APIs and projections do not exist.**
 
 Run: `pnpm vitest run tests/event-store.spec.ts tests/durable-core.spec.ts -t "goal-version|archived"`
 
-- [ ] **Step 3: Add migrations and event projections.**
+- [x] **Step 3: Add migrations and event projections.**
 
 Create `goal_versions(goal_id, version, objective, reason, source, created_at,
 created_order)` and add nullable `archived_at` to `goals` through idempotent
@@ -152,7 +152,7 @@ column migration. Project `GoalCreated` as version zero, and project
 `GoalObjectiveRevised`, `GoalArchived`, and `GoalRestored`. Extend event reads
 with `createdAt` from `runtime_events.created_at` for the UI timeline.
 
-- [ ] **Step 4: Implement runtime lifecycle methods.**
+- [x] **Step 4: Implement runtime lifecycle methods.**
 
 `archiveGoal` cancels only active goals before appending `GoalArchived`; terminal
 goals archive directly. `restoreGoal` removes the archive marker but never
@@ -160,7 +160,7 @@ restarts cancelled execution. `purgeArchived` selects only archives older than
 the supplied cutoff, removes file-backed artifacts through `ArtifactStore`,
 then deletes the goal's projections and events transactionally.
 
-- [ ] **Step 5: Run focused tests, then commit.**
+- [x] **Step 5: Run focused tests, then commit.**
 
 Run: `pnpm vitest run tests/event-store.spec.ts tests/durable-core.spec.ts -t "goal-version|archived"`
 
@@ -180,7 +180,7 @@ Commit: `git add src tests && git commit -m "feat: add goal versions and task ar
 - Produces `TaskControlApi.acceptReplan()` and model tool
   `long_task_accept_replan`.
 
-- [ ] **Step 1: Write failing runtime tests.**
+- [x] **Step 1: Write failing runtime tests.**
 
 ```ts
 test('edits the original goal by pausing and proposing a new revision', async () => {
@@ -201,11 +201,11 @@ test('holds an external-effect replan for confirmation', async () => {
 })
 ```
 
-- [ ] **Step 2: Run focused tests and verify they fail because the commands do not exist.**
+- [x] **Step 2: Run focused tests and verify they fail because the commands do not exist.**
 
 Run: `pnpm vitest run tests/runtime.spec.ts tests/task-api.spec.ts -t "original goal|automatic.*replan|external-effect.*replan"`
 
-- [ ] **Step 3: Implement one replan classification function.**
+- [x] **Step 3: Implement one replan classification function.**
 
 Add `classifyReplan(currentPlan, candidatePlan, trigger)` returning
 `'auto_apply' | 'await_confirmation'` and reasons. It must reject automatic
@@ -214,7 +214,7 @@ invalidated/superseded, verified output is deactivated, a changed/new node has
 `sideEffectClass: 'external_effect'`, or the candidate is not a bounded
 downstream replacement. The function must be the sole source of the policy.
 
-- [ ] **Step 4: Implement goal editing and tool/API controls.**
+- [x] **Step 4: Implement goal editing and tool/API controls.**
 
 Pause active scheduling with `scheduler.interrupt`, append
 `GoalObjectiveRevised` and `DecisionRecorded`, ask the planner for the next
@@ -223,7 +223,7 @@ revision, classify it, and append either `PlanRevisionApplied` or
 and reject methods to `TaskControlApi`; register `long_task_edit_goal` and
 `long_task_accept_replan` with exact named parameters.
 
-- [ ] **Step 5: Run focused tests and commit.**
+- [x] **Step 5: Run focused tests and commit.**
 
 Run: `pnpm vitest run tests/runtime.spec.ts tests/task-api.spec.ts tests/plugin.spec.ts -t "original goal|automatic.*replan|accept.*replan"`
 
@@ -241,7 +241,7 @@ Commit: `git add src tests && git commit -m "feat: add policy-gated goal replann
 - Scheduler calls a runtime-owned `onReplanTrigger` callback only after it has
   durably recorded failure evidence and terminalized the attempt.
 
-- [ ] **Step 1: Write failing scheduler tests.**
+- [x] **Step 1: Write failing scheduler tests.**
 
 ```ts
 test('emits a replan trigger after a terminal validation failure', async () => {
@@ -255,18 +255,18 @@ test('does not trigger replanning for a retriable attempt', async () => {
 })
 ```
 
-- [ ] **Step 2: Run focused tests and verify the callback is missing.**
+- [x] **Step 2: Run focused tests and verify the callback is missing.**
 
 Run: `pnpm vitest run tests/scheduler.spec.ts -t "replan trigger"`
 
-- [ ] **Step 3: Add the callback after durable terminalization.**
+- [x] **Step 3: Add the callback after durable terminalization.**
 
 Do not invoke the planner inside a projection transaction. After a task reaches
 terminal validation failure or a required dependency artifact is demonstrably
 missing, append `DecisionRecorded` evidence first, then invoke the runtime
 callback. Ignore cancelled, archived, superseded, or already-proposed goals.
 
-- [ ] **Step 4: Connect the callback to planner-backed local replan.**
+- [x] **Step 4: Connect the callback to planner-backed local replan.**
 
 The runtime passes the current plan and trigger into the planner, verifies the
 candidate through `validatePlan`, classifies it, and writes the outcome. A
@@ -274,7 +274,7 @@ planner failure appends `AutomaticReplanFailed` while leaving the currently
 valid revision and goal state intact (or paused if the task is terminally
 blocked).
 
-- [ ] **Step 5: Run focused tests and commit.**
+- [x] **Step 5: Run focused tests and commit.**
 
 Run: `pnpm vitest run tests/scheduler.spec.ts tests/durable-core.spec.ts -t "replan trigger|AutomaticReplan"`
 
@@ -293,18 +293,18 @@ Commit: `git add src tests && git commit -m "feat: trigger safe replans from exe
 - `getTaskNavigation({ taskId })` returns `{ currentSessionId?: string,
   attachedSessionIds: string[] }` and never changes bindings.
 
-- [ ] **Step 1: Write failing API tests.**
+- [x] **Step 1: Write failing API tests.**
 
 ```ts
 test('lists archived tasks only when explicitly requested', () => { /* active and archived task expectations */ })
 test('returns the bound current session for a task without changing any binding', () => { /* navigation DTO */ })
 ```
 
-- [ ] **Step 2: Run focused tests and verify the named remote/API methods are missing.**
+- [x] **Step 2: Run focused tests and verify the named remote/API methods are missing.**
 
 Run: `pnpm vitest run tests/task-ui.spec.ts tests/plugin.spec.ts -t "archived|navigation|editTaskGoal"`
 
-- [ ] **Step 3: Implement typed UI DTOs and revision-fenced commands.**
+- [x] **Step 3: Implement typed UI DTOs and revision-fenced commands.**
 
 Use a single input object for every remote method. `archiveTask` receives the
 displayed control revision, returns an applied/conflict result, and performs
@@ -312,13 +312,13 @@ the cancel-then-archive sequence. `purgeArchivedTasks` is host maintenance and
 uses a cutoff timestamp; invoke it during plugin activation and before list
 queries using a fixed 30-day cutoff.
 
-- [ ] **Step 4: Decorate and expose every remote method.**
+- [x] **Step 4: Decorate and expose every remote method.**
 
 Register each `Remote(...)` initializer in `src/remote.ts`, matching its public
 method name exactly. Add model tools for edit/accept replan but keep physical
 purge host-only.
 
-- [ ] **Step 5: Run focused tests and commit.**
+- [x] **Step 5: Run focused tests and commit.**
 
 Run: `pnpm vitest run tests/task-ui.spec.ts tests/plugin.spec.ts -t "archived|navigation|editTaskGoal|acceptReplan"`
 
@@ -337,7 +337,7 @@ Commit: `git add src tests && git commit -m "feat: expose lifecycle controls to 
   human-readable timeline rows without losing revision and reason detail.
 - `TaskDag` receives status presentation and renders a persistent legend.
 
-- [ ] **Step 1: Write failing presentation tests.**
+- [x] **Step 1: Write failing presentation tests.**
 
 ```ts
 test('formats a replan event with its impact and revision', () => {
@@ -349,11 +349,11 @@ test('maps every visual task state to a visible label and legend tone', () => {
 })
 ```
 
-- [ ] **Step 2: Run focused tests and verify the formatter/legend mapping is absent.**
+- [x] **Step 2: Run focused tests and verify the formatter/legend mapping is absent.**
 
 Run: `pnpm vitest run tests/task-cockpit.spec.ts tests/task-graph.spec.ts -t "formats a replan|legend"`
 
-- [ ] **Step 3: Implement the compact goal-edit modal and controls.**
+- [x] **Step 3: Implement the compact goal-edit modal and controls.**
 
 The Cockpit renders `修改原始目标`, `暂停/继续`, `跳转到会话`, and
 `删除` only when authorized by the current DTO. The edit modal requires both
@@ -361,14 +361,14 @@ nonblank objective and reason, sends `editTaskGoal`, and replaces its local
 task snapshot from the response. Delete requests confirmation, then calls
 `archiveTask`; restore appears only in archived-list mode.
 
-- [ ] **Step 4: Implement navigation and replan controls.**
+- [x] **Step 4: Implement navigation and replan controls.**
 
 Use the host session store only to resolve a returned `currentSessionId`; open
 that session through the existing host navigation capability. If it is absent
 or not loaded, show an actionable attach message. Render accept/reject for
 proposed replans with the displayed control revision.
 
-- [ ] **Step 5: Render status legend and readable timeline.**
+- [x] **Step 5: Render status legend and readable timeline.**
 
 Place a labeled persistent legend next to DAG controls. Give state frames
 theme-token colors for running, pending, awaiting confirmation, succeeded,
@@ -376,7 +376,7 @@ failed/blocked, paused, and cancelled/archive; retain textual state labels.
 Replace raw event names with `formatTaskEvent` rows, relative/absolute
 timestamps, details, and a revision-focus action where a graph revision exists.
 
-- [ ] **Step 6: Run focused tests and commit.**
+- [x] **Step 6: Run focused tests and commit.**
 
 Run: `pnpm vitest run tests/task-cockpit.spec.ts tests/task-graph.spec.ts`
 
@@ -388,17 +388,17 @@ Commit: `git add client tests && git commit -m "feat: add lifecycle controls to 
 - Modify: `README.md`, `docs/decisions/2026-08-22-long-task-runtime-v1.md`
 - Test: all test suites
 
-- [ ] **Step 1: Document controls and safety policy.**
+- [x] **Step 1: Document controls and safety policy.**
 
 Document goal editing, automatic-replan limits, archive/restore/30-day purge,
 and the fact that auto replan never applies external-effect or completed-work
 changes.
 
-- [ ] **Step 2: Run complete automated verification.**
+- [x] **Step 2: Run complete automated verification.**
 
 Run: `pnpm test; pnpm typecheck; pnpm build; pnpm pack --dry-run; git diff --check`
 
-- [ ] **Step 3: Perform real DSH Web acceptance without executing work.**
+- [x] **Step 3: Perform real DSH Web acceptance without executing work.**
 
 Build the plugin, start `pnpm --dir D:\code_github\deepseek-harness dsh web
 --port <unused-port>`, open a historical and a drafted task, verify the legend
@@ -406,6 +406,6 @@ and readable timeline, open the goal-edit form then cancel it, verify jump
 targets the linked session, and archive/restore only a disposable test task.
 Do not confirm or execute a user task.
 
-- [ ] **Step 4: Commit documentation and report evidence.**
+- [x] **Step 4: Commit documentation and report evidence.**
 
 Commit: `git add README.md docs && git commit -m "docs: document task lifecycle controls"`
