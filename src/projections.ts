@@ -4,7 +4,8 @@ import type { RuntimeEvent } from './event-store.js'
 /** Creates read models which are deliberately disposable: runtime_events is authoritative. */
 export function createProjectionSchema(db: DatabaseSync): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, control_revision INTEGER NOT NULL DEFAULT 0, workspace_scope TEXT, pause_reason TEXT);
+    CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, objective TEXT NOT NULL, constraints_json TEXT NOT NULL DEFAULT '[]', planning_mode TEXT NOT NULL DEFAULT 'auto', state TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, control_revision INTEGER NOT NULL DEFAULT 0, workspace_scope TEXT, pause_reason TEXT, archived_at TEXT);
+    CREATE TABLE IF NOT EXISTS goal_versions (goal_id TEXT NOT NULL, version INTEGER NOT NULL, objective TEXT NOT NULL, reason TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, version));
     CREATE TABLE IF NOT EXISTS task_session_links (goal_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, session_id, kind));
     CREATE TABLE IF NOT EXISTS current_task_bindings (session_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, control_revision INTEGER NOT NULL, updated_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS context_manifests (attempt_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, selection_reason TEXT NOT NULL, context_json TEXT NOT NULL, created_order INTEGER NOT NULL);
@@ -26,6 +27,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
   const goalColumns = db.prepare('PRAGMA table_info(goals)').all() as Array<{ name: string }>
   if (!goalColumns.some(column => column.name === 'control_revision')) db.exec('ALTER TABLE goals ADD COLUMN control_revision INTEGER NOT NULL DEFAULT 0')
   if (!goalColumns.some(column => column.name === 'workspace_scope')) db.exec('ALTER TABLE goals ADD COLUMN workspace_scope TEXT')
+  if (!goalColumns.some(column => column.name === 'archived_at')) db.exec('ALTER TABLE goals ADD COLUMN archived_at TEXT')
 }
 
 /** Applies exactly one durable event to materialized views. */
@@ -35,6 +37,17 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
   switch (event.type) {
     case 'GoalCreated':
       db.prepare('INSERT INTO goals (id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope) VALUES (?, ?, ?, ?, ?, 0, 0, ?)').run(event.goalId, String(p.objective), JSON.stringify(p.constraints ?? []), String(p.planningMode ?? 'auto'), 'DRAFT', p.workspaceScope == null ? null : String(p.workspaceScope))
+      db.prepare('INSERT OR IGNORE INTO goal_versions (goal_id, version, objective, reason, source, created_at, created_order) VALUES (?, 0, ?, ?, ?, ?, ?)').run(event.goalId, String(p.objective), 'initial objective', String(p.source ?? 'user'), String(p.createdAt ?? '1970-01-01T00:00:00.000Z'), seq)
+      break
+    case 'GoalObjectiveRevised':
+      db.prepare('INSERT INTO goal_versions (goal_id, version, objective, reason, source, created_at, created_order) VALUES (?, ?, ?, ?, ?, ?, ?)').run(event.goalId, Number(p.version), String(p.objective), String(p.reason), String(p.source ?? 'user'), String(p.createdAt), seq)
+      db.prepare('UPDATE goals SET objective = ? WHERE id = ?').run(String(p.objective), event.goalId)
+      break
+    case 'GoalArchived':
+      db.prepare('UPDATE goals SET archived_at = ? WHERE id = ?').run(String(p.archivedAt), event.goalId)
+      break
+    case 'GoalRestored':
+      db.prepare('UPDATE goals SET archived_at = NULL WHERE id = ?').run(event.goalId)
       break
     case 'TaskSessionAttached':
       db.prepare('INSERT OR IGNORE INTO task_session_links (goal_id, session_id, kind, created_order) VALUES (?, ?, ?, ?)').run(event.goalId, String(p.sessionId), String(p.kind), seq)

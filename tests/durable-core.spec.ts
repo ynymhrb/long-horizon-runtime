@@ -36,6 +36,17 @@ const planner: PlannerAdapter = {
 }
 
 describe('durable runtime core', () => {
+  test('archives a running goal by cancelling it first and can restore it', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })
+    const goal = await runtime.createGoal({ objective: 'archive me', planningMode: 'require_confirmation' })
+
+    const archived = runtime.archiveGoal(goal.id, new Date('2026-08-23T00:00:00.000Z'))
+    expect(archived.state).toBe('CANCELLED')
+    expect(archived.archivedAt).toBe('2026-08-23T00:00:00.000Z')
+    expect(runtime.listGoals()).toEqual([])
+    expect(runtime.restoreGoal(goal.id).archivedAt).toBeUndefined()
+  })
   test('uses the built-in required validator without deployment-specific validator registration', async () => {
     const store = createStore()
     const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }

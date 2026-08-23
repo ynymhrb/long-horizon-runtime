@@ -77,4 +77,45 @@ describe('RuntimeEventStore', () => {
     runtime.rebuild()
     expect(runtime.getCurrentTaskForSession('session-1')).toEqual({ sessionId: 'session-1', taskId: 'lt_b', controlRevision: 2 })
   })
+
+  test('projects append-only original-goal versions while retaining its task id', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'GoalCreated', goalId: 'lt_goal', payload: { objective: 'original goal', constraints: [], planningMode: 'auto' } },
+      { type: 'GoalObjectiveRevised', goalId: 'lt_goal', payload: { version: 1, objective: 'corrected goal', reason: 'user corrected scope', source: 'user', createdAt: '2026-08-23T00:00:00.000Z' } },
+    ])
+
+    expect(runtime.getGoal('lt_goal')?.id).toBe('lt_goal')
+    expect(runtime.listGoalVersions('lt_goal')).toEqual([
+      { version: 0, objective: 'original goal', reason: 'initial objective', source: 'user', createdAt: expect.any(String) },
+      { version: 1, objective: 'corrected goal', reason: 'user corrected scope', source: 'user', createdAt: '2026-08-23T00:00:00.000Z' },
+    ])
+  })
+
+  test('hides archived goals by default and restores them before purging', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'GoalCreated', goalId: 'lt_archive', payload: { objective: 'archive me', constraints: [], planningMode: 'auto' } },
+      { type: 'GoalArchived', goalId: 'lt_archive', payload: { archivedAt: '2026-07-01T00:00:00.000Z' } },
+    ])
+
+    expect(runtime.listGoals()).toEqual([])
+    expect(runtime.listGoals({ archived: true }).map(goal => goal.id)).toEqual(['lt_archive'])
+    runtime.append([{ type: 'GoalRestored', goalId: 'lt_archive', payload: {} }])
+    expect(runtime.listGoals().map(goal => goal.id)).toEqual(['lt_archive'])
+  })
+
+  test('purges only archives older than the supplied cutoff', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'GoalCreated', goalId: 'lt_old', payload: { objective: 'old', constraints: [], planningMode: 'auto' } },
+      { type: 'GoalArchived', goalId: 'lt_old', payload: { archivedAt: '2026-07-01T00:00:00.000Z' } },
+      { type: 'GoalCreated', goalId: 'lt_recent', payload: { objective: 'recent', constraints: [], planningMode: 'auto' } },
+      { type: 'GoalArchived', goalId: 'lt_recent', payload: { archivedAt: '2026-08-22T00:00:00.000Z' } },
+    ])
+
+    expect(runtime.purgeArchivedBefore('2026-08-01T00:00:00.000Z')).toEqual(['lt_old'])
+    expect(runtime.getGoal('lt_old')).toBeUndefined()
+    expect(runtime.listGoals({ archived: true }).map(goal => goal.id)).toEqual(['lt_recent'])
+  })
 })
