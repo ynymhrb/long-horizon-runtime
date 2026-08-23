@@ -68,6 +68,15 @@ export class RuntimeEventStore {
     }
     return goalIds
   }
+  /** File-backed artifacts belonging to archives eligible for physical removal. */
+  listArchivedArtifactPathsBefore(cutoff: string): string[] {
+    return (this.db.prepare("SELECT DISTINCT a.path FROM artifacts a JOIN goals g ON g.id = a.goal_id WHERE g.archived_at IS NOT NULL AND g.archived_at < ? AND a.storage = 'file' AND a.path IS NOT NULL").all(cutoff) as Array<{ path: string }>).map(row => row.path)
+  }
+  /** Content-addressed files can be shared; delete one only after its final projection reference is gone. */
+  isArtifactPathReferenced(path: string): boolean {
+    const row = this.db.prepare('SELECT 1 AS present FROM artifacts WHERE path = ? LIMIT 1').get(path) as { present?: number } | undefined
+    return row !== undefined
+  }
   listSessionLinks(goalId: string): TaskSessionLink[] {
     return (this.db.prepare('SELECT session_id, kind FROM task_session_links WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<Record<string, unknown>>).map(row => ({ sessionId: String(row.session_id), kind: String(row.kind) as TaskSessionLink['kind'] }))
   }

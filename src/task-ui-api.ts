@@ -29,6 +29,7 @@ export class TaskUiApi {
   constructor(private readonly runtime: LongTaskRuntime, private readonly control: TaskControlApi) {}
 
   listTasks(input: { readonly cursor?: number; readonly filter?: TaskListFilter } = {}): CursorPage<TaskSummary> {
+    this.runtime.purgeExpiredArchives()
     const cursor = input.cursor ?? 0
     const all = this.runtime.listGoals({ ...(input.filter?.archived === undefined ? {} : { archived: input.filter.archived }) }).filter(task => matches(task, input.filter)).map(task => this.summary(task)).sort(compareTaskSummary)
     const items = all.slice(cursor, cursor + 50)

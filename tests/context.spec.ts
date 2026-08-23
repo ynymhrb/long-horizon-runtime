@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
@@ -16,6 +16,15 @@ describe('artifacts and execution context', () => {
     const artifact = artifacts.put({ id: 'a-1', taskId: 't-1', type: 'analysis', content: 'x'.repeat(101) })
     expect(artifact.storage).toBe('file')
     expect(artifact.contentHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  test('removes only artifact files owned by its store', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'long-task-artifact-'))
+    directories.push(directory)
+    const artifacts = new ArtifactStore(directory, 1)
+    const artifact = artifacts.put({ id: 'a-1', taskId: 't-1', type: 'analysis', content: 'xx' })
+    artifacts.removeIfOwned(artifact.path!)
+    expect(existsSync(artifact.path!)).toBe(false)
   })
 
   test('includes only validated direct-dependency artifacts', () => {

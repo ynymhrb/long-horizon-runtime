@@ -69,3 +69,8 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **Pre-plan history:** a Goal that ended during planning can legitimately have no plan revision or DAG. The Task Area presents its durable goal state and events as “no plan” history, rather than treating a `null` graph response as an in-flight request.
 * **Goal changes and autonomy:** original user goals are versioned independently of task IDs and graph revisions. User edits always produce a reviewable replacement; automatic replanning is enabled only for terminal failures and applies solely to bounded read-only changes that preserve completed nodes and verified outputs. All other candidates await confirmation.
 * **Deletion lifecycle:** deletion means cancel then archive. Archive visibility is reversible for 30 days; expiry is the sole path to physical removal of a task's durable projections and artifacts.
+
+## V4 lifecycle-delivery decisions
+
+* **Retention cleanup:** activation and every Task Area list run a 30-day archive sweep. File-backed artifacts are removed only after the archival projections are deleted and no remaining projection refers to the same content-addressed path.
+* **Session navigation:** `shell.overlay` receives no session-opening callback. The client plugin injects DSH's `sessions` service and calls `ctx.sessions.open(sessionId)` after the host remote resolves a durable task-session link. Historic tasks created before session-link persistence remain readable and show an attach instruction instead of a misleading failed jump.

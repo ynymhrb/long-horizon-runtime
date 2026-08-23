@@ -52,6 +52,7 @@ export function apply(ctx: Context, input: Config): void {
   const taskApi = new TaskControlApi(runtime)
   ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')
   // Reconcile persisted attempts at activation. Execution itself remains tied to a later live tool parent.
+  runtime.purgeExpiredArchives()
   void runtime.recover().catch(() => undefined)
 
   ctx.tools.register(defineTool({

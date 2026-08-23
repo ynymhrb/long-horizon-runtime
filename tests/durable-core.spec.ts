@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { RuntimeEventStore } from '../src/event-store.js'
 import { LongTaskRuntime } from '../src/runtime.js'
+import { ArtifactStore } from '../src/artifacts.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
 
 const directories: string[] = []
@@ -46,6 +47,22 @@ describe('durable runtime core', () => {
     expect(archived.archivedAt).toBe('2026-08-23T00:00:00.000Z')
     expect(runtime.listGoals()).toEqual([])
     expect(runtime.restoreGoal(goal.id).archivedAt).toBeUndefined()
+  })
+  test('physically removes expired archive artifacts only after their final reference is gone', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'long-task-runtime-retention-'))
+    directories.push(directory)
+    const store = new RuntimeEventStore(join(directory, 'runtime.sqlite'))
+    stores.push(store)
+    const artifactDirectory = join(directory, 'artifacts')
+    const artifact = new ArtifactStore(artifactDirectory, 1).put({ id: 'artifact', taskId: 'a', type: 'analysis', content: 'retained file' })
+    store.append([
+      { type: 'GoalCreated', goalId: 'expired', payload: { objective: 'expired', planningMode: 'auto' } },
+      { type: 'ArtifactProduced', goalId: 'expired', taskId: 'a', payload: { id: 'artifact', attemptId: 'attempt', type: 'analysis', contentHash: artifact.contentHash, storage: artifact.storage, path: artifact.path } },
+      { type: 'GoalArchived', goalId: 'expired', payload: { archivedAt: '2026-07-01T00:00:00.000Z' } },
+    ])
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'unused', artifacts: [], evidence: [] } } }, { store, artifactDirectory })
+    expect(runtime.purgeExpiredArchives(new Date('2026-08-23T00:00:00.000Z'))).toEqual(['expired'])
+    expect(existsSync(artifact.path!)).toBe(false)
   })
   test('uses the built-in required validator without deployment-specific validator registration', async () => {
     const store = createStore()

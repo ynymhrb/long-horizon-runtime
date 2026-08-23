@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 
 /** Artifact value persisted inline or as a content-addressed file. */
 export interface StoredArtifact {
@@ -38,6 +38,15 @@ export class ArtifactStore {
     const value = createHash('sha256').update(bytes).digest('hex')
     if (value !== artifact.contentHash) throw new Error(`artifact content hash mismatch: ${artifact.contentHash}`)
     return bytes.toString('utf8')
+  }
+
+  /** Remove an unreferenced file artifact, but never traverse outside this store's directory. */
+  removeIfOwned(path: string): void {
+    const directory = resolve(this.directory)
+    const candidate = resolve(path)
+    const relation = relative(directory, candidate)
+    if (relation === '' || relation.startsWith('..') || relation.includes('..\\') || relation.includes('../')) return
+    rmSync(candidate, { force: true })
   }
 }
 

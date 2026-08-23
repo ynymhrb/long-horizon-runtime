@@ -7,7 +7,7 @@ const STATES = {
   CANCELLED: { tone: 'muted', label: '已取消' },
   PENDING: { tone: 'neutral', label: '待执行' },
   READY: { tone: 'neutral', label: '就绪' },
-  BLOCKED: { tone: 'warning', label: '受阻' },
+  BLOCKED: { tone: 'error', label: '受阻' },
   INVALIDATED: { tone: 'muted', label: '已失效' },
   SUPERSEDED: { tone: 'muted', label: '已替代' },
 }

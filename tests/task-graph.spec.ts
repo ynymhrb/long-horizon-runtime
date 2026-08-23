@@ -52,7 +52,7 @@ test('keeps a minimum SVG canvas after a branch is folded', () => {
 })
 
 test('maps durable states to a closed visual vocabulary', () => {
-  expect(taskStatePresentation('BLOCKED')).toMatchObject({ tone: 'warning', label: '受阻' })
+  expect(taskStatePresentation('BLOCKED')).toMatchObject({ tone: 'error', label: '受阻' })
   expect(taskStatePresentation('INVALIDATED')).toMatchObject({ tone: 'muted', label: '已失效' })
   expect(taskStatePresentation('UNKNOWN')).toMatchObject({ tone: 'muted', label: '未知状态' })
 })

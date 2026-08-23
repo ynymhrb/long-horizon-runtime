@@ -59,10 +59,14 @@ therefore always use one shared durable database.
   service API as model tools.
 - “Modify original goal” opens a goal-and-reason form; it never offers an
   unsafe free-form DAG editor. “Jump to conversation” opens the task's current
-  session link, or guides the user to attach a session when none exists.
+  session link through DSH's injected `sessions` service, or guides the user
+  to attach a session when none exists. Overlay slot props are never used for
+  navigation because the host supplies no session callback there.
 - Delete cancels active execution first, then archives the task. Archived
   tasks are hidden from the default list, recoverable for 30 days, and then
   physically purged with their plan revisions, events, links, and artifacts.
+  Retention runs at plugin activation and before Task Area list queries; a
+  file is removed only once no artifact projection references it.
 - The DAG uses status-colored frames plus visible text labels and a persistent
   legend. Color is never the only state signal. The event panel is a readable
   chronological audit trail with timestamps, reason/impact summaries, and

@@ -17,12 +17,14 @@ export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly d
 export class LongTaskRuntime {
   readonly store: RuntimeEventStore
   private readonly ownsStore: boolean
+  private readonly artifactStore: ArtifactStore | undefined
   private readonly scheduler: Scheduler
   constructor(private readonly planner: PlannerAdapter, execution: ExecutionAdapter, options: number | RuntimeOptions = {}) {
     const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options
     this.ownsStore = normalized.store === undefined
     this.store = normalized.store ?? new RuntimeEventStore(normalized.databasePath ?? ':memory:')
-    this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(normalized.artifactDirectory === undefined ? {} : { artifactStore: new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536) }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
+    this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536)
+    this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
   }
   async createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
     if (request.objective.trim().length === 0) throw new Error('goal objective must not be empty')
@@ -65,6 +67,14 @@ export class LongTaskRuntime {
     const goal = this.requireGoal(goalId)
     if (goal.archivedAt !== undefined) this.store.transaction(() => this.store.append([{ type: 'GoalRestored', goalId, payload: {} }]))
     return this.view(goalId)
+  }
+  /** Remove archives older than the retention window and their unshared file artifacts. */
+  purgeExpiredArchives(now: Date = new Date(), retentionDays = 30): string[] {
+    const cutoff = new Date(now.getTime() - retentionDays * 86_400_000).toISOString()
+    const paths = this.store.listArchivedArtifactPathsBefore(cutoff)
+    const removed = this.store.purgeArchivedBefore(cutoff)
+    for (const path of paths) if (!this.store.isArtifactPathReferenced(path)) this.artifactStore?.removeIfOwned(path)
+    return removed
   }
   /** Revise the durable user objective and create a confirmation-fenced replacement plan. */
   async editOriginalGoal(goalId: string, input: OriginalGoalEdit, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
