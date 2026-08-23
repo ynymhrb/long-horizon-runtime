@@ -56,7 +56,18 @@ export function apply(ctx: Context, input: Config): void {
   ctx.tools.register(defineTool({
     name: 'long_task_create', description: 'Create and plan a durable long-running goal.',
     parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
-    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => runtime.createGoal({ objective: args.objective, ...(args.constraints === undefined ? {} : { constraints: args.constraints }), planningMode: args.planning_mode ?? config.defaultPlanningMode }, exec.agent, exec.signal))),
+    execute: (args, exec) => {
+      const agent = requireParent(exec.agent)
+      return toolValue(() => withDshParent(agent, () => taskApi.create({
+        objective: args.objective,
+        ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
+        planningMode: args.planning_mode ?? config.defaultPlanningMode,
+        ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
+      }, {
+        sessionId: String(agent.id), parent: agent, signal: exec.signal,
+        ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
+      })))
+    },
   }))
   ctx.tools.register(defineTool({
     name: 'long_task_get', description: 'Read a long task by its durable lt_ task ID, including cross-session continuation state.', parameters: goalParameter, output: toolOutput,
@@ -84,6 +95,11 @@ const toolOutput = { schema: { type: 'json' as const }, render: (_args: unknown,
 function withParent<T>(agent: Agent | undefined, work: () => Promise<T>): Promise<T> {
   if (agent === undefined) return Promise.reject(new Error('long-task tools require a current parent Agent'))
   return withDshParent(agent, work)
+}
+
+function requireParent(agent: Agent | undefined): Agent {
+  if (agent === undefined) throw new Error('long-task tools require a current parent Agent')
+  return agent
 }
 
 /** Goal views contain only JSON values, but their narrow TypeScript shape lacks an index signature. */

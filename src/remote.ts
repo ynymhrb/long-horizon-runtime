@@ -24,6 +24,9 @@ export class LongTaskRemote extends TypertRemoteService {
   listTaskEvents(input: { taskId: string; cursor?: number; taskNodeId?: string }): unknown { return this.ui.listTaskEvents(input) }
   getCurrentTaskForSession(input: { sessionId: string }): unknown { return this.ui.getCurrentTaskForSession(input) }
   updateTask(input: { taskId: string; expectedRevision: number; action: 'confirm' | 'resume' | 'pause' | 'cancel'; sessionId?: string; workspaceScope?: string; recoveryResolution?: 'retry' | 'confirmed_succeeded' }): Promise<unknown> { return this.ui.updateTask(input) }
+  attachCurrentSession(input: { taskId: string; sessionId: string; workspaceScope?: string }): Promise<unknown> { return this.ui.attachCurrentSession(input) }
+  setCurrentSession(input: { taskId: string; sessionId: string; workspaceScope?: string }): unknown { return this.ui.setCurrentSession(input) }
+  rejectReplan(input: { taskId: string; expectedRevision: number }): unknown { return this.ui.rejectReplan(input) }
 }
 
 /** Separate host-plane loader row: Gateway can enumerate this active Service. */
@@ -80,4 +83,19 @@ Remote('updateTask')(LongTaskRemote.prototype.updateTask, {
   kind: 'method', name: 'updateTask', static: false, private: false,
   addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
   access: { has: () => true, get: (object: LongTaskRemote) => object.updateTask }, metadata: undefined,
+} as never)
+Remote('attachCurrentSession')(LongTaskRemote.prototype.attachCurrentSession, {
+  kind: 'method', name: 'attachCurrentSession', static: false, private: false,
+  addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
+  access: { has: () => true, get: (object: LongTaskRemote) => object.attachCurrentSession }, metadata: undefined,
+} as never)
+Remote('setCurrentSession')(LongTaskRemote.prototype.setCurrentSession, {
+  kind: 'method', name: 'setCurrentSession', static: false, private: false,
+  addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
+  access: { has: () => true, get: (object: LongTaskRemote) => object.setCurrentSession }, metadata: undefined,
+} as never)
+Remote('rejectReplan')(LongTaskRemote.prototype.rejectReplan, {
+  kind: 'method', name: 'rejectReplan', static: false, private: false,
+  addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
+  access: { has: () => true, get: (object: LongTaskRemote) => object.rejectReplan }, metadata: undefined,
 } as never)

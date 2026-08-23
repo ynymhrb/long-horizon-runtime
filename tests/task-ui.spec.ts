@@ -36,9 +36,25 @@ test('returns a bound non-terminal task strip with progress and immutable graph 
   expect(ui.listTaskEvents({ taskId: created.id, cursor: 0 }).items.map(event => event.type)).toContain('TaskSessionCurrentSet')
 })
 
+test('attaches a cross-session task only on explicit request and can reject a revision-fenced replan', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'done', artifacts: [], evidence: [] } } })
+  const control = new TaskControlApi(runtime)
+  const created = await control.create({ objective: 'cross session', planningMode: 'auto' }, { sessionId: 'origin' })
+  const ui = new TaskUiApi(runtime, control)
+  expect(runtime.store.getCurrentTaskForSession('next')).toBeUndefined()
+  const attached = await ui.attachCurrentSession({ taskId: created.id, sessionId: 'next' })
+  expect(attached.kind).toBe('applied')
+  expect(runtime.store.getCurrentTaskForSession('next')?.taskId).toBe(created.id)
+
+  const proposed = runtime.proposeReplan(created.id, { kind: 'addTask', task: { id: 'b', objective: 'b', dependsOn: ['a'], priority: 1, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }, reason: 'new evidence', evidenceRefs: [] })
+  const rejected = ui.rejectReplan({ taskId: created.id, expectedRevision: proposed.controlRevision })
+  expect(rejected).toMatchObject({ kind: 'applied', task: { state: 'RUNNING' } })
+})
+
 test('declares the Task UI query methods on the DSH remote service', () => {
   const methods = remoteMethods(new LongTaskRemote(new Context(), {} as LongTaskRuntime))
   expect(methods.map(method => method.method)).toEqual(expect.arrayContaining([
-    'listTasks', 'getTask', 'getTaskGraph', 'listTaskEvents', 'getCurrentTaskForSession', 'updateTask',
+    'listTasks', 'getTask', 'getTaskGraph', 'listTaskEvents', 'getCurrentTaskForSession', 'updateTask', 'attachCurrentSession', 'setCurrentSession', 'rejectReplan',
   ]))
 })

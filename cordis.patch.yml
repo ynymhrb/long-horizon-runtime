@@ -1,0 +1,16 @@
+- insert:
+    - id: long-task-runtime
+      name: '@deepseek-ai/dsh-long-task-runtime'
+      config:
+        databasePath: !!js dshHomePath('long-task-runtime', 'long-task-runtime.sqlite')
+        artifactDirectory: !!js dshHomePath('long-task-runtime', 'artifacts')
+        plannerProvider: spawn
+        executionProvider: spawn
+        maxConcurrentTasks: 1
+        defaultPlanningMode: require_confirmation
+        executionTimeoutMs: 300000
+        retryPolicy:
+          maxAttempts: 2
+- insert:
+    - id: long-task-runtime-remote
+      name: '@deepseek-ai/dsh-long-task-runtime/remote'

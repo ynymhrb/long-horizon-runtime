@@ -3,7 +3,7 @@ import type { InterruptionCause, RecoveryPolicyOutcome } from './domain.js'
 import type { GraphMutation } from './domain.js'
 
 export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }
-export interface CreateTaskRequest extends CreateGoalRequest { readonly workspaceScope: string }
+export interface CreateTaskRequest extends CreateGoalRequest { readonly workspaceScope?: string }
 export type TaskUpdateAction = 'confirm' | 'resume' | 'pause' | 'cancel'
 export type TaskUpdateResult = { readonly kind: 'applied'; readonly task: GoalView } | { readonly kind: 'conflict'; readonly current: GoalView }
 
@@ -16,10 +16,10 @@ export class TaskControlApi {
     const task = await this.runtime.createGoal({ ...request, planningMode: request.planningMode ?? 'require_confirmation' }, invocation.parent, invocation.signal)
     if (invocation.sessionId === undefined) return task
     this.runtime.attachSession(task.id, invocation.sessionId, 'origin')
-    return this.setCurrentSessionTask(task.id, { sessionId: invocation.sessionId, workspaceScope: request.workspaceScope }).task
+    return this.setCurrentSessionTask(task.id, { sessionId: invocation.sessionId, ...(request.workspaceScope === undefined ? {} : { workspaceScope: request.workspaceScope }) }).task
   }
 
-  async attachSession(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId' | 'workspaceScope'>>): Promise<TaskUpdateResult> {
+  async attachSession(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId'>> & Pick<TaskInvocation, 'workspaceScope'>): Promise<TaskUpdateResult> {
     const current = this.requireTask(taskId)
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     this.runtime.attachSession(taskId, invocation.sessionId)
@@ -27,7 +27,7 @@ export class TaskControlApi {
   }
 
   /** Explicitly choose which linked task occupies this conversation's one task-strip slot. */
-  setCurrentSessionTask(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId' | 'workspaceScope'>>): Extract<TaskUpdateResult, { kind: 'applied' }> {
+  setCurrentSessionTask(taskId: string, invocation: Required<Pick<TaskInvocation, 'sessionId'>> & Pick<TaskInvocation, 'workspaceScope'>): Extract<TaskUpdateResult, { kind: 'applied' }> {
     const current = this.requireTask(taskId)
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     if (!current.sessionLinks.some(link => link.sessionId === invocation.sessionId)) throw new Error(`session ${invocation.sessionId} is not attached to task ${taskId}`)
@@ -75,6 +75,14 @@ export class TaskControlApi {
   }
   proposeReplan(taskId: string, mutation: GraphMutation): GoalView { return this.runtime.proposeReplan(taskId, mutation) }
   rejectReplan(taskId: string): GoalView { return this.runtime.rejectReplan(taskId) }
+
+  /** Reject only the proposal observed at this control revision; never discard a newer plan. */
+  rejectReplanAtRevision(taskId: string, expectedRevision: number): TaskUpdateResult {
+    const current = this.requireTask(taskId)
+    if (current.controlRevision !== expectedRevision) return { kind: 'conflict', current }
+    const task = this.runtime.rejectReplan(taskId)
+    return { kind: 'applied', task: this.advance(taskId, task.controlRevision) }
+  }
 
   private pause(taskId: string): GoalView {
     const task = this.requireTask(taskId)

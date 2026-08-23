@@ -61,6 +61,20 @@ export class TaskUiApi {
     return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
   }
 
+  /** Explicit user action: create a durable cross-session link and make it current. */
+  async attachCurrentSession(input: { readonly taskId: string; readonly sessionId: string; readonly workspaceScope?: string }): Promise<TaskUpdateResult> {
+    return this.control.attachSession(input.taskId, { sessionId: input.sessionId, ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }) })
+  }
+
+  /** Explicit user action for a session that is already linked to this task. */
+  setCurrentSession(input: { readonly taskId: string; readonly sessionId: string; readonly workspaceScope?: string }): TaskUpdateResult {
+    return this.control.setCurrentSessionTask(input.taskId, { sessionId: input.sessionId, ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }) })
+  }
+
+  rejectReplan(input: { readonly taskId: string; readonly expectedRevision: number }): TaskUpdateResult {
+    return this.control.rejectReplanAtRevision(input.taskId, input.expectedRevision)
+  }
+
   private summary(task: GoalView): TaskSummary {
     const nodes = currentNodes(this.runtime, task)
     const current = nodes.find(node => node.state === 'RUNNING') ?? nodes.find(node => !['SUCCEEDED', 'FAILED', 'CANCELLED', 'INVALIDATED', 'SUPERSEDED'].includes(node.state)) ?? nodes.at(-1)

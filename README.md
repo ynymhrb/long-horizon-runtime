@@ -4,7 +4,7 @@
 
 ## Install and configure
 
-Install this package alongside a compatible DSH deployment, then add the configuration shown in [examples/cordis.yml](examples/cordis.yml). `plannerProvider` and `executionProvider` are names from `ctx.subagents.list()` (for example, an installed `spawn` provider). The package declares its DSH dependencies as peer dependencies so the host controls the compatible harness version.
+Install this package through `dsh plugin --profile web add <tarball-or-package>`. Its `dsh.bundle` declaration contributes `cordis.patch.yml` to the profile composition, which mounts both the host runtime and its web client without editing DSH source. `plannerProvider` and `executionProvider` are names from `ctx.subagents.list()` (for example, an installed `spawn` provider). The package declares its DSH dependencies as peer dependencies so the host controls the compatible harness version.
 
 Required settings are `databasePath`, `artifactDirectory`, `plannerProvider`, and `executionProvider`. Optional settings are `maxConcurrentTasks` (default 1), `defaultPlanningMode` (`auto` by default), `executionTimeoutMs` (default 300000), `retryPolicy.maxAttempts` (default 1), `artifactInlineLimitBytes` (default 65536), `defaultAgentProfile`, and profile-local `workspaceScope`.
 
