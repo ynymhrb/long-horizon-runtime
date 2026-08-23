@@ -9,8 +9,8 @@ const FILTER_STATES = ['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED', 'SUCCEEDED'
 export function TaskArea({ open, onClose, remote, initialTaskId, useSessions }) {
   const [items, setItems] = React.useState([])
   const [selectedId, setSelectedId] = React.useState(initialTaskId ?? null)
-  const [task, setTask] = React.useState(null)
-  const [graph, setGraph] = React.useState(null)
+  const [task, setTask] = React.useState(undefined)
+  const [graph, setGraph] = React.useState(undefined)
   const [events, setEvents] = React.useState([])
   const [currentTaskId, setCurrentTaskId] = React.useState(null)
   const [error, setError] = React.useState(null)
@@ -30,6 +30,7 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions }) 
   }, [open, remote, query, state])
   React.useEffect(() => {
     if (!selectedId) return
+    setTask(undefined); setGraph(undefined); setEvents([])
     Promise.all([remote.getTask({ taskId: selectedId }), remote.getTaskGraph({ taskId: selectedId }), remote.listTaskEvents({ taskId: selectedId, cursor: 0 })])
       .then(([nextTask, nextGraph, page]) => { setTask(remoteValue(nextTask)); setGraph(remoteValue(nextGraph)); setEvents(remoteValue(page)?.items ?? []) })
       .catch(reason => setError(String(reason)))
