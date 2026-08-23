@@ -4,7 +4,7 @@ import type { GoalView, LongTaskRuntime } from './runtime.js'
 import type { TaskControlApi, TaskUpdateResult } from './task-api.js'
 
 export interface CursorPage<T> { readonly items: readonly T[]; readonly nextCursor?: number }
-export interface TaskListFilter { readonly state?: GoalView['state']; readonly query?: string }
+export interface TaskListFilter { readonly state?: GoalView['state']; readonly query?: string; readonly archived?: boolean }
 export interface TaskProgress { readonly succeeded: number; readonly total: number }
 export interface TaskSummary {
   readonly id: string
@@ -29,7 +29,7 @@ export class TaskUiApi {
 
   listTasks(input: { readonly cursor?: number; readonly filter?: TaskListFilter } = {}): CursorPage<TaskSummary> {
     const cursor = input.cursor ?? 0
-    const all = this.runtime.listGoals().filter(task => matches(task, input.filter)).map(task => this.summary(task)).sort(compareTaskSummary)
+    const all = this.runtime.listGoals({ ...(input.filter?.archived === undefined ? {} : { archived: input.filter.archived }) }).filter(task => matches(task, input.filter)).map(task => this.summary(task)).sort(compareTaskSummary)
     const items = all.slice(cursor, cursor + 50)
     return { items, ...(cursor + items.length < all.length ? { nextCursor: cursor + items.length } : {}) }
   }
@@ -79,6 +79,26 @@ export class TaskUiApi {
 
   rejectReplan(input: { readonly taskId: string; readonly expectedRevision: number }): TaskUpdateResult {
     return this.control.rejectReplanAtRevision(input.taskId, input.expectedRevision)
+  }
+  async editTaskGoal(input: { readonly taskId: string; readonly expectedRevision: number; readonly objective: string; readonly reason: string; readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
+    return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+  }
+  async acceptReplan(input: { readonly taskId: string; readonly expectedRevision: number; readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
+    return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+  }
+  async archiveTask(input: { readonly taskId: string; readonly expectedRevision: number }): Promise<TaskUpdateResult> {
+    const current = this.runtime.getStatus(input.taskId)
+    if (current === undefined) throw new Error(`unknown task ${input.taskId}`)
+    if (current.controlRevision !== input.expectedRevision) return { kind: 'conflict', current }
+    return { kind: 'applied', task: this.runtime.archiveGoal(input.taskId) }
+  }
+  restoreTask(input: { readonly taskId: string }): GoalView { return this.runtime.restoreGoal(input.taskId) }
+  getTaskNavigation(input: { readonly taskId: string }): { readonly attachedSessionIds: readonly string[]; readonly currentSessionId?: string } {
+    const task = this.runtime.getStatus(input.taskId)
+    if (task === undefined) throw new Error(`unknown task ${input.taskId}`)
+    const attachedSessionIds = task.sessionLinks.map(link => link.sessionId)
+    const currentSessionId = task.sessionLinks.find(link => this.runtime.store.getCurrentTaskForSession(link.sessionId)?.taskId === task.id)?.sessionId
+    return { attachedSessionIds, ...(currentSessionId === undefined ? {} : { currentSessionId }) }
   }
 
   private summary(task: GoalView): TaskSummary {

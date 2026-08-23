@@ -7,6 +7,7 @@ import { Scheduler, type RecoveryResult } from './scheduler.js'
 import { ArtifactStore } from './artifacts.js'
 
 export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
+export interface OriginalGoalEdit { readonly objective: string; readonly reason: string; readonly source?: 'user' | 'model' }
 
 export interface CreateGoalRequest { readonly objective: string; readonly constraints?: readonly string[]; readonly planningMode?: 'auto' | 'require_confirmation'; readonly workspaceScope?: string }
 export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[] }
@@ -63,6 +64,30 @@ export class LongTaskRuntime {
   restoreGoal(goalId: string): GoalView {
     const goal = this.requireGoal(goalId)
     if (goal.archivedAt !== undefined) this.store.transaction(() => this.store.append([{ type: 'GoalRestored', goalId, payload: {} }]))
+    return this.view(goalId)
+  }
+  /** Revise the durable user objective and create a confirmation-fenced replacement plan. */
+  async editOriginalGoal(goalId: string, input: OriginalGoalEdit, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
+    const goal = this.requireGoal(goalId)
+    if (goal.archivedAt !== undefined) throw new Error(`goal ${goalId} is archived`)
+    if (input.objective.trim().length === 0 || input.reason.trim().length === 0) throw new Error('goal objective and revision reason must not be empty')
+    if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(goal.state)) throw new Error(`goal ${goalId} is terminal and cannot be edited`)
+    if (goal.state === 'RUNNING') this.scheduler.interrupt(goalId)
+    const nextVersion = this.store.listGoalVersions(goalId).length
+    const baseRevision = goal.revision
+    this.store.transaction(() => this.store.append([
+      ...(goal.state === 'RUNNING' ? [{ type: 'GoalPaused', goalId, payload: { reason: 'original_goal_edit' } }] : []),
+      { type: 'GoalObjectiveRevised', goalId, payload: { version: nextVersion, objective: input.objective, reason: input.reason, source: input.source ?? 'user', createdAt: new Date().toISOString() } },
+      { type: 'DecisionRecorded', goalId, payload: { type: 'original_goal_edit', baseRevision, reason: input.reason } },
+    ]))
+    try {
+      const planned = await planWithValidation(this.planner, { goalId, objective: input.objective, constraints: goal.constraints })
+      const revision = baseRevision + 1
+      this.store.transaction(() => this.store.append([{ type: 'PlanProposed', goalId, payload: { revision, baseRevision, trigger: { kind: 'original_goal_edit', reason: input.reason }, tasks: [...planned.tasks.values()] } }]))
+    } catch (error) {
+      this.store.transaction(() => this.store.append([{ type: 'DecisionRecorded', goalId, payload: { type: 'goal_replan_failed', reason: error instanceof Error ? error.message : String(error) } }]))
+    }
+    void executionParent; void executionSignal
     return this.view(goalId)
   }
   attachSession(goalId: string, sessionId: string, kind: TaskSessionLink['kind'] = 'attached'): GoalView {

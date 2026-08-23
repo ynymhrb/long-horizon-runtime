@@ -87,6 +87,16 @@ export function apply(ctx: Context, input: Config): void {
     parameters: { goal_id: { type: 'string', required: true }, task_id: { type: 'string', required: true }, reason: { type: 'string', required: true }, evidence_refs: { type: 'array', items: { type: 'string' } } }, output: toolOutput,
     execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.invalidateTask(args.goal_id, args.task_id, args.reason, args.evidence_refs ?? []))),
   }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_edit_goal', description: 'Revise a task original goal and produce a confirmation-fenced replacement plan.',
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, objective: { type: 'string', required: true }, reason: { type: 'string', required: true } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.editGoal({ taskId: args.goal_id, expectedRevision: args.expected_revision, objective: args.objective, reason: args.reason }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+  }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_accept_replan', description: 'Accept the current revision-fenced long-task replan proposal.',
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.acceptReplan({ taskId: args.goal_id, expectedRevision: args.expected_revision }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+  }))
 }
 
 const goalParameter = { goal_id: { type: 'string', required: true } } as const

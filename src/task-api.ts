@@ -65,6 +65,21 @@ export class TaskControlApi {
     return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
   }
 
+  async editGoal(request: { readonly taskId: string; readonly expectedRevision: number; readonly objective: string; readonly reason: string }, invocation: TaskInvocation): Promise<TaskUpdateResult> {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    const task = await this.runtime.editOriginalGoal(request.taskId, { objective: request.objective, reason: request.reason }, invocation.parent, invocation.signal)
+    return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
+  }
+  async acceptReplan(request: { readonly taskId: string; readonly expectedRevision: number }, invocation: TaskInvocation): Promise<TaskUpdateResult> {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    const task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal)
+    return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
+  }
+
   get(taskId: string, invocation?: Pick<TaskInvocation, 'workspaceScope'>): GoalView | undefined {
     const task = this.runtime.getStatus(taskId)
     if (task !== undefined && invocation?.workspaceScope !== undefined) this.assertScope(task.workspaceScope, invocation.workspaceScope)

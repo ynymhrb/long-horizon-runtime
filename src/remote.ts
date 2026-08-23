@@ -18,7 +18,7 @@ export class LongTaskRemote extends TypertRemoteService {
 
   get(taskId: string): unknown { return this.runtime.getStatus(taskId) ?? null }
   list(): unknown { return this.runtime.listGoals() }
-  listTasks(input: { cursor?: number; filter?: { state?: string; query?: string } }): unknown { return this.ui.listTasks(input as Parameters<TaskUiApi['listTasks']>[0]) }
+  listTasks(input: { cursor?: number; filter?: { state?: string; query?: string; archived?: boolean } }): unknown { return this.ui.listTasks(input as Parameters<TaskUiApi['listTasks']>[0]) }
   getTask(input: { taskId: string }): unknown { return this.ui.getTask(input) }
   getTaskGraph(input: { taskId: string; revision?: number }): unknown { return this.ui.getTaskGraph(input) }
   listTaskEvents(input: { taskId: string; cursor?: number; taskNodeId?: string }): unknown { return this.ui.listTaskEvents(input) }
@@ -28,6 +28,11 @@ export class LongTaskRemote extends TypertRemoteService {
   setCurrentSession(input: { taskId: string; sessionId: string; workspaceScope?: string }): unknown { return this.ui.setCurrentSession(input) }
   clearCurrentSession(input: { sessionId: string }): unknown { return this.ui.clearCurrentSession(input) }
   rejectReplan(input: { taskId: string; expectedRevision: number }): unknown { return this.ui.rejectReplan(input) }
+  editTaskGoal(input: { taskId: string; expectedRevision: number; objective: string; reason: string; sessionId?: string }): Promise<unknown> { return this.ui.editTaskGoal(input) }
+  acceptReplan(input: { taskId: string; expectedRevision: number; sessionId?: string }): Promise<unknown> { return this.ui.acceptReplan(input) }
+  archiveTask(input: { taskId: string; expectedRevision: number }): Promise<unknown> { return this.ui.archiveTask(input) }
+  restoreTask(input: { taskId: string }): unknown { return this.ui.restoreTask(input) }
+  getTaskNavigation(input: { taskId: string }): unknown { return this.ui.getTaskNavigation(input) }
 }
 
 /** Separate host-plane loader row: Gateway can enumerate this active Service. */
@@ -104,4 +109,9 @@ Remote('rejectReplan')(LongTaskRemote.prototype.rejectReplan, {
   kind: 'method', name: 'rejectReplan', static: false, private: false,
   addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
   access: { has: () => true, get: (object: LongTaskRemote) => object.rejectReplan }, metadata: undefined,
+} as never)
+for (const method of ['editTaskGoal', 'acceptReplan', 'archiveTask', 'restoreTask', 'getTaskNavigation'] as const) Remote(method)(LongTaskRemote.prototype[method], {
+  kind: 'method', name: method, static: false, private: false,
+  addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
+  access: { has: () => true, get: (object: LongTaskRemote) => object[method] }, metadata: undefined,
 } as never)

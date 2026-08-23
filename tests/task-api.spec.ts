@@ -99,4 +99,18 @@ describe('TaskControlApi', () => {
     expect(rejected.state).toBe('RUNNING')
     expect(rejected.pendingProposal).toBeUndefined()
   })
+
+  test('edits the original goal and accepts its revision through the fenced control API', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const task = await api.create({ objective: 'old goal', planningMode: 'require_confirmation' }, {})
+    const edited = await api.editGoal({ taskId: task.id, expectedRevision: task.controlRevision, objective: 'new goal', reason: 'correct scope' }, {})
+    expect(edited.kind).toBe('applied')
+    if (edited.kind !== 'applied') throw new Error('expected applied edit')
+    expect(edited.task.objective).toBe('new goal')
+    const accepted = await api.acceptReplan({ taskId: task.id, expectedRevision: edited.task.controlRevision }, {})
+    expect(accepted.kind).toBe('applied')
+    if (accepted.kind !== 'applied') throw new Error('expected accepted replan')
+    expect(accepted.task.state).toBe('RUNNING')
+  })
 })

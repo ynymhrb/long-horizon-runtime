@@ -7,6 +7,18 @@ function strictTask(id: string, objective: string, dependsOn: string[] = []) {
 }
 
 describe('LongTaskRuntime', () => {
+  test('revises the original goal and holds its new plan for confirmation', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const created = await runtime.createGoal({ objective: 'original', planningMode: 'require_confirmation' })
+    const edited = await runtime.editOriginalGoal(created.id, { objective: 'corrected', reason: 'user corrected scope' })
+
+    expect(edited.objective).toBe('corrected')
+    expect(edited.state).toBe('AWAITING_CONFIRMATION')
+    expect(edited.pendingProposal?.baseRevision).toBe(0)
+    expect(runtime.store.listGoalVersions(created.id).at(-1)).toMatchObject({ version: 1, objective: 'corrected', reason: 'user corrected scope' })
+  })
   test('holds a valid initial plan until explicit confirmation', async () => {
     const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
     const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
