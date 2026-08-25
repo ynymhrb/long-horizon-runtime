@@ -1,0 +1,74 @@
+# Long-Task runtime live-research audit (2026-08-25)
+
+## Context
+
+Two DSH sessions ran the same research request ("适合中国投资者的低回撤核心组合")
+in the same workspace (`D:\code\test`): a native single-turn session
+(`session-dab00f0f`) and a long-task session (`session-d4a0ff5b`) that drove the
+`long_task_create` runtime. The long-task session created four goals; the first
+three failed, and the fourth only succeeded after the model reverse-engineered
+runtime constraints (local-only data to avoid the 5-minute child timeout, and
+artifact `type: "analysis"` to satisfy V1 validation). This record keeps the
+findings and the resulting fix in the audit trail.
+
+## Observed failure modes (ordered by impact)
+
+1. **Terminal failure orphaned a pending replan proposal.** Each failed goal
+   ended in `FAILED` with a `pendingProposal` (revision 2) attached, yet
+   `availableActions` was empty. `long_task_confirm` rejected with "goal is not
+   awaiting confirmation" and `long_task_resume` with "goal is not paused", so
+   the proposal could never be accepted and completed work could not be reused.
+2. **5-minute hard child timeout surfaced as an opaque abort.** `executionTimeoutMs`
+   defaults to `300000` (`cordis.patch.yml` and `tools.ts`); `dsh-adapters.ts`
+   wraps every child in `AbortSignal.timeout(300000)`. Research tasks that
+   download 10 years of market data cannot finish in one child turn, so they
+   settled as `DSH child stopped: aborted` (dsh-adapters.ts:84) with no hint
+   that this was a timeout or how to fix it.
+3. **Artifact type contract is invisible to children.** The child JSON schema
+   accepts any `type: string` (dsh-adapters.ts RESULT_SCHEMA) while validation
+   accepts only the seven V1 types (`plan`, `analysis`, `code_patch`,
+   `command_result`, `test_report`, `review`, `note` — artifacts.ts:25,
+   scheduler.ts:229). Children naturally chose `markdown`/`json`/`report` and
+   failed with an error that does not list the valid types; retries did not
+   converge because `priorFailureSummary` did not teach the accepted set.
+4. **`long_task_create` (auto mode) blocks inside the tool call.** `createGoal`
+   runs `runUntilIdle` synchronously, so one tool call blocked ~30 minutes and
+   returned an already-failed goal; the model could not observe progress or
+   confirm a proposal before the goal was terminalized.
+
+## Root cause of failure mode 1 (fixed)
+
+In `scheduler.runRound`, the round-end terminalization appended `GoalFailed`
+whenever a task was `FAILED` and nothing was pending — even when
+`onTerminalFailure` had just appended `PlanProposed` (goal →
+`AWAITING_CONFIRMATION`) or a failed replan planner had appended `GoalPaused`
+(goal → `PAUSED`). Event order in the observed session was exactly
+`DecisionRecorded → PlanProposed → CheckpointCreated → GoalFailed`, so the
+confirmation state existed only for an instant before being overwritten.
+
+## Fix (this commit)
+
+`scheduler.runRound` now reads the goal state inside the terminalization
+transaction and skips `GoalFailed` when the goal is no longer `RUNNING` (i.e.
+the replan flow already decided `AWAITING_CONFIRMATION` or `PAUSED`). The
+pending proposal stays confirmable, and a planner failure leaves the goal
+paused per the V1 "await confirmation" policy.
+
+Regression tests added in `tests/runtime.spec.ts`:
+- "keeps a scheduler-triggered unsafe automatic replan awaiting confirmation
+  instead of failing the goal" — full scheduler path: terminal failure →
+  unsafe replan → `AWAITING_CONFIRMATION` with `confirm` action; confirming
+  applies revision 2 and succeeds.
+- "pauses a goal when the automatic replan planner itself fails, instead of
+  failing it" — planner throws during replan → goal stays `PAUSED` with an
+  `automatic_replan_failed` decision.
+
+## Remaining known issues (not fixed in this commit)
+
+- Child timeout is still a hard 5-minute default with an opaque failure
+  message; consider surfacing timeout as the reason and allowing per-goal or
+  per-task overrides.
+- Artifact type contract is still invisible to children; consider enumerating
+  valid types in the RESULT_SCHEMA/execution prompt and in the validation error.
+- `long_task_create` (auto mode) still executes synchronously; consider
+  returning a RUNNING goal for the caller to observe.

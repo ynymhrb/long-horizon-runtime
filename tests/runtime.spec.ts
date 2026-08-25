@@ -37,6 +37,42 @@ describe('LongTaskRuntime', () => {
     const replan = await runtime.requestAutomaticReplan(task.id, { task: task.tasks[0]!, reason: 'evidence contradicts result' })
     expect(replan.state).toBe('AWAITING_CONFIRMATION')
   })
+  test('keeps a scheduler-triggered unsafe automatic replan awaiting confirmation instead of failing the goal', async () => {
+    const planner: PlannerAdapter = {
+      async plan(input) {
+        // Initial plan: one read-only task that fails terminally.
+        if (input.baseRevision === undefined) return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] }
+        // Replan candidate: external-effect task -> classified unsafe -> await confirmation.
+        return { goalId: input.goalId, revision: 2, tasks: [{ ...strictTask('b', 'external replacement'), sideEffectClass: 'external_effect' as const }] }
+      },
+    }
+    const execution: ExecutionAdapter = { async execute(input) { return input.taskId === 'a' ? { status: 'failed' as const, summary: 'broken', artifacts: [], evidence: [] } : { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const created = await runtime.createGoal({ objective: 'needs confirmation' })
+    await runtime.runUntilIdle(created.id, {})
+    const awaiting = runtime.getStatus(created.id)!
+    expect(awaiting.state).toBe('AWAITING_CONFIRMATION')
+    expect(awaiting.pendingProposal?.revision).toBe(2)
+    expect(awaiting.availableActions).toContain('confirm')
+    // The proposal must remain confirmable; confirming applies revision 2 and resumes execution.
+    const confirmed = await runtime.confirmGoal(created.id, {})
+    expect(confirmed.state).toBe('SUCCEEDED')
+  })
+  test('pauses a goal when the automatic replan planner itself fails, instead of failing it', async () => {
+    const planner: PlannerAdapter = {
+      async plan(input) {
+        if (input.baseRevision === undefined) return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] }
+        throw new Error('planner unavailable')
+      },
+    }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'failed' as const, summary: 'broken', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const created = await runtime.createGoal({ objective: 'planner fails' })
+    await runtime.runUntilIdle(created.id, {})
+    const paused = runtime.getStatus(created.id)!
+    expect(paused.state).toBe('PAUSED')
+    expect(paused.decisions.some(decision => decision.type === 'automatic_replan_failed')).toBe(true)
+  })
   test('holds a valid initial plan until explicit confirmation', async () => {
     const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
     const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }

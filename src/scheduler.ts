@@ -61,8 +61,14 @@ export class Scheduler {
     this.store.transaction(() => {
       const events: Array<{ type: string; goalId: string; payload: Record<string, unknown> }> = [{ type: 'CheckpointCreated', goalId, payload: { eventSeq: this.store!.latestSeq(goalId), revision: goal.revision, readySet: ready.map(task => task.id), maxConcurrentTasks: this.maxConcurrentTasks, verifiedArtifactIds: this.store!.listActiveValidatedArtifacts(goalId).map(artifact => artifact.id), environmentSnapshotRef: null } }]
       const latest = this.store!.listTasks(goalId)
+      // A replan proposal recorded during this round (e.g. by onTerminalFailure)
+      // already moved the goal to AWAITING_CONFIRMATION, and a failed replan
+      // planner pauses it. Appending GoalFailed here would overwrite either
+      // decision and orphan the proposal or the pause.
+      const currentState = this.store!.getGoal(goalId)?.state
+      const lifecycleDecided = currentState !== undefined && currentState !== 'RUNNING'
       if (latest.length > 0 && latest.every(task => task.state === 'SUCCEEDED')) events.push({ type: 'GoalSucceeded', goalId, payload: {} })
-      else if (latest.some(task => task.state === 'FAILED') && !latest.some(task => ['PENDING', 'READY', 'RUNNING'].includes(task.state))) events.push({ type: 'GoalFailed', goalId, payload: {} })
+      else if (!lifecycleDecided && latest.some(task => task.state === 'FAILED') && !latest.some(task => ['PENDING', 'READY', 'RUNNING'].includes(task.state))) events.push({ type: 'GoalFailed', goalId, payload: {} })
       this.store!.append(events)
     })
     return ready.length > 0
