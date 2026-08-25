@@ -31,7 +31,7 @@ test('returns a bound non-terminal task strip with progress and immutable graph 
   const created = await control.create({ objective: 'research RAG', workspaceScope: 'D:/repo', planningMode: 'require_confirmation' }, { sessionId: 'session-1', workspaceScope: 'D:/repo' })
   const ui = new TaskUiApi(runtime, control)
 
-  expect(ui.getCurrentTaskForSession({ sessionId: 'session-1' })).toMatchObject({ id: created.id, progress: { succeeded: 0, total: 2 } })
+  expect(ui.getCurrentTaskForSession({ sessionId: 'session-1' })).toMatchObject({ id: created.id, progress: { settled: 0, total: 2 } })
   expect(ui.getTaskGraph({ taskId: created.id })).toMatchObject({ revision: 1, nodes: [{ id: 'research' }, { id: 'review' }] })
   expect(ui.listTaskEvents({ taskId: created.id, cursor: 0 }).items.map(event => event.type)).toContain('TaskSessionCurrentSet')
 })
@@ -90,6 +90,21 @@ test('task overview lists actionable tasks before terminal and failed history', 
   await control.create({ objective: 'failed historical task', planningMode: 'require_confirmation' }, {})
   const page = new TaskUiApi(runtime, control).listTasks({})
   expect(page.items.map(item => item.state)).toEqual(['AWAITING_CONFIRMATION', 'FAILED'])
+})
+
+test('strip progress counts failed and blocked nodes as settled real progress', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [
+    { id: 'ok', objective: 'ok', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+    { id: 'bad', objective: 'bad', dependsOn: ['ok'], priority: 1, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+    { id: 'downstream', objective: 'downstream', dependsOn: ['bad'], priority: 2, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+  ] } } }
+  const execution: ExecutionAdapter = { async execute(input) { return input.taskId === 'bad' ? { status: 'failed' as const, summary: 'boom', artifacts: [], evidence: [] } : { status: 'succeeded' as const, summary: 'done', artifacts: [], evidence: [] } } }
+  const runtime = new LongTaskRuntime(planner, execution)
+  const control = new TaskControlApi(runtime)
+  const created = await control.create({ objective: 'settled progress', planningMode: 'auto' }, { sessionId: 'session-1', parent: {} })
+  const ui = new TaskUiApi(runtime, control)
+  // 'ok' succeeded, 'bad' failed terminally, 'downstream' is blocked: all three are settled.
+  expect(ui.listTasks({ filter: { sessionId: 'session-1' } } as never).items[0]).toMatchObject({ progress: { settled: 3, total: 3 }, currentOrLastNode: { state: 'BLOCKED' } })
 })
 
 test('task overview defaults to the one task current for its conversation', async () => {

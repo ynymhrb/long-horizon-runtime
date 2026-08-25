@@ -5,7 +5,7 @@ import type { TaskControlApi, TaskUpdateResult } from './task-api.js'
 
 export interface CursorPage<T> { readonly items: readonly T[]; readonly nextCursor?: number }
 export interface TaskListFilter { readonly state?: GoalView['state']; readonly query?: string; readonly archived?: boolean; readonly sessionId?: string }
-export interface TaskProgress { readonly succeeded: number; readonly total: number }
+export interface TaskProgress { readonly settled: number; readonly total: number }
 export interface TaskSummary {
   readonly id: string
   readonly objective: string
@@ -23,6 +23,9 @@ export interface TaskStripView extends TaskSummary { readonly availableActions: 
 export interface TaskGraphView { readonly taskId: string; readonly revision: number; readonly nodes: readonly TaskNode[]; readonly edges: readonly { readonly from: string; readonly to: string }[] }
 
 const terminalStates = new Set<GoalView['state']>(['SUCCEEDED', 'FAILED', 'CANCELLED'])
+
+/** Work that is no longer runnable in the current plan revision: real progress. */
+const settledStates = new Set(['SUCCEEDED', 'FAILED', 'BLOCKED', 'INVALIDATED', 'SUPERSEDED', 'CANCELLED'])
 
 /** Browser read model. It derives compact JSON DTOs from durable runtime projections only. */
 export class TaskUiApi {
@@ -119,7 +122,7 @@ export class TaskUiApi {
       controlRevision: task.controlRevision,
       ...(task.workspaceScope === undefined ? {} : { workspaceScope: task.workspaceScope }),
       ...(task.archivedAt === undefined ? {} : { archivedAt: task.archivedAt }),
-      progress: { succeeded: nodes.filter(node => node.state === 'SUCCEEDED').length, total: nodes.length },
+      progress: { settled: nodes.filter(node => settledStates.has(node.state)).length, total: nodes.length },
       ...(current === undefined ? {} : { currentOrLastNode: { id: current.id, objective: current.objective, state: current.state } }),
       ...(task.pauseReason === undefined ? {} : { reason: task.pauseReason }),
       latestEventCursor: this.runtime.store.latestSeq(task.id),

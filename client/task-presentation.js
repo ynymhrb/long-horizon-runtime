@@ -27,11 +27,12 @@ export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state
 
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
-  return { ...state, progress: `${task.progress.succeeded}/${task.progress.total}`, detail: task.reason ?? task.currentOrLastNode?.objective ?? '' }
+  return { ...state, progress: formatTaskProgress(task.progress, task.currentOrLastNode), detail: task.reason ?? task.currentOrLastNode?.objective ?? '' }
 }
 
 export function formatTaskProgress(progress, node) {
   const objective = node?.objective
   const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective
-  return `${progress.succeeded}/${progress.total}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
+  const settled = progress.settled ?? progress.succeeded
+  return `${settled}/${progress.total}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
 }

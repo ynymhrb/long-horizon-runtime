@@ -295,9 +295,11 @@ The following flows are normative:
 The long-task strip is a dock card after DSH's native GoalBar. It is rendered
 only when `getCurrentTaskForSession` yields a non-terminal task. It contains
 the long-task glyph, a concise task-state label, truncated objective, progress
-`succeeded / total`, and either the running node or the durable pause/block
-reason. Clicking its body opens the bound task Cockpit; controls expose only
-the actions currently advertised by the authoritative task snapshot.
+`settled / total` (nodes that are no longer runnable: succeeded, failed,
+blocked, invalidated, superseded, or cancelled), and either the running node or
+the durable pause/block reason. Clicking its body opens the bound task Cockpit;
+controls expose only the actions currently advertised by the authoritative task
+snapshot.
 
 Task state is presentation data, not a client inference:
 

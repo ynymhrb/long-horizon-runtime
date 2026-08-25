@@ -25,7 +25,7 @@ export function TaskStrip({ sessionId, remote, onOpen }) {
     e('span', { className: 'ltr-strip-glyph', 'aria-hidden': true }, '◎'),
     e('span', { className: 'ltr-strip-label' }, view.label),
     e('button', { type: 'button', className: 'ltr-strip-objective', onClick: () => onOpen(task.id), title: task.objective }, task.objective),
-    e('span', { className: 'ltr-strip-progress' }, view.progress),
+    e('span', { className: 'ltr-strip-progress', title: view.detail || task.objective }, view.progress),
     e('div', { className: 'ltr-strip-actions' },
       (task.availableActions ?? []).includes('pause') ? e('button', { type: 'button', className: 'ltr-icon-button', disabled: pending, onClick: () => update('pause'), 'aria-label': '暂停长任务', title: '暂停长任务' }, 'Ⅱ') : null,
       (task.availableActions ?? []).includes('resume') ? e('button', { type: 'button', className: 'ltr-icon-button', disabled: pending, onClick: () => update('resume'), 'aria-label': '继续长任务', title: '继续长任务' }, '▶') : null,

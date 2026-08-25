@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { layoutTaskGraph, stableCanvasSize, truncateGraphText, visibleTaskGraph } from '../client/task-graph.js'
-import { dagToneCss, formatTaskProgress, taskStatePresentation } from '../client/task-presentation.js'
+import { dagToneCss, formatTaskProgress, taskStatePresentation, taskStripPresentation } from '../client/task-presentation.js'
 
 describe('long task DAG layout', () => {
   test('places dependencies in increasing stable ranks', () => {
@@ -66,6 +66,11 @@ test('gives every DAG state tone a visible node stroke, including running', () =
 })
 
 test('renders progress with the current task objective instead of its internal id', () => {
-  expect(formatTaskProgress({ succeeded: 2, total: 7 }, { objective: '检索并去重资料' })).toBe('2/7 · 当前：检索并去重资料')
-  expect(formatTaskProgress({ succeeded: 2, total: 7 }, { objective: '系统研究影响 RAG 准确率的文档处理因素：数据清洗、去重、元数据，以及需要保留的执行说明。' })).toBe('2/7 · 当前：系统研究影响 RAG 准确率的文档处理因素：数据清洗、去重、元数据…')
+  expect(formatTaskProgress({ settled: 2, total: 7 }, { objective: '检索并去重资料' })).toBe('2/7 · 当前：检索并去重资料')
+  expect(formatTaskProgress({ settled: 2, total: 7 }, { objective: '系统研究影响 RAG 准确率的文档处理因素：数据清洗、去重、元数据，以及需要保留的执行说明。' })).toBe('2/7 · 当前：系统研究影响 RAG 准确率的文档处理因素：数据清洗、去重、元数据…')
+})
+
+test('counts settled work including failed and blocked nodes as real progress', () => {
+  expect(taskStripPresentation({ state: 'RUNNING', progress: { settled: 1, total: 14 }, currentOrLastNode: { objective: '调研嵌入模型' } })).toMatchObject({ progress: '1/14 · 当前：调研嵌入模型' })
+  expect(formatTaskProgress({ settled: 5, total: 14 }, { objective: '调研嵌入模型' })).toBe('5/14 · 当前：调研嵌入模型')
 })
