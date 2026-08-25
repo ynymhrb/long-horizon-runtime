@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from '../src/dsh-adapters.js'
+import { V1_ARTIFACT_TYPES } from '../src/domain.js'
 
 describe('DSH adapters', () => {
   test('uses the current parent, parses structured planner output, and disposes the child run', async () => {
@@ -34,6 +35,22 @@ describe('DSH adapters', () => {
     expect(disposed).toBe(true)
   })
 
+  test('enumerates the V1 artifact types in the execution result schema so children learn them up front', async () => {
+    let request: Record<string, unknown> | undefined
+    const adapter = createDshExecutionAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { summary: 'done', artifacts: [], evidence: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'worker' })
+    await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+    const artifactsSchema = (request!.outputSchema as { properties: { artifacts: { items: { properties: { type: { enum: string[] } } } } } }).properties.artifacts.items.properties.type
+    expect(artifactsSchema.enum).toEqual([...V1_ARTIFACT_TYPES])
+  })
+
   test('maps a completed execution child result into the runtime contract', async () => {
     const adapter = createDshExecutionAdapter({
       async start() {
@@ -65,5 +82,50 @@ describe('DSH adapters', () => {
       context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
     }))
     expect(result).toMatchObject({ status: 'failed', summary: 'DSH child stopped: max-tokens' })
+  })
+
+  test('reports a child timeout with its budget and a remedy instead of a bare abort', async () => {
+    let childSignal: AbortSignal | undefined
+    const adapter = createDshExecutionAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        childSignal = received.signal as AbortSignal
+        return {
+          id: 'child', localAgent: undefined,
+          result: new Promise((_resolve, reject) => { childSignal!.addEventListener('abort', () => reject(new Error('aborted'))) }),
+          async dispose() {},
+        }
+      },
+    } as never, { providerName: 'worker' })
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+      timeoutMs: 30,
+    }))
+    expect(result.status).toBe('failed')
+    expect(result.summary).toContain('DSH child stopped: timeout after 30ms')
+    expect(result.summary).toContain('executionTimeoutMs')
+  })
+
+  test('prefers a per-task timeoutMs over the adapter default', async () => {
+    let childSignal: AbortSignal | undefined
+    const adapter = createDshExecutionAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        childSignal = received.signal as AbortSignal
+        return {
+          id: 'child', localAgent: undefined,
+          result: new Promise((_resolve, reject) => { childSignal!.addEventListener('abort', () => reject(new Error('aborted'))) }),
+          async dispose() {},
+        }
+      },
+    } as never, { providerName: 'worker', timeoutMs: 5000 })
+    const started = Date.now()
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+      timeoutMs: 30,
+    }))
+    expect(result.status).toBe('failed')
+    expect(result.summary).toContain('timeout after 30ms')
+    expect(Date.now() - started).toBeLessThan(1000)
   })
 })

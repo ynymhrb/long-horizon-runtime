@@ -14,6 +14,10 @@ export type RecoveryPolicyOutcome = 'requeue' | 'wait_for_live_parent' | 'requir
 /** Retry limits are per logical task; attempts are never overwritten. */
 export interface RetryPolicy { readonly maxAttempts: number }
 
+/** The seven artifact types the V1 runtime accepts from a completed child. */
+export const V1_ARTIFACT_TYPES = ['plan', 'analysis', 'code_patch', 'command_result', 'test_report', 'review', 'note'] as const
+export type ArtifactType = typeof V1_ARTIFACT_TYPES[number]
+
 /** One logical task supplied by a planner. */
 export interface TaskDraft {
   readonly id: string
@@ -26,6 +30,8 @@ export interface TaskDraft {
   readonly completionCriteria?: string
   readonly retryPolicy?: RetryPolicy
   readonly validator?: string
+  /** Per-task child execution budget in milliseconds; overrides the deployment default when set. */
+  readonly timeoutMs?: number
 }
 
 /** Planner output before validation. */
@@ -44,6 +50,7 @@ export interface TaskNode extends TaskDraft {
   readonly outputContract?: Record<string, unknown>
   readonly completionCriteria?: string
   readonly retryPolicy?: RetryPolicy
+  readonly timeoutMs?: number
   /** Persisted projection ordering; planner task array order is the stable tie-break. */
   readonly createdOrder?: number
 }

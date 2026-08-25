@@ -35,4 +35,15 @@ describe('plan validation', () => {
   test('rejects a planner task missing a required durable execution field', () => {
     expect(() => validatePlan(plan([{ id: 'a', objective: 'first', dependsOn: [] }]))).toThrow(/priority.*required/i)
   })
+
+  test('accepts and preserves a per-task execution timeoutMs', () => {
+    const validated = validatePlan(plan([{ ...strictTask('a', 'heavy download'), timeoutMs: 900_000 }]))
+    expect(validated.tasks.get('a')?.timeoutMs).toBe(900_000)
+  })
+
+  test('rejects an invalid per-task execution timeoutMs', () => {
+    expect(() => validatePlan(plan([{ ...strictTask('a', 'heavy download'), timeoutMs: 0 }]))).toThrow(/timeoutMs/i)
+    expect(() => validatePlan(plan([{ ...strictTask('a', 'heavy download'), timeoutMs: -1 }]))).toThrow(/timeoutMs/i)
+    expect(() => validatePlan(plan([{ ...strictTask('a', 'heavy download'), timeoutMs: 1.5 }]))).toThrow(/timeoutMs/i)
+  })
 })

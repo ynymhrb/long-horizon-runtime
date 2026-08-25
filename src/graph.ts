@@ -20,6 +20,7 @@ export function validatePlan(draft: PlanDraft): ValidatedPlan {
     if (task.priority !== undefined && (!Number.isSafeInteger(task.priority))) throw new PlanValidationError(`task ${task.id} priority must be a safe integer`)
     if (task.sideEffectClass !== undefined && !['read_only', 'idempotent', 'external_effect'].includes(task.sideEffectClass)) throw new PlanValidationError(`task ${task.id} has invalid sideEffectClass`)
     if (task.retryPolicy !== undefined && (!Number.isSafeInteger(task.retryPolicy.maxAttempts) || task.retryPolicy.maxAttempts < 1)) throw new PlanValidationError(`task ${task.id} has invalid retry policy`)
+    if (task.timeoutMs !== undefined && (!Number.isSafeInteger(task.timeoutMs) || task.timeoutMs < 1)) throw new PlanValidationError(`task ${task.id} has invalid timeoutMs`)
     for (const [name, contract] of [['inputContract', task.inputContract], ['outputContract', task.outputContract]] as const) if (contract !== undefined && (contract === null || Array.isArray(contract) || typeof contract !== 'object')) throw new PlanValidationError(`task ${task.id} ${name} must be an object`)
     if (task.completionCriteria !== undefined && task.completionCriteria.trim().length === 0) throw new PlanValidationError(`task ${task.id} completionCriteria must not be empty`)
     if (task.validator !== undefined && task.validator.trim().length === 0) throw new PlanValidationError(`task ${task.id} validator must not be empty`)

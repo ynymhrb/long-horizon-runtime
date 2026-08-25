@@ -56,7 +56,7 @@ export function apply(ctx: Context, input: Config): void {
   void runtime.recover().catch(() => undefined)
 
   ctx.tools.register(defineTool({
-    name: 'long_task_create', description: 'Create and plan a durable long-running goal.',
+    name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" this call executes the whole DAG synchronously and returns only after the goal reaches a terminal or awaiting-confirmation state, so it can take minutes and you cannot observe intermediate progress; use planning_mode "require_confirmation" to review the generated plan before execution, or create with auto and poll long_task_status.',
     parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
     execute: (args, exec) => {
       const agent = requireParent(exec.agent)

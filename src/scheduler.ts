@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { validateExecutionResult, type ExecutionAdapter } from './adapters.js'
 import type { ContextView } from './context.js'
-import type { TaskNode, TaskState } from './domain.js'
+import { V1_ARTIFACT_TYPES, type TaskNode, type TaskState } from './domain.js'
 import { RuntimeEventStore } from './event-store.js'
 import { ArtifactStore } from './artifacts.js'
 
@@ -157,7 +157,7 @@ export class Scheduler {
       { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
     ]))
     let result
-    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
+    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs }), onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
@@ -232,8 +232,9 @@ export class Scheduler {
 
 function validateOutputContract(task: TaskNode, result: import('./adapters.js').ExecutionResult): { readonly ok: boolean; readonly reason?: string } {
   if (result.status === 'failed') return { ok: false, reason: result.summary }
-  const allowedTypes = new Set(['plan', 'analysis', 'code_patch', 'command_result', 'test_report', 'review', 'note'])
-  if (result.artifacts.some(artifact => !allowedTypes.has(artifact.type))) return { ok: false, reason: 'result artifact type is not a V1 artifact type' }
+  const allowedTypes = new Set<string>(V1_ARTIFACT_TYPES)
+  const invalid = result.artifacts.find(artifact => !allowedTypes.has(artifact.type))
+  if (invalid !== undefined) return { ok: false, reason: `result artifact type "${invalid.type}" is not a V1 artifact type; valid types: ${V1_ARTIFACT_TYPES.join(', ')}` }
   if (result.artifacts.some(artifact => artifact.mimeType !== undefined && !/^[\w.+-]+\/[\w.+-]+$/.test(artifact.mimeType))) return { ok: false, reason: 'result artifact MIME type must be type/subtype' }
   const contract = task.outputContract ?? {}
   const types = contract.artifactTypes

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { V1_ARTIFACT_TYPES } from './domain.js'
 
 /** Artifact value persisted inline or as a content-addressed file. */
 export interface StoredArtifact {
@@ -22,7 +23,7 @@ export class ArtifactStore {
 
   /** Store an artifact without trusting a path supplied by the caller. */
   put(input: { id: string; taskId: string; type: string; content: string; mimeType?: string }): StoredArtifact {
-    if (!new Set(['plan', 'analysis', 'code_patch', 'command_result', 'test_report', 'review', 'note']).has(input.type)) throw new TypeError('artifact type must be one of the V1 artifact types')
+    if (!(new Set<string>(V1_ARTIFACT_TYPES).has(input.type))) throw new TypeError(`artifact type must be one of the V1 artifact types: ${V1_ARTIFACT_TYPES.join(', ')}`)
     if (input.mimeType !== undefined && !/^[\w.+-]+\/[\w.+-]+$/.test(input.mimeType)) throw new TypeError('artifact mimeType must be type/subtype')
     const bytes = Buffer.from(input.content, 'utf8')
     const contentHash = createHash('sha256').update(bytes).digest('hex')

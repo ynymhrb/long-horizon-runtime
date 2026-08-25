@@ -73,6 +73,29 @@ describe('LongTaskRuntime', () => {
     expect(paused.state).toBe('PAUSED')
     expect(paused.decisions.some(decision => decision.type === 'automatic_replan_failed')).toBe(true)
   })
+  test('forwards a per-task execution timeoutMs to the child adapter', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ ...strictTask('a', 'heavy download'), timeoutMs: 900_000 }] } } }
+    let receivedTimeout: number | undefined
+    const execution: ExecutionAdapter = { async execute(input) { receivedTimeout = input.timeoutMs; return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const created = await runtime.createGoal({ objective: 'honors timeout override' })
+    await runtime.runUntilIdle(created.id, {})
+    expect(receivedTimeout).toBe(900_000)
+    expect(runtime.getStatus(created.id)?.state).toBe('SUCCEEDED')
+  })
+  test('rejects a child artifact whose type is not in the V1 set with the valid list', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded' as const, summary: 'done', artifacts: [{ type: 'markdown', content: 'oops' }], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const created = await runtime.createGoal({ objective: 'artifact contract' })
+    await runtime.runUntilIdle(created.id, {})
+    const failed = runtime.getStatus(created.id)!
+    expect(failed.state).toBe('FAILED')
+    const reason = failed.attempts.flatMap(attempt => attempt.summary === undefined ? [] : [attempt.summary]).join('\n')
+    expect(reason).toContain('markdown')
+    expect(reason).toContain('analysis')
+    expect(reason).toContain('note')
+  })
   test('holds a valid initial plan until explicit confirmation', async () => {
     const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
     const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }

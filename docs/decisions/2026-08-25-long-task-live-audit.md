@@ -63,6 +63,28 @@ Regression tests added in `tests/runtime.spec.ts`:
   failing it" — planner throws during replan → goal stays `PAUSED` with an
   `automatic_replan_failed` decision.
 
+## Follow-up fixes (child budget and artifact contract visibility)
+
+* **Actionable timeout failure (P0-2):** `dsh-adapters.ts` now distinguishes a
+  timeout abort from an operator/other abort. The failed summary becomes
+  `DSH child stopped: timeout after <ms>ms; consider raising executionTimeoutMs
+  or splitting the task` instead of the opaque `DSH child stopped: aborted`.
+* **Per-task timeout override (P0-2):** a planner task may declare a positive
+  integer `timeoutMs` (validated in `graph.ts`, carried on `TaskNode`,
+  forwarded through `Scheduler.executeOne` to the execution adapter). It
+  overrides the deployment default, which itself is the fallback. This lets a
+  known-heavy task (e.g. data acquisition) get more budget without raising the
+  global default.
+* **Artifact type contract visible to children (P0-3):** the seven V1 types are
+  now a single shared constant `V1_ARTIFACT_TYPES` in `domain.ts`. The child
+  result schema enumerates them as an `enum`, the execution prompt lists them
+  explicitly, and both validation errors (`scheduler.ts`, `artifacts.ts`) name
+  the rejected type and list the valid ones, so a retry can converge.
+* **Create-mode documentation (P1-1):** `long_task_create`'s description now
+  states that `planning_mode: "auto"` executes the whole DAG synchronously and
+  only returns at a terminal/awaiting state, directing callers to
+  `require_confirmation` or polling when they need visibility.
+
 ## Remaining known issues (not fixed in this commit)
 
 - Child timeout is still a hard 5-minute default with an opaque failure
@@ -72,3 +94,28 @@ Regression tests added in `tests/runtime.spec.ts`:
   valid types in the RESULT_SCHEMA/execution prompt and in the validation error.
 - `long_task_create` (auto mode) still executes synchronously; consider
   returning a RUNNING goal for the caller to observe.
+
+---
+
+## Resolved follow-ups (supersedes the previous list)
+
+The three items above were all addressed in a follow-up commit:
+
+* **Timeout reason + per-task override** — `dsh-adapters.ts` reports
+  `DSH child stopped: timeout after <ms>ms; consider raising
+  executionTimeoutMs or splitting the task` when the child budget fires, and a
+  planner-declared task `timeoutMs` overrides the deployment default
+  (validated in `graph.ts`, threaded through `Scheduler` → adapter).
+* **Artifact type contract visibility** — the seven V1 types are a single
+  shared `V1_ARTIFACT_TYPES` constant; the result schema enumerates them, the
+  execution prompt lists them, and both the scheduler and artifact-store
+  validation errors name the rejected type and list the valid set.
+* **Create-mode documentation** — `long_task_create`'s description now warns
+  that `planning_mode: "auto"` runs the whole DAG synchronously and only
+  returns at a terminal/awaiting state, and points to `require_confirmation`
+  or polling for visibility.
+
+Tests: timeout surfacing and per-task override in `tests/dsh-adapters.spec.ts`;
+`timeoutMs` validation in `tests/graph.spec.ts`; scheduler forwarding and the
+actionable artifact-type error in `tests/runtime.spec.ts`; result-schema enum
+in `tests/dsh-adapters.spec.ts`.
