@@ -166,4 +166,65 @@ describe('TaskControlApi', () => {
     expect(runtime.store.getCurrentTaskForSession('bystander')).toBeUndefined()
     expect(runtime.getStatus(created.id)?.sessionLinks).toEqual([{ sessionId: 'origin', kind: 'origin' }])
   })
+
+  test('lists durable events as a model-friendly summary without raw context payloads', async () => {
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [], dshSessionId: 'child-session-1' } } })
+    const api = new TaskControlApi(runtime)
+    const goal = await runtime.createGoal({ objective: 'events', planningMode: 'auto' }, {})
+
+    const page = api.listEvents({ taskId: goal.id }, {})
+    expect(page).not.toBeNull()
+    const types = page!.items.map(item => item.type)
+    expect(types).toContain('TaskAttemptStarted')
+    expect(types).toContain('TaskCompleted')
+    // The model-facing projection never leaks full context or inline artifact content.
+    for (const item of page!.items) {
+      expect(item.payload.context).toBeUndefined()
+      expect(item.payload.content).toBeUndefined()
+      expect(item.payload.tasks).toBeUndefined()
+    }
+  })
+
+  test('pages events with a next cursor and filters by task node', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const goal = await runtime.createGoal({ objective: 'paging', planningMode: 'auto' }, {})
+
+    const page1 = api.listEvents({ taskId: goal.id, limit: 1 }, {})
+    expect(page1!.items).toHaveLength(1)
+    expect(page1!.nextCursor).toBe(page1!.items[0]!.seq)
+    const cursor1 = page1!.nextCursor!
+    const page2 = api.listEvents({ taskId: goal.id, cursor: cursor1, limit: 1 }, {})
+    expect(page2!.items).toHaveLength(1)
+    expect(page2!.items[0]!.seq).toBeGreaterThan(cursor1)
+    const cursor2 = page2!.nextCursor!
+    const page3 = api.listEvents({ taskId: goal.id, cursor: cursor2 }, {})
+    expect(page3!.nextCursor).toBeUndefined()
+  })
+
+  test('lists child session ids of attempts for jump-away visibility', async () => {
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [], dshSessionId: 'child-session-9' } } })
+    const api = new TaskControlApi(runtime)
+    const goal = await runtime.createGoal({ objective: 'sessions', planningMode: 'auto' }, {})
+
+    const view = api.listAttemptSessions({ taskId: goal.id }, {})
+    expect(view?.attempts).toHaveLength(1)
+    expect(view?.attempts[0]).toMatchObject({ taskId: 'research', state: 'SUCCEEDED', dshSessionId: 'child-session-9' })
+  })
+
+  test('rejects reading events or attempt sessions of a task in another workspace scope', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const goal = await api.create({ objective: 'scoped', planningMode: 'require_confirmation', workspaceScope: 'D:/repo' }, { workspaceScope: 'D:/repo' })
+
+    expect(() => api.listEvents({ taskId: goal.id }, { workspaceScope: 'D:/other' })).toThrow(/workspace scope/)
+    expect(() => api.listAttemptSessions({ taskId: goal.id }, { workspaceScope: 'D:/other' })).toThrow(/workspace scope/)
+  })
+
+  test('returns null for an unknown task when listing events or attempt sessions', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    expect(api.listEvents({ taskId: 'lt_missing' }, {})).toBeNull()
+    expect(api.listAttemptSessions({ taskId: 'lt_missing' }, {})).toBeNull()
+  })
 })

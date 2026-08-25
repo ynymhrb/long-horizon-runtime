@@ -1,11 +1,32 @@
 import type { GoalView, CreateGoalRequest, LongTaskRuntime, RecoveryResolution } from './runtime.js'
 import type { InterruptionCause, RecoveryPolicyOutcome } from './domain.js'
 import type { GraphMutation } from './domain.js'
+import type { RuntimeEvent } from './event-store.js'
 
 export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }
 export interface CreateTaskRequest extends CreateGoalRequest { readonly workspaceScope?: string }
 export type TaskUpdateAction = 'confirm' | 'resume' | 'pause' | 'cancel'
 export type TaskUpdateResult = { readonly kind: 'applied'; readonly task: GoalView } | { readonly kind: 'conflict'; readonly current: GoalView }
+
+/** Compact event projection for model-facing reads; raw context/content never leaves the store. */
+export interface EventSummary {
+  readonly seq?: number
+  readonly type: string
+  readonly goalId: string
+  readonly taskId?: string
+  readonly createdAt?: string
+  readonly payload: Record<string, unknown>
+}
+export interface AttemptSessionSummary { readonly id: string; readonly taskId: string; readonly state: string; readonly revision: number; readonly dshSessionId?: string; readonly summary?: string }
+
+/** Payload keys that can carry unbounded or sensitive content; excluded from model-facing pages. */
+const EVENT_PAYLOAD_EXCLUDED_KEYS = new Set(['context', 'content', 'tasks'])
+
+function summarizeEvent(event: RuntimeEvent): EventSummary {
+  const payload: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(event.payload)) if (!EVENT_PAYLOAD_EXCLUDED_KEYS.has(key)) payload[key] = value
+  return { ...(event.seq === undefined ? {} : { seq: event.seq }), type: event.type, goalId: event.goalId, ...(event.taskId === undefined ? {} : { taskId: event.taskId }), ...(event.createdAt === undefined ? {} : { createdAt: event.createdAt }), payload }
+}
 
 /** Stable, session-neutral control surface. DSH tools and the future task UI both use this API. */
 export class TaskControlApi {
@@ -86,6 +107,30 @@ export class TaskControlApi {
     const task = this.runtime.getStatus(taskId)
     if (task !== undefined && invocation?.workspaceScope !== undefined) this.assertScope(task.workspaceScope, invocation.workspaceScope)
     return task
+  }
+
+  /**
+   * Model-friendly incremental event page. Events are projected to a compact
+   * summary: raw context manifests and inline artifact content are excluded so
+   * polling a long goal does not flood the model context.
+   */
+  listEvents(request: { readonly taskId: string; readonly cursor?: number; readonly limit?: number; readonly taskNodeId?: string }, invocation: Pick<TaskInvocation, 'workspaceScope'>): { readonly items: readonly EventSummary[]; readonly nextCursor?: number } | null {
+    const task = this.runtime.getStatus(request.taskId)
+    if (task === undefined) return null
+    this.assertScope(task.workspaceScope, invocation.workspaceScope)
+    const limit = request.limit === undefined ? 50 : Math.min(Math.max(Number(request.limit), 1), 100)
+    const events = this.runtime.store.listEvents(request.taskId, request.cursor ?? 0, limit, request.taskNodeId)
+    return { items: events.map(summarizeEvent), ...(events.length === limit ? { nextCursor: events.at(-1)!.seq } : {}) }
+  }
+
+  /** Resolve durable child session IDs of attempts so the caller can jump to or cite subagent logs. */
+  listAttemptSessions(request: { readonly taskId: string; readonly taskNodeId?: string }, invocation: Pick<TaskInvocation, 'workspaceScope'>): { readonly attempts: readonly AttemptSessionSummary[] } | null {
+    const task = this.runtime.getStatus(request.taskId)
+    if (task === undefined) return null
+    this.assertScope(task.workspaceScope, invocation.workspaceScope)
+    const taskIds = request.taskNodeId === undefined ? task.tasks.map(node => node.id) : [request.taskNodeId]
+    const attempts = taskIds.flatMap(id => this.runtime.store.listAttempts(id, request.taskId))
+    return { attempts: attempts.map(attempt => ({ id: attempt.id, taskId: attempt.taskId, state: attempt.state, revision: attempt.revision, ...(attempt.dshSessionId === undefined ? {} : { dshSessionId: attempt.dshSessionId }), ...(attempt.summary === undefined ? {} : { summary: attempt.summary }) })) }
   }
   interrupt(taskId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView {
     return this.runtime.interruptGoal(taskId, cause, recoveryOutcome)

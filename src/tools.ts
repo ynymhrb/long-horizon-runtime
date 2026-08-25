@@ -85,6 +85,16 @@ export function apply(ctx: Context, input: Config): void {
   ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused durable long-task goal. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined) taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); return runtime.resumeGoal(args.goal_id, exec.agent, args.recovery_resolution, exec.signal) })) }))
   ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }))
   ctx.tools.register(defineTool({
+    name: 'long_task_events', description: 'Read a page of durable runtime events for a long task, oldest first, with a cursor for incremental polling. Payloads are compact summaries: context manifests and inline artifact content are excluded. Use this to observe what the scheduler and task children actually did (TaskAttemptStarted, ValidationRecorded, TaskCompleted, replan decisions, etc.).',
+    parameters: { ...goalParameter, cursor: { type: 'number' }, limit: { type: 'number' }, task_id: { type: 'string' } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.listEvents({ taskId: args.goal_id, ...(args.cursor === undefined ? {} : { cursor: args.cursor }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.task_id === undefined ? {} : { taskNodeId: args.task_id }) }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }) ?? { events: null })),
+  }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_attempt_sessions', description: 'List the durable child session IDs of a long task\'s execution attempts. Each attempt ran in its own DSH session; return these IDs to the user so they can jump into and inspect the subagent\'s own conversation log.',
+    parameters: { ...goalParameter, task_id: { type: 'string' } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.listAttemptSessions({ taskId: args.goal_id, ...(args.task_id === undefined ? {} : { taskNodeId: args.task_id }) }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }) ?? { attempts: null })),
+  }))
+  ctx.tools.register(defineTool({
     name: 'long_task_invalidate', description: 'Invalidate one task and its reachable downstream work using recorded evidence.',
     parameters: { goal_id: { type: 'string', required: true }, task_id: { type: 'string', required: true }, reason: { type: 'string', required: true }, evidence_refs: { type: 'array', items: { type: 'string' } } }, output: toolOutput,
     execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.invalidateTask(args.goal_id, args.task_id, args.reason, args.evidence_refs ?? []))),

@@ -119,3 +119,33 @@ Tests: timeout surfacing and per-task override in `tests/dsh-adapters.spec.ts`;
 `timeoutMs` validation in `tests/graph.spec.ts`; scheduler forwarding and the
 actionable artifact-type error in `tests/runtime.spec.ts`; result-schema enum
 in `tests/dsh-adapters.spec.ts`.
+
+---
+
+## Model-facing execution visibility (option B)
+
+The long-task audit and the Claude/LangGraph/OpenAI comparison concluded that
+real-time streaming into the parent model's turn (Claude's cross-post style)
+is out of scope for this plugin: it requires harness round-execution support,
+and the synchronous `auto` create (V1 "superstep ownership") makes an
+in-turn stream architecturally impossible. The chosen level is option B —
+incremental, model-addressable reads of the execution trail that already
+exists durably:
+
+* **`long_task_events` (goal_id, cursor?, limit?, task_id?)** — pages
+  `runtime_events` oldest-first with an `afterSeq` cursor. Events are projected
+  to a compact summary (`EventSummary`) that **excludes `context`, `content`,
+  and `tasks` payload keys**, so polling a long goal does not flood the model
+  context with context manifests or inline artifacts. Honours
+  `workspaceScope` isolation like every other model tool.
+* **`long_task_attempt_sessions` (goal_id, task_id?)** — resolves the durable
+  child session IDs (`dshSessionId`) of execution attempts. The model returns
+  these to the user so they can jump into the subagent's own conversation log
+  (the same `.jsonl.zstd` format as a native session). Honours
+  `workspaceScope` isolation.
+
+Both are pure reads on existing projections (`RuntimeEventStore.listEvents`,
+`listAttempts`) plus a new scope assertion; no storage, lifecycle, or recovery
+semantics change. Tests: summary projection, cursor paging, attempt session
+resolution, scope rejection, and unknown-task nulls in `tests/task-api.spec.ts`;
+tool registration in `tests/plugin.spec.ts`.
