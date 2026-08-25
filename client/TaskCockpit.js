@@ -13,7 +13,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const [editing, setEditing] = React.useState(false)
   const [objective, setObjective] = React.useState('')
   const [reason, setReason] = React.useState('')
-  React.useEffect(() => setSelectedId(initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph])
+  React.useEffect(() => setSelectedId(previous => (previous !== undefined && graph?.nodes.some(node => node.id === previous)) ? previous : initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph])
   const dataState = cockpitDataState(task, graph)
   if (dataState === 'loading') return e('p', null, '正在加载任务…')
   if (dataState === 'missing') return e('section', { className: 'ltr-cockpit' }, e('button', { type: 'button', onClick: onBack }, '← 全部任务'), e('p', { className: 'ltr-error' }, '任务不存在或已被清理。'))

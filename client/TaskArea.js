@@ -31,12 +31,32 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
     return () => { live = false; clearInterval(timer) }
   }, [open, remote, query, state, archived, showAll, sessionId])
   React.useEffect(() => {
-    if (!selectedId) return
+    if (!open || !selectedId) return
+    let live = true
+    let inflight = false
+    let timer = null
+    let eventsCursor = 0
+    const load = () => {
+      if (!live || inflight) return
+      inflight = true
+      Promise.all([remote.getTask({ taskId: selectedId }), remote.getTaskGraph({ taskId: selectedId }), remote.listTaskEvents({ taskId: selectedId, cursor: eventsCursor })])
+        .then(([nextTask, nextGraph, page]) => {
+          if (!live) return
+          const taskValue = remoteValue(nextTask)
+          const graphValue = remoteValue(nextGraph)
+          const nextEvents = remoteValue(page)?.items ?? []
+          if (taskValue !== undefined) setTask(taskValue)
+          if (graphValue !== undefined) setGraph(graphValue)
+          if (nextEvents.length) { setEvents(previous => [...previous, ...nextEvents].slice(-200)); eventsCursor = nextEvents[nextEvents.length - 1].seq }
+        })
+        .catch(reason => { if (live) setError(String(reason)) })
+        .finally(() => { inflight = false })
+    }
     setTask(undefined); setGraph(undefined); setEvents([])
-    Promise.all([remote.getTask({ taskId: selectedId }), remote.getTaskGraph({ taskId: selectedId }), remote.listTaskEvents({ taskId: selectedId, cursor: 0 })])
-      .then(([nextTask, nextGraph, page]) => { setTask(remoteValue(nextTask)); setGraph(remoteValue(nextGraph)); setEvents(remoteValue(page)?.items ?? []) })
-      .catch(reason => setError(String(reason)))
-  }, [selectedId, remote])
+    void load()
+    timer = setInterval(load, 3000)
+    return () => { live = false; if (timer) clearInterval(timer) }
+  }, [open, selectedId, remote])
   React.useEffect(() => { if (initialTaskId) setSelectedId(initialTaskId) }, [initialTaskId])
   React.useEffect(() => {
     if (!open || !sessionId) return

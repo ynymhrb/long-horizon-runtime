@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { layoutTaskGraph, stableCanvasSize, truncateGraphText, visibleTaskGraph } from '../client/task-graph.js'
-import { formatTaskProgress, taskStatePresentation } from '../client/task-presentation.js'
+import { dagToneCss, formatTaskProgress, taskStatePresentation } from '../client/task-presentation.js'
 
 describe('long task DAG layout', () => {
   test('places dependencies in increasing stable ranks', () => {
@@ -55,6 +55,14 @@ test('maps durable states to a closed visual vocabulary', () => {
   expect(taskStatePresentation('BLOCKED')).toMatchObject({ tone: 'error', label: '受阻' })
   expect(taskStatePresentation('INVALIDATED')).toMatchObject({ tone: 'muted', label: '已失效' })
   expect(taskStatePresentation('UNKNOWN')).toMatchObject({ tone: 'muted', label: '未知状态' })
+})
+
+test('gives every DAG state tone a visible node stroke, including running', () => {
+  expect(dagToneCss).toContain('.ltr-node.tone-ongoing>rect')
+  expect(dagToneCss).toContain('.ltr-node.tone-done>rect')
+  expect(dagToneCss).toContain('.ltr-node.tone-error>rect')
+  expect(dagToneCss).toContain('.ltr-node.tone-warning>rect')
+  expect(dagToneCss).toContain('.ltr-node.tone-muted>rect')
 })
 
 test('renders progress with the current task objective instead of its internal id', () => {

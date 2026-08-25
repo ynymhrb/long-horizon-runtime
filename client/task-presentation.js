@@ -17,6 +17,14 @@ export function taskStatePresentation(state) {
   return STATES[state] ?? { tone: 'muted', label: '未知状态' }
 }
 
+/**
+ * SVG node stroke rules for every DAG tone, embedded by the client bundle so
+ * the graph and its legend always agree. RUNNING must be visibly distinct
+ * from pending work, so `tone-ongoing` gets the business accent like other
+ * active tones; cancelled/superseded work is dashed to read as retired.
+ */
+export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}'
+
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
   return { ...state, progress: `${task.progress.succeeded}/${task.progress.total}`, detail: task.reason ?? task.currentOrLastNode?.objective ?? '' }
