@@ -81,6 +81,95 @@ therefore always use one shared durable database.
   DAG. The UI must present its durable state and failure timeline as no-plan
   history, never as an indefinitely loading Cockpit.
 
+## Open-source routing and profile rules
+
+- Long Horizon Runtime is exposed through ordinary DSH chat presets. Do not
+  present a public “long-task mode” merely to enable the runtime's tools.
+  `task-orchestrator` is an internal execution profile, not a user-facing
+  capability switch.
+- The `long-task:routing` prompt section is evaluated for the assembling Agent.
+  It must render as an empty string for `origin: subagent` or positive
+  `subagentDepth`; planner and worker children must never receive its routing
+  policy text.
+- Every runtime-created planner or execution child must use a DSH
+  `toolFilter.deny` that includes every `long_task_*` lifecycle tool and the
+  native goal-management tools. This is the authorization fence; prompt
+  exclusion alone is insufficient.
+- `routingMode: advisory` is the default and preserves native goal tools.
+  `routingMode: strict` may omit native goal-management schemas only in a
+  top-level model Agent assembly. Never apply a host-global restriction, and
+  do not describe strict mode as enforcement until the DSH tool-call path has
+  a focused integration test.
+
+# Open-source routing implementation plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans`
+> to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
+
+**Goal:** Route durable work from normal DSH chat without exposing a long-task
+mode, while excluding routing and task-lifecycle authority from delegated
+planner and worker Agents.
+
+**Architecture:** The host plugin registers a dynamic routing prompt section
+whose content depends on the assembling Agent. The existing DSH adapters pass
+a deny filter on every child start. A scoped prompt-assembly transformer
+implements optional strict schema visibility for top-level Agents; all runtime
+state remains unchanged.
+
+**Tech Stack:** TypeScript, Vitest, Cordis `systemPrompt`, DSH tools and
+subagent spawn provider.
+
+### Task 1: Routing policy and child tool authority
+
+**Files:** Modify `src/tools.ts`, `src/dsh-adapters.ts`; create
+`src/routing-policy.ts`; test `tests/plugin.spec.ts`, `tests/dsh-adapters.spec.ts`.
+
+- [x] Write failing tests proving the routing section is nonempty for a root
+  Agent and empty for a subagent-origin/depth Agent, and proving planner and
+  execution starts carry the exact deny-list.
+- [x] Run those focused tests and observe the missing prompt section and
+  absent `toolFilter` fields.
+- [x] Add `ROUTING_POLICY`, `isDelegatedAgent`, and a shared
+  `CHILD_TASK_TOOL_DENY` constant. Register the dynamic named section through
+  `ctx.systemPrompt.section` at tool-guidance order.
+- [x] Extend `DshAdapterOptions` and `runStructured` so planner and execution
+  starts forward the shared deny-list without changing their output-schema,
+  abort, or agent-option behavior.
+- [x] Re-run focused tests, then commit
+  `feat: route long tasks and fence delegated children`.
+
+### Task 2: Advisory and strict top-level schema routing
+
+**Files:** Modify `src/tools.ts`, `cordis.patch.yml`, `README.md`; test
+`tests/plugin.spec.ts` and an integration-style system-prompt assembly test.
+
+- [ ] Write failing tests for default `routingMode: advisory`, strict removal
+  of native `create_goal/get_goal/update_goal` only for a root Agent assembly,
+  and unchanged schemas for delegated children.
+- [ ] Run focused tests and observe that `routingMode` and the assembly
+  transformer do not exist.
+- [ ] Add validated `routingMode: 'advisory' | 'strict'` configuration with
+  advisory as the bundle default. In strict mode, filter only the assembled
+  tool schemas for root Agent scope; retain the underlying Host registry and
+  all non-goal tools.
+- [ ] Document that strict is a model-facing schema policy and its exact
+  native-goal trade-off; do not add a user-facing chat mode.
+- [ ] Re-run focused tests, then commit
+  `feat: add configurable long-task routing policy`.
+
+### Task 3: Verification and open-source handoff
+
+**Files:** Modify `README.md`, this decision record; test all suites.
+
+- [ ] Add user-facing examples: standard chat creates a draft durable task,
+  `lt_` continuation, advisory native-goal fallback, and strict-mode trade-off.
+- [ ] Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm pack --dry-run`,
+  and `git diff --check`.
+- [ ] Start a disposable DSH Web profile, verify the routing section is absent
+  from a child session's assembled prompt and the denied lifecycle tools are
+  absent from its tool schema; do not execute a real user task.
+- [ ] Commit documentation and verification evidence.
+
 # Task Lifecycle, Goal Revision, and Autonomy Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

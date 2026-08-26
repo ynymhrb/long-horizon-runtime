@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from '../src/dsh-adapters.js'
 import { V1_ARTIFACT_TYPES } from '../src/domain.js'
+import { CHILD_TASK_TOOL_DENY } from '../src/routing-policy.js'
 
 describe('DSH adapters', () => {
   test('uses the current parent, parses structured planner output, and disposes the child run', async () => {
@@ -31,6 +32,7 @@ describe('DSH adapters', () => {
 
     expect(plan).toMatchObject({ goalId: 'goal-1', revision: 1 })
     expect(request).toMatchObject({ parent: { id: 'parent' } })
+    expect(request?.toolFilter).toEqual({ deny: CHILD_TASK_TOOL_DENY })
     expect(() => assertObjectJsonSchema(request!.outputSchema)).not.toThrow()
     expect(disposed).toBe(true)
   })
@@ -49,6 +51,7 @@ describe('DSH adapters', () => {
     }))
     const artifactsSchema = (request!.outputSchema as { properties: { artifacts: { items: { properties: { type: { enum: string[] } } } } } }).properties.artifacts.items.properties.type
     expect(artifactsSchema.enum).toEqual([...V1_ARTIFACT_TYPES])
+    expect(request?.toolFilter).toEqual({ deny: CHILD_TASK_TOOL_DENY })
   })
 
   test('maps a completed execution child result into the runtime contract', async () => {

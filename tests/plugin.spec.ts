@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vitest'
 import { apply } from '../src/tools.js'
 import { LongTaskRuntime } from '../src/runtime.js'
+import { routingPolicyText } from '../src/routing-policy.js'
+
+describe('long-task routing policy', () => {
+  test('renders only for a top-level conversation agent', () => {
+    expect(routingPolicyText({ session: { header: { origin: 'user' } }, options: { subagentDepth: 0 } } as never)).toContain('long_task_create')
+    expect(routingPolicyText({ session: { header: { origin: 'subagent' } }, options: { subagentDepth: 1 } } as never)).toBe('')
+  })
+})
 
 describe('Cordis plugin surface', () => {
   test('provides one durable runtime and registers compatibility plus canonical control tools', async () => {
@@ -11,7 +19,7 @@ describe('Cordis plugin surface', () => {
       subagents: { async start() { return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [] }] } }), async dispose() {} } } },
       provide(name: string, service: unknown) { provided.set(name, service) },
       reflect: { provide() {} },
-      effect() { return () => {} },
+      effect() { return () => {} }, systemPrompt: { section() { return () => {} } },
     }
     apply(ctx as never, { databasePath: ':memory:', artifactDirectory: 'artifacts', plannerProvider: 'planner', executionProvider: 'worker' })
 
@@ -30,7 +38,7 @@ describe('Cordis plugin surface', () => {
     const provided = new Map<string, unknown>()
     const ctx = {
       tools: { register(tool: { name: string; execute(args: Record<string, unknown>, exec: { agent?: unknown; signal: AbortSignal }): Promise<unknown> }) { registered.set(tool.name, tool); return () => {} } },
-      subagents: {}, provide(name: string, service: unknown) { provided.set(name, service) }, reflect: { provide() {} }, effect() { return () => {} },
+      subagents: {}, provide(name: string, service: unknown) { provided.set(name, service) }, reflect: { provide() {} }, effect() { return () => {} }, systemPrompt: { section() { return () => {} } },
     }
     apply(ctx as never, {
       databasePath: ':memory:', artifactDirectory: 'artifacts', plannerProvider: 'planner', executionProvider: 'worker',
@@ -46,7 +54,7 @@ describe('Cordis plugin surface', () => {
     const provided = new Map<string, unknown>()
     const ctx = {
       tools: { register(tool: { name: string; execute(args: Record<string, unknown>, exec: { agent?: unknown; signal: AbortSignal }): Promise<unknown> }) { registered.set(tool.name, tool); return () => {} } },
-      subagents: {}, provide(name: string, service: unknown) { provided.set(name, service) }, reflect: { provide() {} }, effect() { return () => {} },
+      subagents: {}, provide(name: string, service: unknown) { provided.set(name, service) }, reflect: { provide() {} }, effect() { return () => {} }, systemPrompt: { section() { return () => {} } },
     }
     apply(ctx as never, {
       databasePath: ':memory:', artifactDirectory: 'artifacts', plannerProvider: 'planner', executionProvider: 'worker',

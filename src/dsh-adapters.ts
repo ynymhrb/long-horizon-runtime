@@ -4,6 +4,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SubagentRun, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import { V1_ARTIFACT_TYPES } from './domain.js'
+import { CHILD_TASK_TOOL_DENY } from './routing-policy.js'
 import type { ExecutionAdapter, ExecutionResult, PlannerAdapter } from './adapters.js'
 import type { PlanDraft } from './domain.js'
 
@@ -122,6 +123,7 @@ async function runStructured(
     parent: currentParent(),
     signal,
     ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions as never }),
+    toolFilter: { deny: [...CHILD_TASK_TOOL_DENY] },
     outputSchema: outputSchema as never,
   })
   onStarted?.(String(run.id))

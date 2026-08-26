@@ -4,6 +4,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from './dsh-adapters.js'
 import { LongTaskRuntime } from './runtime.js'
 import { TaskControlApi } from './task-api.js'
+import { routingPolicyText } from './routing-policy.js'
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -37,7 +38,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'long-task-runtime'
-export const inject = ['tools', 'subagents']
+export const inject = ['tools', 'subagents', 'systemPrompt']
 
 /** Mount the runtime service and six stateless model-facing controls. */
 export function apply(ctx: Context, input: Config): void {
@@ -49,6 +50,11 @@ export function apply(ctx: Context, input: Config): void {
     databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true,
   })
   ctx.provide('longTaskRuntime', runtime)
+  ctx.systemPrompt.section({
+    name: 'long-task:routing',
+    order: 130,
+    text: assembly => routingPolicyText(assembly.agent),
+  })
   const taskApi = new TaskControlApi(runtime)
   ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')
   // Reconcile persisted attempts at activation. Execution itself remains tied to a later live tool parent.
@@ -82,7 +88,7 @@ export function apply(ctx: Context, input: Config): void {
   }))
   ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined) taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); return runtime.confirmGoal(args.goal_id, exec.agent, exec.signal) })) }))
   ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }))
-  ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused durable long-task goal. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined) taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); return runtime.resumeGoal(args.goal_id, exec.agent, args.recovery_resolution, exec.signal) })) }))
+  ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal. A web-side resume only marks the goal RUNNING without dispatching rounds; this tool with a live parent drives the actual execution. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined) taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); return runtime.resumeGoal(args.goal_id, exec.agent, args.recovery_resolution, exec.signal) })) }))
   ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }))
   ctx.tools.register(defineTool({
     name: 'long_task_events', description: 'Read a page of durable runtime events for a long task, oldest first, with a cursor for incremental polling. Payloads are compact summaries: context manifests and inline artifact content are excluded. Use this to observe what the scheduler and task children actually did (TaskAttemptStarted, ValidationRecorded, TaskCompleted, replan decisions, etc.).',
