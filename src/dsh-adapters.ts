@@ -43,6 +43,8 @@ const PLAN_SCHEMA = {
           retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer' } }, required: ['maxAttempts'], additionalProperties: false },
           sideEffectClass: { type: 'string', enum: ['read_only', 'idempotent', 'external_effect'] }, validator: { type: 'string' },
           timeoutMs: { type: 'integer' },
+          executionProfile: { type: 'string' },
+          requiredCapabilities: { type: 'array', items: { type: 'string' } },
         }, required: ['id', 'objective', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
       },
     },

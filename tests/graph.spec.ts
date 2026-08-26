@@ -10,6 +10,11 @@ function strictTask(id: string, objective: string, dependsOn: string[] = []) {
 }
 
 describe('plan validation', () => {
+  test('preserves execution profile and validates capability declarations', () => {
+    const plan = validatePlan({ goalId: 'g', revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', executionProfile: 'fast', requiredCapabilities: ['code'] }] })
+    expect(plan.tasks.get('a')).toMatchObject({ executionProfile: 'fast', requiredCapabilities: ['code'] })
+    expect(() => validatePlan({ goalId: 'g', revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', requiredCapabilities: [''] }] })).toThrow('invalid requiredCapabilities')
+  })
   test('rejects a cyclic dependency before the plan can run', () => {
     expect(() => validatePlan(plan([
       strictTask('a', 'first', ['b']), strictTask('b', 'second', ['a']),
