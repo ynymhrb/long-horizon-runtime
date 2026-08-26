@@ -6,6 +6,7 @@ import { RuntimeEventStore } from '../src/event-store.js'
 import { LongTaskRuntime } from '../src/runtime.js'
 import { ArtifactStore } from '../src/artifacts.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
+import { ProfileRouter, normalizeExecutionProfiles } from '../src/execution-profiles.js'
 
 const directories: string[] = []
 const stores: RuntimeEventStore[] = []
@@ -37,6 +38,16 @@ const planner: PlannerAdapter = {
 }
 
 describe('durable runtime core', () => {
+  test('persists the selected execution profile before dispatching the child', async () => {
+    const store = createStore()
+    let receivedProfile: unknown
+    const routedPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', executionProfile: 'fast', requiredCapabilities: ['code'] }] } } }
+    const router = new ProfileRouter(normalizeExecutionProfiles({ profiles: [{ id: 'default', providerName: 'spawn' }, { id: 'fast', providerName: 'spawn-fast', capabilities: ['code'] }], defaultProfile: 'default' }))
+    const runtime = new LongTaskRuntime(routedPlanner, { async execute(input) { receivedProfile = input.profile; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, profileRouter: router })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(receivedProfile).toMatchObject({ id: 'fast', providerName: 'spawn-fast' })
+    expect(store.listExecutionProfileResolutions(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', taskId: 'a' })])
+  })
   test('archives a running goal by cancelling it first and can restore it', async () => {
     const store = createStore()
     const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })

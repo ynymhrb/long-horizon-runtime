@@ -26,6 +26,7 @@ export interface DshAdapterOptions {
   readonly providerName: string
   readonly agentOptions?: Record<string, unknown>
   readonly timeoutMs?: number
+  readonly toolDeny?: readonly string[]
 }
 
 const PLAN_SCHEMA = {
@@ -77,12 +78,18 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       // A per-task timeoutMs overrides the deployment default, which itself
       // overrides an absent timeout. Distinguish a timeout abort from an
       // operator/other abort so the failure summary is actionable.
-      const timeoutMs = input.timeoutMs ?? options.timeoutMs
+      const timeoutMs = input.profile?.timeoutMs ?? input.timeoutMs ?? options.timeoutMs
       const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs)
       const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
       let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }
       let dshSessionId: string | undefined
-      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId) }) }
+      const profileOptions: DshAdapterOptions = {
+        ...options,
+        ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }),
+        ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }),
+        ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }),
+      }
+      try { settled = await runStructured(subagents, profileOptions, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId) }) }
       catch (error) {
         const failure = error as Error & { dshSessionId?: string }
         const summary = timeout?.aborted === true ? `DSH child stopped: timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : failure.message
@@ -123,7 +130,7 @@ async function runStructured(
     parent: currentParent(),
     signal,
     ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions as never }),
-    toolFilter: { deny: [...CHILD_TASK_TOOL_DENY] },
+    toolFilter: { deny: [...new Set([...CHILD_TASK_TOOL_DENY, ...(options.toolDeny ?? [])])] },
     outputSchema: outputSchema as never,
   })
   onStarted?.(String(run.id))

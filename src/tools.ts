@@ -5,7 +5,7 @@ import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } fro
 import { LongTaskRuntime } from './runtime.js'
 import { TaskControlApi } from './task-api.js'
 import { filterRoutingTools, routingPolicyText, type RoutingMode } from './routing-policy.js'
-import { normalizeExecutionProfiles, type ExecutionProfile, type ExecutionProfileSet } from './execution-profiles.js'
+import { normalizeExecutionProfiles, ProfileRouter, type ExecutionProfile, type ExecutionProfileSet } from './execution-profiles.js'
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -54,7 +54,7 @@ export function apply(ctx: Context, input: Config): void {
   const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile })
   const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.executionTimeoutMs, ...profile })
   const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true,
+    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles),
   })
   ctx.provide('longTaskRuntime', runtime)
   ctx.systemPrompt.section({

@@ -54,6 +54,25 @@ describe('DSH adapters', () => {
     expect(request?.toolFilter).toEqual({ deny: CHILD_TASK_TOOL_DENY })
   })
 
+  test('forwards a resolved profile provider, options, timeout, and additive deny list', async () => {
+    let provider = ''
+    let request: Record<string, unknown> | undefined
+    const adapter = createDshExecutionAdapter({
+      async start(receivedProvider: string, received: Record<string, unknown>) {
+        provider = receivedProvider
+        request = received
+        return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { summary: 'done', artifacts: [], evidence: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'worker' })
+    await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+      profile: { id: 'fast', providerName: 'spawn-fast', capabilities: ['code'], toolDeny: ['shell'], timeoutMs: 12_000, agentOptions: { model: 'fast' }, agentOptionsHash: 'hash', selectionReason: 'task selected fast' },
+    }))
+    expect(provider).toBe('spawn-fast')
+    expect(request).toMatchObject({ agentOptions: { model: 'fast' }, toolFilter: { deny: expect.arrayContaining([...CHILD_TASK_TOOL_DENY, 'shell']) } })
+  })
+
   test('maps a completed execution child result into the runtime contract', async () => {
     const adapter = createDshExecutionAdapter({
       async start() {

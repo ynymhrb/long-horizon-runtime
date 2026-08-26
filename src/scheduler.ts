@@ -4,6 +4,7 @@ import type { ContextView } from './context.js'
 import { V1_ARTIFACT_TYPES, type TaskNode, type TaskState } from './domain.js'
 import { RuntimeEventStore } from './event-store.js'
 import { ArtifactStore } from './artifacts.js'
+import { ProfileRouter, type ResolvedExecutionProfile } from './execution-profiles.js'
 
 type MutableTask = { -readonly [Key in keyof TaskNode]: TaskNode[Key] }
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate'
@@ -19,6 +20,7 @@ export interface SchedulerOptions {
   readonly validators?: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   readonly artifactStore?: ArtifactStore
   readonly onTerminalFailure?: (input: { readonly goalId: string; readonly task: TaskNode; readonly reason: string }) => Promise<void>
+  readonly profileRouter?: ProfileRouter
 }
 
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
@@ -31,6 +33,7 @@ export class Scheduler {
   private readonly validators: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   private readonly artifactStore: ArtifactStore | undefined
   private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
+  private readonly profileRouter: ProfileRouter | undefined
   private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
 
   constructor(private readonly adapter: ExecutionAdapter, options: number | SchedulerOptions) {
@@ -45,6 +48,7 @@ export class Scheduler {
     this.validators = { required: async () => ({ ok: true }), ...(typeof options === 'number' ? {} : options.validators ?? {}) }
     this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore
     this.onTerminalFailure = typeof options === 'number' ? undefined : options.onTerminalFailure
+    this.profileRouter = typeof options === 'number' ? undefined : options.profileRouter
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
 
@@ -138,6 +142,18 @@ export class Scheduler {
     const attemptRevision = this.store!.getGoal(goalId)?.revision ?? 1
     const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`
     this.aborters.set(attemptId, { goalId, controller })
+    let profile: ResolvedExecutionProfile | undefined
+    try { profile = this.profileRouter?.resolve({ task, defaultTimeoutMs: task.timeoutMs ?? 300_000 }) }
+    catch (error) {
+      this.aborters.delete(attemptId)
+      executionSignal?.removeEventListener('abort', relayAbort)
+      const reason = failureMessage(error)
+      this.store!.transaction(() => this.store!.append([
+        { type: 'ExecutionProfileRejected', goalId, taskId: task.id, payload: { attemptId, reason, requestedProfile: task.executionProfile ?? null } },
+        { type: 'GoalPaused', goalId, payload: { reason: `execution profile rejected for ${task.id}: ${reason}` } },
+      ]))
+      return
+    }
     let context: ContextView
     try { context = this.context(goalId, task) }
     catch (error) {
@@ -153,11 +169,12 @@ export class Scheduler {
       return
     }
     this.store!.transaction(() => this.store!.append([
+      ...(profile === undefined ? [] : [{ type: 'ExecutionProfileResolved', goalId, taskId: task.id, payload: { attemptId, profileId: profile.id, providerName: profile.providerName, agentOptionsHash: profile.agentOptionsHash, capabilities: profile.capabilities, toolDeny: profile.toolDeny, timeoutMs: profile.timeoutMs, selectionReason: profile.selectionReason } }]),
       { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
       { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
     ]))
     let result
-    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs }), onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
+    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs }), ...(profile === undefined ? {} : { profile }), onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
