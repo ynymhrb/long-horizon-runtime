@@ -24,11 +24,11 @@
 ### Install from GitHub
 
 ```bash
-dsh plugin --profile web add github:ynymhrb/long-horizon-runtime
+dsh plugin --profile web add github:ynymhrb/long-horizon-runtime#master
 dsh web
 ```
 
-The first Git-source installation may be stopped by pnpm's build-approval policy. Follow pnpm's printed `allowBuilds` instruction in the Web profile's `pnpm-workspace.yaml`, then run the same `add` command again. The package's `prepare` script builds its required `dist/` files during installation.
+The repository includes its compiled `dist/` bundle, so Git installation does not run a build or depend on a local DeepSeek Harness checkout. `#master` is intentional: it is the project's supported release branch.
 
 ### Install a local checkout
 

@@ -53,7 +53,6 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "pnpm build",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json && pnpm run build:client",
     "build:client": "tsdown --config tsdown.client.config.ts"
