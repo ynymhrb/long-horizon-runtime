@@ -5,6 +5,7 @@ import { V1_ARTIFACT_TYPES, type TaskNode, type TaskState } from './domain.js'
 import { RuntimeEventStore } from './event-store.js'
 import { ArtifactStore } from './artifacts.js'
 import { ProfileRouter, type ResolvedExecutionProfile } from './execution-profiles.js'
+import { BudgetLedger, type BudgetReservation } from './budgets.js'
 
 type MutableTask = { -readonly [Key in keyof TaskNode]: TaskNode[Key] }
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate'
@@ -154,6 +155,21 @@ export class Scheduler {
       ]))
       return
     }
+    const budgetSummary = this.store!.getBudgetSummary(goalId)
+    const reservation: BudgetReservation = { attempts: 1, wallTimeMs: profile?.timeoutMs ?? task.timeoutMs ?? 300_000, estimatedTokens: 0, estimatedCostMicros: 0 }
+    const budgetActive = budgetSummary !== undefined || task.budget !== undefined
+    if (budgetActive) {
+      const decision = new BudgetLedger(budgetSummary?.usage).reserve({ ...(budgetSummary === undefined ? {} : { goal: budgetSummary.goal }), ...(task.budget === undefined ? {} : { task: task.budget }), estimate: reservation })
+      if (!decision.ok) {
+        this.aborters.delete(attemptId)
+        executionSignal?.removeEventListener('abort', relayAbort)
+        this.store!.transaction(() => this.store!.append([
+          { type: 'BudgetExhausted', goalId, taskId: task.id, payload: { attemptId, reason: decision.reason, estimate: reservation } },
+          { type: 'GoalPaused', goalId, payload: { reason: `budget exhausted for ${task.id}: ${decision.reason}` } },
+        ]))
+        return
+      }
+    }
     let context: ContextView
     try { context = this.context(goalId, task) }
     catch (error) {
@@ -170,9 +186,11 @@ export class Scheduler {
     }
     this.store!.transaction(() => this.store!.append([
       ...(profile === undefined ? [] : [{ type: 'ExecutionProfileResolved', goalId, taskId: task.id, payload: { attemptId, profileId: profile.id, providerName: profile.providerName, agentOptionsHash: profile.agentOptionsHash, capabilities: profile.capabilities, toolDeny: profile.toolDeny, timeoutMs: profile.timeoutMs, selectionReason: profile.selectionReason } }]),
+      ...(budgetActive ? [{ type: 'BudgetReserved', goalId, taskId: task.id, payload: { attemptId, usage: reservation } }] : []),
       { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
       { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
     ]))
+    const executionStartedAt = Date.now()
     let result
     try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs }), ...(profile === undefined ? {} : { profile }), onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
@@ -185,6 +203,7 @@ export class Scheduler {
     // work.  In particular, it must never feed the automatic-replan loop.
     if (controller.signal.aborted) {
       this.store!.transaction(() => this.store!.append([
+        ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId } }] : []),
         { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } },
         { type: 'GoalPaused', goalId, payload: { reason: 'conversation stopped; resume with a live parent' } },
       ]))
@@ -206,6 +225,7 @@ export class Scheduler {
       const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
       this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
+      if (budgetActive) events.push({ type: 'BudgetSettled', goalId, taskId: task.id, payload: { attemptId, reservation, actual: { attempts: 1, wallTimeMs: Math.max(0, Date.now() - executionStartedAt), estimatedTokens: 0, estimatedCostMicros: 0 } } })
       if (result.dshSessionId !== undefined) events.push({ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId: result.dshSessionId } })
       for (const [index, artifact] of result.artifacts.entries()) {
         const id = `${attemptId}:artifact:${index}`

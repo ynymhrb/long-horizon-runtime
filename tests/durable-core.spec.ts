@@ -38,6 +38,15 @@ const planner: PlannerAdapter = {
 }
 
 describe('durable runtime core', () => {
+  test('pauses before starting a child when its goal budget cannot reserve an attempt', async () => {
+    const store = createStore()
+    let executions = 0
+    const runtime = new LongTaskRuntime(planner, { async execute() { executions += 1; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, goalBudget: { maxAttempts: 0 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(executions).toBe(0)
+    expect(goal.state).toBe('PAUSED')
+    expect(store.listEvents(goal.id).map(event => event.type)).toContain('BudgetExhausted')
+  })
   test('persists the selected execution profile before dispatching the child', async () => {
     const store = createStore()
     let receivedProfile: unknown
