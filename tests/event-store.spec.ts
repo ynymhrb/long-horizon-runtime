@@ -119,3 +119,16 @@ describe('RuntimeEventStore', () => {
     expect(runtime.listGoals({ archived: true }).map(goal => goal.id)).toEqual(['lt_recent'])
   })
 })
+
+describe('execution profile resolutions', () => {
+  test('projects and replays a durable resolved profile snapshot', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_profile', payload: { objective: 'route', constraints: [], planningMode: 'auto' } },
+      { type: 'ExecutionProfileResolved', goalId: 'lt_profile', taskId: 'node-a', payload: { attemptId: 'attempt-a', profileId: 'fast', providerName: 'spawn-fast', agentOptionsHash: 'abc', capabilities: ['code'], toolDeny: ['shell'], timeoutMs: 30_000, selectionReason: 'task selected fast' } },
+    ])
+    expect(store.listExecutionProfileResolutions('lt_profile')).toEqual([expect.objectContaining({ taskId: 'node-a', attemptId: 'attempt-a', profileId: 'fast', providerName: 'spawn-fast', timeoutMs: 30_000 })])
+    store.rebuild()
+    expect(store.listExecutionProfileResolutions('lt_profile')).toHaveLength(1)
+  })
+})

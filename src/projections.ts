@@ -18,6 +18,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, type TEXT NOT NULL, payload_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, level TEXT NOT NULL, content TEXT NOT NULL, refs_json TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE IF NOT EXISTS checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, event_seq INTEGER, revision INTEGER NOT NULL, payload_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS execution_profile_resolutions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT NOT NULL, provider_name TEXT NOT NULL, agent_options_hash TEXT NOT NULL, capabilities_json TEXT NOT NULL, tool_deny_json TEXT NOT NULL, timeout_ms INTEGER NOT NULL, selection_reason TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
@@ -68,6 +69,10 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'ContextManifestRecorded':
       if (taskId === undefined) throw new Error('ContextManifestRecorded requires taskId')
       db.prepare('INSERT OR REPLACE INTO context_manifests (attempt_id, goal_id, task_id, revision, selection_reason, context_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision), String(p.selectionReason), JSON.stringify(p.context ?? {}), seq)
+      break
+    case 'ExecutionProfileResolved':
+      if (taskId === undefined) throw new Error('ExecutionProfileResolved requires taskId')
+      db.prepare('INSERT INTO execution_profile_resolutions (goal_id, task_id, attempt_id, profile_id, provider_name, agent_options_hash, capabilities_json, tool_deny_json, timeout_ms, selection_reason, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), String(p.profileId), String(p.providerName), String(p.agentOptionsHash), JSON.stringify(p.capabilities ?? []), JSON.stringify(p.toolDeny ?? []), Number(p.timeoutMs), String(p.selectionReason), seq)
       break
     case 'PlanProposed':
       db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [], ...(p.baseRevision === undefined ? {} : { baseRevision: p.baseRevision }), ...(p.trigger === undefined ? {} : { trigger: p.trigger }) }))

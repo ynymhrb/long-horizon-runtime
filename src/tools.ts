@@ -5,6 +5,7 @@ import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } fro
 import { LongTaskRuntime } from './runtime.js'
 import { TaskControlApi } from './task-api.js'
 import { filterRoutingTools, routingPolicyText, type RoutingMode } from './routing-policy.js'
+import { normalizeExecutionProfiles, type ExecutionProfile, type ExecutionProfileSet } from './execution-profiles.js'
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -22,17 +23,21 @@ export interface Config {
   /** Profile-local compatibility scope for tasks resumed from another chat. */
   readonly workspaceScope?: string
   readonly defaultAgentProfile?: Record<string, unknown>
+  /** Explicit worker profiles; omitted keeps the historic single spawn worker. */
+  readonly executionProfiles?: readonly ExecutionProfile[]
+  readonly defaultExecutionProfile?: string
   /** Test/composition seam; normal deployments use the configured DSH adapters. */
   readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime
 }
 
-interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'retryPolicy' | 'artifactInlineLimitBytes'> {
+interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'retryPolicy' | 'artifactInlineLimitBytes' | 'executionProfiles' | 'defaultExecutionProfile'> {
   readonly maxConcurrentTasks: number
   readonly defaultPlanningMode: 'auto' | 'require_confirmation'
   readonly executionTimeoutMs: number
   readonly retryPolicy: { readonly maxAttempts: number }
   readonly artifactInlineLimitBytes: number
   readonly routingMode: RoutingMode
+  readonly executionProfiles: ExecutionProfileSet
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -155,7 +160,11 @@ function resolveConfig(config: Config): ResolvedConfig {
   const defaultPlanningMode = config.defaultPlanningMode ?? 'auto'
   if (defaultPlanningMode !== 'auto' && defaultPlanningMode !== 'require_confirmation') throw new TypeError('defaultPlanningMode must be auto or require_confirmation')
   if (routingMode !== 'advisory' && routingMode !== 'strict') throw new TypeError('routingMode must be advisory or strict')
-  return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode }
+  const executionProfiles = normalizeExecutionProfiles({
+    ...(config.defaultExecutionProfile === undefined ? {} : { defaultProfile: config.defaultExecutionProfile }),
+    profiles: config.executionProfiles ?? [{ id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }) }],
+  })
+  return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode, executionProfiles }
 }
 
 function requiredText(value: string, name: string): void { if (value.trim().length === 0) throw new TypeError(`${name} must be non-empty`) }

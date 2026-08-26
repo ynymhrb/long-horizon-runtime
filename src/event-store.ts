@@ -16,6 +16,7 @@ export interface DecisionProjection { readonly type: string; readonly payload: R
 export interface EvidenceProjection { readonly taskId?: string; readonly attemptId?: string; readonly value: unknown }
 export interface CheckpointProjection { readonly eventSeq?: number; readonly revision: number; readonly payload: Record<string, unknown> }
 export interface ContextManifestProjection { readonly attemptId: string; readonly taskId: string; readonly revision: number; readonly selectionReason: string; readonly context: Record<string, unknown> }
+export interface ExecutionProfileResolutionProjection { readonly taskId: string; readonly attemptId: string; readonly profileId: string; readonly providerName: string; readonly agentOptionsHash: string; readonly capabilities: readonly string[]; readonly toolDeny: readonly string[]; readonly timeoutMs: number; readonly selectionReason: string }
 
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export class RuntimeEventStore {
@@ -36,7 +37,7 @@ export class RuntimeEventStore {
   /** Rebuild every owned projection from ordered append-only events. */
   rebuild(): void {
     this.transaction(() => {
-      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
+      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM execution_profile_resolutions; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
       const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all() as Array<{ seq: number; type: string; goal_id: string; task_id: string | null; payload_json: string }>
       for (const row of rows) projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }, row.seq)
     })
@@ -60,7 +61,7 @@ export class RuntimeEventStore {
     const remove = (table: string) => this.db.prepare(`DELETE FROM ${table} WHERE goal_id = ?`)
     for (const goalId of goalIds) {
       remove('current_task_bindings').run(goalId)
-      remove('task_session_links').run(goalId); remove('context_manifests').run(goalId); remove('goal_versions').run(goalId)
+      remove('task_session_links').run(goalId); remove('context_manifests').run(goalId); remove('execution_profile_resolutions').run(goalId); remove('goal_versions').run(goalId)
       remove('plan_revisions').run(goalId); remove('task_nodes').run(goalId); remove('task_attempts').run(goalId); remove('artifacts').run(goalId)
       remove('evidence').run(goalId); remove('validation_results').run(goalId); remove('decisions').run(goalId); remove('memories').run(goalId); remove('checkpoints').run(goalId)
       remove('runtime_events').run(goalId)
@@ -87,6 +88,9 @@ export class RuntimeEventStore {
   }
   listContextManifests(goalId: string): ContextManifestProjection[] {
     return (this.db.prepare('SELECT attempt_id, task_id, revision, selection_reason, context_json FROM context_manifests WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<Record<string, unknown>>).map(row => ({ attemptId: String(row.attempt_id), taskId: String(row.task_id), revision: Number(row.revision), selectionReason: String(row.selection_reason), context: JSON.parse(String(row.context_json)) as Record<string, unknown> }))
+  }
+  listExecutionProfileResolutions(goalId: string): ExecutionProfileResolutionProjection[] {
+    return (this.db.prepare('SELECT task_id, attempt_id, profile_id, provider_name, agent_options_hash, capabilities_json, tool_deny_json, timeout_ms, selection_reason FROM execution_profile_resolutions WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<Record<string, unknown>>).map(row => ({ taskId: String(row.task_id), attemptId: String(row.attempt_id), profileId: String(row.profile_id), providerName: String(row.provider_name), agentOptionsHash: String(row.agent_options_hash), capabilities: JSON.parse(String(row.capabilities_json)) as string[], toolDeny: JSON.parse(String(row.tool_deny_json)) as string[], timeoutMs: Number(row.timeout_ms), selectionReason: String(row.selection_reason) }))
   }
   getPlan(goalId: string, revision?: number): { readonly revision: number; readonly state: string; readonly tasks: TaskNode[]; readonly invalidatedTaskIds: readonly string[]; readonly staleTaskIds: readonly string[]; readonly baseRevision?: number; readonly trigger?: Record<string, unknown> } | undefined {
     const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision])) as Record<string, unknown> | undefined

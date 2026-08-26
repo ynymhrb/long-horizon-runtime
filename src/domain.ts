@@ -32,6 +32,10 @@ export interface TaskDraft {
   readonly validator?: string
   /** Per-task child execution budget in milliseconds; overrides the deployment default when set. */
   readonly timeoutMs?: number
+  /** Optional named execution profile selected by the planner. */
+  readonly executionProfile?: string
+  /** Capabilities that the selected profile must advertise. */
+  readonly requiredCapabilities?: readonly string[]
 }
 
 /** Planner output before validation. */
