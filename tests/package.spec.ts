@@ -7,6 +7,7 @@ describe('package surface', () => {
     expect(pluginName).toBe('@deepseek-ai/dsh-long-task-runtime')
     expect(name).toBe('long-task-runtime')
     expect(inject).toEqual(['tools', 'subagents', 'systemPrompt'])
+    expect(manifest.scripts.prepare).toBe('pnpm build')
     expect(manifest.exports['.'].import).toBe('./dist/index.js')
   })
 })

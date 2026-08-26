@@ -1,52 +1,127 @@
-# DSH Long-Task Runtime
+# Long Horizon Runtime for DeepSeek Harness
 
-`@deepseek-ai/dsh-long-task-runtime` is a durable, single-machine control plane for long-running DSH goals. It stores plans, attempts, outputs, validation, and recovery state in its own SQLite event log; DSH child sessions provide planning and execution but are never the source of task state.
+`@deepseek-ai/dsh-long-task-runtime` adds durable, inspectable long-running work to [DeepSeek Harness](https://github.com/deepseek-harness/deepseek-harness) without modifying DSH source. It keeps task state in a local SQLite event log; DSH conversations and child agents are execution surfaces, never the source of truth.
 
-## Install and configure
+## What it provides
 
-Install this package through `dsh plugin --profile web add <tarball-or-package>`. Its `dsh.bundle` declaration contributes `cordis.patch.yml` to the profile composition, which mounts both the host runtime and its web client without editing DSH source. `plannerProvider` and `executionProvider` are names from `ctx.subagents.list()` (for example, an installed `spawn` provider). The package declares its DSH dependencies as peer dependencies so the host controls the compatible harness version.
+- Durable `lt_` task IDs that can continue from another conversation.
+- Versioned DAG plans, dependency-aware scheduling, retries, validated artifacts, and checkpoint recovery.
+- A Web Task Area with task list, status-colored DAG, timeline, goal editing, pause/resume, archive/restore, and linked-session navigation.
+- A compact current-task strip in conversations attached to a long task.
+- Goal versions and revision-fenced controls, so stale writes cannot overwrite newer state.
+- Policy-gated automatic replanning: only bounded, unfinished `read_only` work may be applied automatically.
+- Planner and worker child-agent isolation: they cannot recursively create, edit, resume, or cancel the parent task.
+- Standard-chat routing: users stay in their normal DSH chat mode; they do not need a “long-task mode”.
 
-Required settings are `databasePath`, `artifactDirectory`, `plannerProvider`, and `executionProvider`. Optional settings are `maxConcurrentTasks` (default 1), `defaultPlanningMode` (`auto` by default), `executionTimeoutMs` (default 300000), `retryPolicy.maxAttempts` (default 1), `artifactInlineLimitBytes` (default 65536), `autoReplan` (default true in the DSH plugin), `defaultAgentProfile`, `routingMode` (`advisory` by default), and profile-local `workspaceScope`.
+## Requirements
 
-The plugin exports `apply(ctx, config)`. It calls `ctx.provide('longTaskRuntime', runtime)` so other DSH plugins can use the same durable service. It registers the six V1 compatibility tools plus the V1.1 task-ID control API:
+- A compatible DeepSeek Harness installation with the Web profile and an in-process `spawn` subagent provider.
+- Node.js `^22.19.0` or `>=24.0.0` and pnpm on `PATH` for Git-source installation.
+- A configured DSH model/provider capable of normal chats and child agents.
 
-- `long_task_create`
-- `long_task_confirm`
-- `long_task_status`
-- `long_task_resume`
-- `long_task_cancel`
-- `long_task_invalidate`
-- `long_task_get`
-- `long_task_update`
-- `long_task_edit_goal`
-- `long_task_accept_replan`
+## Install
 
-New tasks use an `lt_` ID. `long_task_get` supports a new chat continuing a task by ID; `long_task_update` uses `controlRevision` as its compare-and-swap guard. This is separate from the plan/DAG `revision`.
+### Install from GitHub
 
-The package also exposes a DSH web client at `@deepseek-ai/dsh-long-task-runtime/client`. The loader discovers it from `dsh.client`; it adds a global Task Area action, a task strip only for chats with a current task, and an additive overlay. No `apps/web` source modification is needed.
+```bash
+dsh plugin --profile web add github:ynymhrb/long-horizon-runtime
+dsh web
+```
 
-## Standard-chat routing
+The first Git-source installation may be stopped by pnpm's build-approval policy. Follow pnpm's printed `allowBuilds` instruction in the Web profile's `pnpm-workspace.yaml`, then run the same `add` command again. The package's `prepare` script builds its required `dist/` files during installation.
 
-Long Horizon Runtime is available from normal DSH chat; users do not need to select a “long-task mode”. The plugin contributes a routing policy to top-level conversations:
+### Install a local checkout
 
-- explicit `lt_` task IDs and requests to continue, inspect, pause, resume, edit, or cancel a long task use `long_task_*` tools;
-- work that is resumable, cross-session, DAG/subagent based, auditable, or requires plan review uses `long_task_create` and defaults to `require_confirmation`;
-- short, single-session progress tracking may use DSH's native goal tools; ordinary one-shot work creates no goal.
+Run this from the repository root:
 
-The plugin never asks planner or worker children to make that choice. Their routing section renders empty, and their DSH `toolFilter` removes both `long_task_*` lifecycle tools and native goal-management tools. This prevents a delegated task node from recursively creating or changing the parent task.
+```bash
+dsh plugin --profile web add .
+dsh web
+```
 
-`routingMode: advisory` is the default and keeps native goal schemas visible. `routingMode: strict` is an advanced deployment option: it omits native `create_goal`, `get_goal`, and `update_goal` schemas from root conversation turns, so any persistent goal created by the model uses Long Horizon Runtime. It does not create a task for ordinary one-shot requests, and it does not modify DSH source or a user profile's local patch.
+### Install a built tarball
 
-## Goal changes, automatic replanning, and deletion
+```bash
+pnpm pack
+dsh plugin --profile web add ./deepseek-ai-dsh-long-task-runtime-<version>.tgz
+dsh web
+```
 
-“修改原始目标” creates an append-only goal version and asks the planner for a new revision. The replacement waits for confirmation, while automatic replanning is limited to a terminal validation failure whose candidate changes only unfinished `read_only` work and leaves completed nodes and verified artifacts intact. Any external-effect, completed-work, or scope-changing candidate waits for confirmation.
+The bundle contributes its own `cordis.patch.yml`; plugin defaults are installed with the package. Do not edit DSH source to install or use it.
 
-Deleting a task cancels active work and archives it. Archived tasks are hidden from the default Task Area list and can be restored for 30 days; profile maintenance purges expired task records and their associated projections. The Cockpit also exposes status legend, readable event timeline, and the task's attached-session navigation target.
+## Use it from a normal chat
 
-Each tool requires a current DSH parent Agent. Planner and worker children are started with `ctx.subagents.start(providerName, request)`, receive a structured JSON schema, and are always disposed after settlement. A missing parent Agent is rejected rather than creating an orphan child.
+The default routing mode is `advisory`: the model chooses a durable task for work that needs a plan, multiple dependent stages, child agents, task artifacts, pause/recovery, audit history, or cross-session continuation. Short, single-session progress tracking can still use DSH's native goal feature. One-shot questions create no goal.
 
-## Execution semantics
+### Create a draft long task
 
-Planning creates a validated DAG. Task attempts run in isolated one-shot child sessions. The runtime only accepts declared task output after result validation, and it persists event history separately from DSH session history. On restart, safe `read_only` / `idempotent` work can retry; an interrupted `external_effect` task is paused when recovery cannot establish whether the effect occurred.
+Ask normally:
 
-The children must return schema-conforming JSON. Planner output must contain `revision` and `tasks`; worker output must contain `summary`, `artifacts`, and `evidence`. If a provider does not deliver `structured` output, the adapter accepts an exactly JSON final text response instead.
+```text
+研究 RAG 召回率的影响因素；拆成可验证的子任务，先给我计划，等我确认再执行。
+```
+
+The model should create a durable task in `AWAITING_CONFIRMATION`, return an `lt_…` ID, and show it in Task Area. No work starts until you confirm.
+
+### Confirm, pause, or change the goal
+
+Use natural language or Task Area controls:
+
+```text
+确认执行 lt_abc123。
+暂停 lt_abc123。
+把 lt_abc123 的原始目标改为“只研究中文技术资料”，原因是范围收窄。
+```
+
+Goal edits preserve history and produce a reviewable replacement plan. A conversation stop pauses the durable task; it is not failure evidence and does not trigger automatic replanning.
+
+### Continue from another conversation
+
+```text
+继续任务 lt_abc123，先告诉我当前状态和未完成节点。
+```
+
+The new conversation can attach the task as its current task, so its task strip and Task Area focus on the same durable record.
+
+## Routing configuration
+
+The package default is:
+
+```yaml
+routingMode: advisory
+```
+
+For an intentional machine-local customization only, add this to the `long-task-runtime` row in your Web profile's `cordis.patch.yml`:
+
+```yaml
+- id: long-task-runtime
+  config:
+    routingMode: strict
+```
+
+`strict` removes DSH-native `create_goal`, `get_goal`, and `update_goal` schemas from top-level model turns. It does not create a task for every request; it means that if the model creates a persistent goal, it must use Long Horizon Runtime. It is an advanced deployment choice because native lightweight goals are no longer available to the model in that profile.
+
+## Task lifecycle and safety
+
+- New tasks receive stable `lt_` IDs; task state, plans, attempts, evidence, and artifacts are append-only or revisioned.
+- A task's original goal may be edited, but its ID never changes.
+- Automatic replanning never applies a change that expands scope, touches external effects, invalidates completed work, or deactivates verified artifacts.
+- Deleting a task first cancels active work, then archives it. Archives are restorable for 30 days before purge.
+- An interrupted external-effect node remains blocked until an operator explicitly resolves its outcome.
+
+## Storage and integration boundary
+
+The default bundle stores its database under DSH Home at `long-task-runtime/long-task-runtime.sqlite` and file artifacts under `long-task-runtime/artifacts`. Browser code uses only the plugin's Typert remote API; the package injects additive DSH slots for Task Area and the conversation task strip. No DSH application file is patched.
+
+The exported plugin entry is `apply(ctx, config)`. It provides `ctx.longTaskRuntime` and registers `long_task_*` tools. It does **not** replace DSH's agent loop.
+
+## Development
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+pnpm pack --dry-run
+```
+
+The implementation roadmap, including V5 heterogeneous multi-agent routing, is in [docs/roadmaps/long-task-runtime-roadmap.md](docs/roadmaps/long-task-runtime-roadmap.md).
