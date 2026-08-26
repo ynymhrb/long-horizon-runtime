@@ -132,3 +132,18 @@ describe('execution profile resolutions', () => {
     expect(store.listExecutionProfileResolutions('lt_profile')).toHaveLength(1)
   })
 })
+
+describe('budget projections', () => {
+  test('projects configured limits and settled usage from append-only facts', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_budget', payload: { objective: 'budget', constraints: [], planningMode: 'auto' } },
+      { type: 'BudgetConfigured', goalId: 'lt_budget', payload: { scope: 'goal', limit: { maxAttempts: 2 } } },
+      { type: 'BudgetReserved', goalId: 'lt_budget', taskId: 'a', payload: { attemptId: 'a1', usage: { attempts: 1, wallTimeMs: 10, estimatedTokens: 2, estimatedCostMicros: 3 } } },
+      { type: 'BudgetSettled', goalId: 'lt_budget', taskId: 'a', payload: { attemptId: 'a1', reservation: { attempts: 1, wallTimeMs: 10, estimatedTokens: 2, estimatedCostMicros: 3 }, actual: { attempts: 1, wallTimeMs: 8, estimatedTokens: 1, estimatedCostMicros: 2 } } },
+    ])
+    expect(store.getBudgetSummary('lt_budget')).toEqual({ goal: { maxAttempts: 2 }, usage: { attempts: 1, wallTimeMs: 8, estimatedTokens: 1, estimatedCostMicros: 2 }, reservations: [] })
+    store.rebuild()
+    expect(store.getBudgetSummary('lt_budget')?.usage.wallTimeMs).toBe(8)
+  })
+})

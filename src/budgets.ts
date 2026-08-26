@@ -1,9 +1,5 @@
-export interface BudgetLimit {
-  readonly maxAttempts?: number
-  readonly maxWallTimeMs?: number
-  readonly maxEstimatedTokens?: number
-  readonly maxEstimatedCostMicros?: number
-}
+export type { BudgetLimit } from './domain.js'
+import type { BudgetLimit } from './domain.js'
 
 export interface BudgetUsage {
   readonly attempts: number

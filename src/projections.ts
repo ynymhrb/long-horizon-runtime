@@ -19,6 +19,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, level TEXT NOT NULL, content TEXT NOT NULL, refs_json TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE IF NOT EXISTS checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, event_seq INTEGER, revision INTEGER NOT NULL, payload_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS execution_profile_resolutions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT NOT NULL, provider_name TEXT NOT NULL, agent_options_hash TEXT NOT NULL, capabilities_json TEXT NOT NULL, tool_deny_json TEXT NOT NULL, timeout_ms INTEGER NOT NULL, selection_reason TEXT NOT NULL, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS budget_state (goal_id TEXT PRIMARY KEY, goal_limit_json TEXT NOT NULL DEFAULT '{}', usage_json TEXT NOT NULL DEFAULT '{"attempts":0,"wallTimeMs":0,"estimatedTokens":0,"estimatedCostMicros":0}', reservations_json TEXT NOT NULL DEFAULT '[]');
     CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
@@ -73,6 +74,18 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'ExecutionProfileResolved':
       if (taskId === undefined) throw new Error('ExecutionProfileResolved requires taskId')
       db.prepare('INSERT INTO execution_profile_resolutions (goal_id, task_id, attempt_id, profile_id, provider_name, agent_options_hash, capabilities_json, tool_deny_json, timeout_ms, selection_reason, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), String(p.profileId), String(p.providerName), String(p.agentOptionsHash), JSON.stringify(p.capabilities ?? []), JSON.stringify(p.toolDeny ?? []), Number(p.timeoutMs), String(p.selectionReason), seq)
+      break
+    case 'BudgetConfigured':
+      if (p.scope === 'goal') updateBudget(db, event.goalId, state => ({ ...state, goal: p.limit as Record<string, unknown> ?? {} }))
+      break
+    case 'BudgetReserved':
+      updateBudget(db, event.goalId, state => ({ ...state, usage: addUsage(state.usage, usageValue(p.usage)), reservations: [...state.reservations, { attemptId: String(p.attemptId), usage: usageValue(p.usage) }] }))
+      break
+    case 'BudgetReleased':
+      updateBudget(db, event.goalId, state => { const reservation = state.reservations.find(item => item.attemptId === String(p.attemptId)); return reservation === undefined ? state : { ...state, usage: subtractUsage(state.usage, reservation.usage), reservations: state.reservations.filter(item => item.attemptId !== reservation.attemptId) } })
+      break
+    case 'BudgetSettled':
+      updateBudget(db, event.goalId, state => { const reservation = state.reservations.find(item => item.attemptId === String(p.attemptId)) ?? { attemptId: String(p.attemptId), usage: usageValue(p.reservation) }; return { ...state, usage: addUsage(subtractUsage(state.usage, reservation.usage), usageValue(p.actual)), reservations: state.reservations.filter(item => item.attemptId !== reservation.attemptId) } })
       break
     case 'PlanProposed':
       db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [], ...(p.baseRevision === undefined ? {} : { baseRevision: p.baseRevision }), ...(p.trigger === undefined ? {} : { trigger: p.trigger }) }))
@@ -206,4 +219,17 @@ function blockDependentTasks(db: DatabaseSync, goalId: string): void {
       }
     }
   }
+}
+
+type BudgetUsage = { attempts: number; wallTimeMs: number; estimatedTokens: number; estimatedCostMicros: number }
+type BudgetState = { goal: Record<string, unknown>; usage: BudgetUsage; reservations: Array<{ attemptId: string; usage: BudgetUsage }> }
+function zeroUsage(): BudgetUsage { return { attempts: 0, wallTimeMs: 0, estimatedTokens: 0, estimatedCostMicros: 0 } }
+function usageValue(value: unknown): BudgetUsage { const item = value as Partial<BudgetUsage> | undefined; return { attempts: Number(item?.attempts ?? 0), wallTimeMs: Number(item?.wallTimeMs ?? 0), estimatedTokens: Number(item?.estimatedTokens ?? 0), estimatedCostMicros: Number(item?.estimatedCostMicros ?? 0) } }
+function addUsage(left: BudgetUsage, right: BudgetUsage): BudgetUsage { return { attempts: left.attempts + right.attempts, wallTimeMs: left.wallTimeMs + right.wallTimeMs, estimatedTokens: left.estimatedTokens + right.estimatedTokens, estimatedCostMicros: left.estimatedCostMicros + right.estimatedCostMicros } }
+function subtractUsage(left: BudgetUsage, right: BudgetUsage): BudgetUsage { return { attempts: left.attempts - right.attempts, wallTimeMs: left.wallTimeMs - right.wallTimeMs, estimatedTokens: left.estimatedTokens - right.estimatedTokens, estimatedCostMicros: left.estimatedCostMicros - right.estimatedCostMicros } }
+function updateBudget(db: DatabaseSync, goalId: string, mutate: (state: BudgetState) => BudgetState): void {
+  const row = db.prepare('SELECT goal_limit_json, usage_json, reservations_json FROM budget_state WHERE goal_id = ?').get(goalId) as { goal_limit_json: string; usage_json: string; reservations_json: string } | undefined
+  const state = row === undefined ? { goal: {}, usage: zeroUsage(), reservations: [] } : { goal: JSON.parse(row.goal_limit_json) as Record<string, unknown>, usage: JSON.parse(row.usage_json) as BudgetUsage, reservations: JSON.parse(row.reservations_json) as BudgetState['reservations'] }
+  const next = mutate(state)
+  db.prepare('INSERT INTO budget_state (goal_id, goal_limit_json, usage_json, reservations_json) VALUES (?, ?, ?, ?) ON CONFLICT(goal_id) DO UPDATE SET goal_limit_json=excluded.goal_limit_json, usage_json=excluded.usage_json, reservations_json=excluded.reservations_json').run(goalId, JSON.stringify(next.goal), JSON.stringify(next.usage), JSON.stringify(next.reservations))
 }
