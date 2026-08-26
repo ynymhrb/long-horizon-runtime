@@ -1,16 +1,40 @@
 import { describe, expect, test } from 'vitest'
 import { apply } from '../src/tools.js'
 import { LongTaskRuntime } from '../src/runtime.js'
-import { routingPolicyText } from '../src/routing-policy.js'
+import { filterRoutingTools, routingPolicyText } from '../src/routing-policy.js'
 
 describe('long-task routing policy', () => {
   test('renders only for a top-level conversation agent', () => {
     expect(routingPolicyText({ session: { header: { origin: 'user' } }, options: { subagentDepth: 0 } } as never)).toContain('long_task_create')
     expect(routingPolicyText({ session: { header: { origin: 'subagent' } }, options: { subagentDepth: 1 } } as never)).toBe('')
   })
+
+  test('strict routing removes native goal schemas only from a top-level agent', () => {
+    const tools = [{ name: 'create_goal' }, { name: 'get_goal' }, { name: 'update_goal' }, { name: 'long_task_create' }, { name: 'read_file' }]
+    const root = { session: { header: { origin: 'user' } }, options: { subagentDepth: 0 } } as never
+    const child = { session: { header: { origin: 'subagent' } }, options: { subagentDepth: 1 } } as never
+    expect(filterRoutingTools('advisory', root, tools)).toEqual(tools)
+    expect(filterRoutingTools('strict', root, tools).map(tool => tool.name)).toEqual(['long_task_create', 'read_file'])
+    expect(filterRoutingTools('strict', child, tools)).toEqual(tools)
+  })
 })
 
 describe('Cordis plugin surface', () => {
+  test('installs strict routing as a root-only prompt assembly filter', async () => {
+    let assemble: ((assembly: unknown, context: { agent?: unknown }, next: () => Promise<{ tools: readonly { name: string }[] }>) => Promise<{ tools: readonly { name: string }[] }>) | undefined
+    const ctx = {
+      tools: { register() { return () => {} } }, subagents: {}, provide() {}, reflect: { provide() {} }, effect() { return () => {} },
+      systemPrompt: { section() { return () => {} } },
+      on(event: string, listener: typeof assemble) { if (event === 'system-prompt/assemble') assemble = listener },
+    }
+    apply(ctx as never, { databasePath: ':memory:', artifactDirectory: 'artifacts', plannerProvider: 'planner', executionProvider: 'worker', routingMode: 'strict' })
+    const tools = [{ name: 'create_goal' }, { name: 'long_task_create' }]
+    const root = await assemble!({}, { agent: { session: { header: { origin: 'user' } }, options: { subagentDepth: 0 } } }, async () => ({ tools }))
+    const child = await assemble!({}, { agent: { session: { header: { origin: 'subagent' } }, options: { subagentDepth: 1 } } }, async () => ({ tools }))
+    expect(root.tools.map(tool => tool.name)).toEqual(['long_task_create'])
+    expect(child.tools).toEqual(tools)
+  })
+
   test('provides one durable runtime and registers compatibility plus canonical control tools', async () => {
     const registered = new Map<string, { execute(args: Record<string, unknown>, exec: { agent?: unknown; signal: AbortSignal }): Promise<unknown> }>()
     const provided = new Map<string, unknown>()

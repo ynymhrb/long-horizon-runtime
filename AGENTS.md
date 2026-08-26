@@ -143,32 +143,32 @@ subagent spawn provider.
 **Files:** Modify `src/tools.ts`, `cordis.patch.yml`, `README.md`; test
 `tests/plugin.spec.ts` and an integration-style system-prompt assembly test.
 
-- [ ] Write failing tests for default `routingMode: advisory`, strict removal
+- [x] Write failing tests for default `routingMode: advisory`, strict removal
   of native `create_goal/get_goal/update_goal` only for a root Agent assembly,
   and unchanged schemas for delegated children.
-- [ ] Run focused tests and observe that `routingMode` and the assembly
+- [x] Run focused tests and observe that `routingMode` and the assembly
   transformer do not exist.
-- [ ] Add validated `routingMode: 'advisory' | 'strict'` configuration with
+- [x] Add validated `routingMode: 'advisory' | 'strict'` configuration with
   advisory as the bundle default. In strict mode, filter only the assembled
   tool schemas for root Agent scope; retain the underlying Host registry and
   all non-goal tools.
-- [ ] Document that strict is a model-facing schema policy and its exact
+- [x] Document that strict is a model-facing schema policy and its exact
   native-goal trade-off; do not add a user-facing chat mode.
-- [ ] Re-run focused tests, then commit
+- [x] Re-run focused tests, then commit
   `feat: add configurable long-task routing policy`.
 
 ### Task 3: Verification and open-source handoff
 
 **Files:** Modify `README.md`, this decision record; test all suites.
 
-- [ ] Add user-facing examples: standard chat creates a draft durable task,
+- [x] Add user-facing examples: standard chat creates a draft durable task,
   `lt_` continuation, advisory native-goal fallback, and strict-mode trade-off.
-- [ ] Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm pack --dry-run`,
+- [x] Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm pack --dry-run`,
   and `git diff --check`.
-- [ ] Start a disposable DSH Web profile, verify the routing section is absent
+- [x] Start a disposable DSH Web profile, verify the routing section is absent
   from a child session's assembled prompt and the denied lifecycle tools are
   absent from its tool schema; do not execute a real user task.
-- [ ] Commit documentation and verification evidence.
+- [x] Commit documentation and verification evidence.
 
 # Task Lifecycle, Goal Revision, and Autonomy Implementation Plan
 

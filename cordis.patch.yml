@@ -8,6 +8,7 @@
         executionProvider: spawn
         maxConcurrentTasks: 1
         autoReplan: true
+        routingMode: advisory
         defaultPlanningMode: require_confirmation
         executionTimeoutMs: 300000
         retryPolicy:

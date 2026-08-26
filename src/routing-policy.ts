@@ -18,8 +18,23 @@ export const CHILD_TASK_TOOL_DENY = [
   'long_task_accept_replan', 'create_goal', 'get_goal', 'update_goal',
 ] as const
 
+export const NATIVE_GOAL_TOOL_NAMES = ['create_goal', 'get_goal', 'update_goal'] as const
+export type RoutingMode = 'advisory' | 'strict'
+type RoutingAgent = { readonly session?: { readonly header?: { readonly origin?: string } }; readonly options?: { readonly subagentDepth?: number } }
+
+export function isDelegatedAgent(agent: RoutingAgent | undefined): boolean {
+  return agent?.session?.header?.origin === 'subagent' || (agent?.options?.subagentDepth ?? 0) > 0
+}
+
 /** Return no routing prose for any delegated child, even though it composes its parent's preset. */
-export function routingPolicyText(agent: { readonly session?: { readonly header?: { readonly origin?: string } }; readonly options?: { readonly subagentDepth?: number } } | undefined): string {
-  if (agent?.session?.header?.origin === 'subagent' || (agent?.options?.subagentDepth ?? 0) > 0) return ''
+export function routingPolicyText(agent: RoutingAgent | undefined): string {
+  if (isDelegatedAgent(agent)) return ''
   return ROUTING_POLICY
+}
+
+/** Strict mode changes only the schemas visible to a top-level model Agent. */
+export function filterRoutingTools<T extends { readonly name: string }>(mode: RoutingMode, agent: RoutingAgent | undefined, tools: readonly T[]): readonly T[] {
+  if (mode !== 'strict' || agent === undefined || isDelegatedAgent(agent)) return tools
+  const denied = new Set<string>(NATIVE_GOAL_TOOL_NAMES)
+  return tools.filter(tool => !denied.has(tool.name))
 }

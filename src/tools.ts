@@ -4,7 +4,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from './dsh-adapters.js'
 import { LongTaskRuntime } from './runtime.js'
 import { TaskControlApi } from './task-api.js'
-import { routingPolicyText } from './routing-policy.js'
+import { filterRoutingTools, routingPolicyText, type RoutingMode } from './routing-policy.js'
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -18,6 +18,7 @@ export interface Config {
   readonly retryPolicy?: { readonly maxAttempts: number }
   readonly artifactInlineLimitBytes?: number
   readonly autoReplan?: boolean
+  readonly routingMode?: RoutingMode
   /** Profile-local compatibility scope for tasks resumed from another chat. */
   readonly workspaceScope?: string
   readonly defaultAgentProfile?: Record<string, unknown>
@@ -31,6 +32,7 @@ interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPla
   readonly executionTimeoutMs: number
   readonly retryPolicy: { readonly maxAttempts: number }
   readonly artifactInlineLimitBytes: number
+  readonly routingMode: RoutingMode
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -55,6 +57,12 @@ export function apply(ctx: Context, input: Config): void {
     order: 130,
     text: assembly => routingPolicyText(assembly.agent),
   })
+  if (config.routingMode === 'strict') {
+    ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+      const resolved = await next()
+      return { ...resolved, tools: [...filterRoutingTools(config.routingMode, context.agent, resolved.tools)] }
+    })
+  }
   const taskApi = new TaskControlApi(runtime)
   ctx.effect(() => () => runtime.close(), 'long-task-runtime.close()')
   // Reconcile persisted attempts at activation. Execution itself remains tied to a later live tool parent.
@@ -139,13 +147,15 @@ function resolveConfig(config: Config): ResolvedConfig {
   const executionTimeoutMs = config.executionTimeoutMs ?? 300_000
   const artifactInlineLimitBytes = config.artifactInlineLimitBytes ?? 65_536
   const retryPolicy = config.retryPolicy ?? { maxAttempts: 1 }
+  const routingMode = config.routingMode ?? 'advisory'
   if (!Number.isSafeInteger(maxConcurrentTasks) || maxConcurrentTasks < 1) throw new TypeError('maxConcurrentTasks must be a positive safe integer')
   if (!Number.isSafeInteger(executionTimeoutMs) || executionTimeoutMs < 1) throw new TypeError('executionTimeoutMs must be a positive safe integer')
   if (!Number.isSafeInteger(artifactInlineLimitBytes) || artifactInlineLimitBytes < 0) throw new TypeError('artifactInlineLimitBytes must be a non-negative safe integer')
   if (!Number.isSafeInteger(retryPolicy.maxAttempts) || retryPolicy.maxAttempts < 1) throw new TypeError('retryPolicy.maxAttempts must be a positive safe integer')
   const defaultPlanningMode = config.defaultPlanningMode ?? 'auto'
   if (defaultPlanningMode !== 'auto' && defaultPlanningMode !== 'require_confirmation') throw new TypeError('defaultPlanningMode must be auto or require_confirmation')
-  return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode }
+  if (routingMode !== 'advisory' && routingMode !== 'strict') throw new TypeError('routingMode must be advisory or strict')
+  return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode }
 }
 
 function requiredText(value: string, name: string): void { if (value.trim().length === 0) throw new TypeError(`${name} must be non-empty`) }
