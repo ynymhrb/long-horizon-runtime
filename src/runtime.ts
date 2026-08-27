@@ -177,6 +177,17 @@ export class LongTaskRuntime {
     this.scheduler.cancel(goalId)
     return this.view(goalId)
   }
+  extendGoalBudget(goalId: string, limit: BudgetLimit): GoalView {
+    const goal = this.requireGoal(goalId)
+    const previous = this.store.getBudgetSummary(goalId)?.goal ?? {}
+    for (const [name, value] of Object.entries(limit)) {
+      if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`budget ${name} must be a non-negative safe integer`)
+      const old = previous[name as keyof BudgetLimit]
+      if (old !== undefined && value < old) throw new Error(`budget ${name} may not reduce`)
+    }
+    this.store.transaction(() => this.store.append([{ type: 'BudgetExtended', goalId, payload: { previous, limit } }, { type: 'BudgetConfigured', goalId, payload: { scope: 'goal', limit: { ...previous, ...limit } } }]))
+    return this.view(goal.id)
+  }
   /** Record the interruption cause before applying the caller-selected recovery policy. */
   interruptGoal(goalId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView {
     const goal = this.requireGoal(goalId)

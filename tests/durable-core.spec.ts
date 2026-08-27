@@ -47,6 +47,15 @@ describe('durable runtime core', () => {
     expect(goal.state).toBe('PAUSED')
     expect(store.listEvents(goal.id).map(event => event.type)).toContain('BudgetExhausted')
   })
+
+  test('extends an exhausted goal budget without reducing an existing limit', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, goalBudget: { maxAttempts: 0 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(runtime.extendGoalBudget(goal.id, { maxAttempts: 2 }).state).toBe('PAUSED')
+    expect(store.getBudgetSummary(goal.id)?.goal).toEqual({ maxAttempts: 2 })
+    expect(() => runtime.extendGoalBudget(goal.id, { maxAttempts: 1 })).toThrow('may not reduce')
+  })
   test('persists the selected execution profile before dispatching the child', async () => {
     const store = createStore()
     let receivedProfile: unknown
