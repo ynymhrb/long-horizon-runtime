@@ -158,6 +158,7 @@ export class Scheduler {
     const budgetSummary = this.store!.getBudgetSummary(goalId)
     const reservation: BudgetReservation = { attempts: 1, wallTimeMs: profile?.timeoutMs ?? task.timeoutMs ?? 300_000, estimatedTokens: 0, estimatedCostMicros: 0 }
     const budgetActive = budgetSummary !== undefined || task.budget !== undefined
+    let budgetReserved = false
     if (budgetActive) {
       const decision = new BudgetLedger(budgetSummary?.usage).reserve({ ...(budgetSummary === undefined ? {} : { goal: budgetSummary.goal }), ...(task.budget === undefined ? {} : { task: task.budget }), estimate: reservation })
       if (!decision.ok) {
@@ -190,27 +191,38 @@ export class Scheduler {
       { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
       { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
     ]))
+    budgetReserved = budgetActive
     const executionStartedAt = Date.now()
     let result
+    let adapterFailure: string | undefined
     try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs }), ...(profile === undefined ? {} : { profile }), onSessionId: dshSessionId => this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])), ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
+      adapterFailure = failureMessage(error)
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
     this.aborters.delete(attemptId)
     executionSignal?.removeEventListener('abort', relayAbort)
-    if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
+    if (this.store!.getGoal(goalId)?.state === 'CANCELLED') {
+      this.releaseBudget(goalId, task, attemptId, budgetReserved)
+      return
+    }
     // A conversation stop is an operator interruption, not a failed unit of
     // work.  In particular, it must never feed the automatic-replan loop.
     if (controller.signal.aborted) {
       this.store!.transaction(() => this.store!.append([
-        ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId } }] : []),
+        ...(budgetReserved ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId } }] : []),
         { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } },
         { type: 'GoalPaused', goalId, payload: { reason: 'conversation stopped; resume with a live parent' } },
       ]))
       return
     }
     if (this.store!.getGoal(goalId)?.revision !== attemptRevision) {
+      this.releaseBudget(goalId, task, attemptId, budgetReserved)
       this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } }]))
+      return
+    }
+    if (adapterFailure !== undefined) {
+      this.terminalFailure(goalId, task, attemptId, adapterFailure, result.dshSessionId, budgetReserved)
       return
     }
     try {
@@ -225,7 +237,7 @@ export class Scheduler {
       const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
       this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
-      if (budgetActive) events.push({ type: 'BudgetSettled', goalId, taskId: task.id, payload: { attemptId, reservation, actual: { attempts: 1, wallTimeMs: Math.max(0, Date.now() - executionStartedAt), estimatedTokens: 0, estimatedCostMicros: 0 } } })
+      if (budgetReserved) events.push({ type: 'BudgetSettled', goalId, taskId: task.id, payload: { attemptId, reservation, actual: budgetActual(result, executionStartedAt) } })
       events.push({ type: 'ExecutionEvaluationRecorded', goalId, taskId: task.id, payload: { attemptId, ...(profile === undefined ? {} : { profileId: profile.id }), outcome: contract.ok ? 'succeeded' : 'failed', wallTimeMs: Math.max(0, Date.now() - executionStartedAt), validatorOk: contract.ok, artifactContractOk: outputContract.ok } })
       if (result.dshSessionId !== undefined) events.push({ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId: result.dshSessionId } })
       for (const [index, artifact] of result.artifacts.entries()) {
@@ -247,13 +259,18 @@ export class Scheduler {
       this.store!.append(events)
       })
       if (!contract.ok && attemptCount >= maxAttempts) await this.onTerminalFailure?.({ goalId, task, reason: contract.reason ?? result.summary })
-    } catch (error) { this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId) }
+    } catch (error) { this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId, budgetReserved) }
   }
-  private terminalFailure(goalId: string, task: TaskNode, attemptId: string, reason: string, dshSessionId?: string): void {
+  private releaseBudget(goalId: string, task: TaskNode, attemptId: string, budgetReserved: boolean): void {
+    if (!budgetReserved) return
+    this.store!.transaction(() => this.store!.append([{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId } }]))
+  }
+  private terminalFailure(goalId: string, task: TaskNode, attemptId: string, reason: string, dshSessionId?: string, budgetReserved = false): void {
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
     const attemptCount = this.store!.listAttempts(task.id, goalId).length
     const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
     this.store!.transaction(() => this.store!.append([
+      ...(budgetReserved ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId } }] : []),
       ...(dshSessionId === undefined ? [] : [{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]),
       { type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: false, validator: task.validator ?? 'runtime', reason } },
       { type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason } },
@@ -289,3 +306,12 @@ function validateOutputContract(task: TaskNode, result: import('./adapters.js').
 }
 
 function failureMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+function budgetActual(result: import('./adapters.js').ExecutionResult, executionStartedAt: number): BudgetReservation & { readonly estimated: boolean } {
+  const usage = result.usage
+  const tokens = usage?.tokens ?? 0
+  const costMicros = usage?.costMicros ?? 0
+  if (!Number.isSafeInteger(tokens) || tokens < 0) throw new TypeError('execution usage tokens must be a non-negative safe integer')
+  if (!Number.isSafeInteger(costMicros) || costMicros < 0) throw new TypeError('execution usage costMicros must be a non-negative safe integer')
+  return { attempts: 1, wallTimeMs: Math.max(0, Date.now() - executionStartedAt), estimatedTokens: tokens, estimatedCostMicros: costMicros, estimated: usage?.estimated ?? usage === undefined }
+}

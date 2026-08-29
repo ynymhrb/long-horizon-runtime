@@ -56,6 +56,20 @@ describe('durable runtime core', () => {
     expect(store.getBudgetSummary(goal.id)?.goal).toEqual({ maxAttempts: 2 })
     expect(() => runtime.extendGoalBudget(goal.id, { maxAttempts: 1 })).toThrow('may not reduce')
   })
+  test('releases a reservation when the execution adapter throws', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { throw new Error('provider start failed') } }, { store, goalBudget: { maxAttempts: 2 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.listEvents(goal.id).map(event => event.type)).toContain('BudgetReleased')
+    expect(store.getBudgetSummary(goal.id)?.reservations).toEqual([])
+  })
+  test('settles provider-reported token and cost usage', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [], usage: { tokens: 21, costMicros: 8, estimated: false } } } }, { store, goalBudget: { maxEstimatedTokens: 100, maxEstimatedCostMicros: 100 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.getBudgetSummary(goal.id)?.usage).toMatchObject({ attempts: 2, estimatedTokens: 42, estimatedCostMicros: 16 })
+    expect(store.listEvents(goal.id).find(event => event.type === 'BudgetSettled')?.payload).toMatchObject({ actual: { estimatedTokens: 21, estimatedCostMicros: 8, estimated: false } })
+  })
   test('persists the selected execution profile before dispatching the child', async () => {
     const store = createStore()
     let receivedProfile: unknown

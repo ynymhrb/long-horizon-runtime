@@ -8,6 +8,8 @@ export interface ExecutionResult {
   readonly summary: string
   readonly artifacts: readonly { readonly type: string; readonly content: string; readonly mimeType?: string }[]
   readonly evidence: readonly string[]
+  /** Optional provider-reported usage. Missing dimensions remain estimated. */
+  readonly usage?: { readonly tokens?: number; readonly costMicros?: number; readonly estimated?: boolean }
   /** Durable reference to the child created by the DSH execution adapter. */
   readonly dshSessionId?: string
 }
