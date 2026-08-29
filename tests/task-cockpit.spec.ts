@@ -12,3 +12,10 @@ test('identifies historical tasks that failed before a plan existed', () => {
   expect(cockpitDataState({ id: 'goal-old', state: 'FAILED' }, null)).toBe('no-plan')
   expect(cockpitDataState({ id: 'lt_current', state: 'FAILED' }, { nodes: [], edges: [] })).toBe('ready')
 })
+
+test('formats profile, budget, and retrieval events as readable audit rows', async () => {
+  const { formatTaskEvent } = await import('../client/task-events.js')
+  expect(formatTaskEvent({ type: 'BudgetExhausted', payload: { reason: 'maxAttempts exhausted' } }).detail).toContain('maxAttempts')
+  expect(formatTaskEvent({ type: 'ExecutionProfileResolved', payload: { profileId: 'fast' } }).label).not.toBe('ExecutionProfileResolved')
+  expect(formatTaskEvent({ type: 'MemoryRetrievalFeedbackRecorded', payload: { reason: 'useful' } }).label).not.toBe('MemoryRetrievalFeedbackRecorded')
+})

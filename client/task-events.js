@@ -3,6 +3,9 @@ const labels = {
   PlanConfirmed: '已确认计划', PlanRejected: '已拒绝重规划', GoalPaused: '任务已暂停', GoalResumed: '任务已继续', GoalCancelled: '任务已取消',
   GoalArchived: '任务已归档', GoalRestored: '任务已恢复', TaskCompleted: '节点已完成', TaskFailed: '节点失败',
   TaskAttemptFailed: '节点尝试失败', ValidationRecorded: '已完成验证', DecisionRecorded: '已记录决策',
+  ExecutionProfileResolved: '已选择执行配置', ExecutionProfileRejected: '执行配置被拒绝',
+  BudgetConfigured: '已配置预算', BudgetReserved: '已预留预算', BudgetSettled: '已结算预算', BudgetReleased: '已释放预算', BudgetExhausted: '预算已耗尽', BudgetExtended: '已扩展预算',
+  ExecutionEvaluationRecorded: '已记录执行评估', MemoryIndexed: '已索引记忆', MemoryIndexSuperseded: '记忆索引已失效', MemoryRetrievalFeedbackRecorded: '已记录检索反馈',
 }
 
 export function formatTaskEvent(event) {
