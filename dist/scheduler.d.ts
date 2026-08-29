@@ -2,6 +2,9 @@ import { type ExecutionAdapter } from './adapters.js';
 import { type TaskNode } from './domain.js';
 import { RuntimeEventStore } from './event-store.js';
 import { ArtifactStore } from './artifacts.js';
+import { ProfileRouter } from './execution-profiles.js';
+import { ExecutionPolicy } from './execution-policy.js';
+import type { MemoryRetriever } from './memory-retrieval.js';
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate';
 export interface SchedulerOptions {
     readonly store: RuntimeEventStore;
@@ -33,6 +36,10 @@ export interface SchedulerOptions {
         readonly task: TaskNode;
         readonly reason: string;
     }) => Promise<void>;
+    readonly profileRouter?: ProfileRouter;
+    readonly executionPolicy?: ExecutionPolicy;
+    readonly memoryRetriever?: MemoryRetriever;
+    readonly maxMemoryItems?: number;
 }
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
 export declare class Scheduler {
@@ -45,6 +52,10 @@ export declare class Scheduler {
     private readonly validators;
     private readonly artifactStore;
     private readonly onTerminalFailure?;
+    private readonly profileRouter;
+    private readonly executionPolicy;
+    private readonly memoryRetriever;
+    private readonly maxMemoryItems;
     private readonly aborters;
     constructor(adapter: ExecutionAdapter, options: number | SchedulerOptions);
     /** Dispatch one bounded ready set. Legacy map mode is retained for a narrow unit-test boundary. */
@@ -57,6 +68,7 @@ export declare class Scheduler {
     private dependenciesSatisfied;
     private context;
     private executeOne;
+    private releaseBudget;
     private terminalFailure;
     private runLegacyRound;
     private setState;

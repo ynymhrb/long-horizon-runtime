@@ -12,6 +12,7 @@
 - Policy-gated automatic replanning: only bounded, unfinished `read_only` work may be applied automatically.
 - Planner and worker child-agent isolation: they cannot recursively create, edit, resume, or cancel the parent task.
 - Standard-chat routing: users stay in their normal DSH chat mode; they do not need a “long-task mode”.
+- Opt-in V5–V7 execution controls: profile routing, durable budgets/evaluations, and source-linked lexical memory retrieval with an inspectable audit trail.
 
 ## Requirements
 
@@ -108,6 +109,26 @@ For an intentional machine-local customization only, add this to the `long-task-
 - Automatic replanning never applies a change that expands scope, touches external effects, invalidates completed work, or deactivates verified artifacts.
 - Deleting a task first cancels active work, then archives it. Archives are restorable for 30 days before purge.
 - An interrupted external-effect node remains blocked until an operator explicitly resolves its outcome.
+
+## Optional V5–V7 execution configuration
+
+The packaged defaults preserve the historic single `spawn` worker and fixed routing policy. Enable advanced behavior only in the plugin bundle configuration you intentionally deploy:
+
+```yaml
+executionProfiles:
+  - id: default
+    providerName: spawn
+  - id: research
+    providerName: spawn-research
+    capabilities: [research]
+    timeoutMs: 180000
+    toolDeny: [shell]
+policyMode: evaluated # default is fixed
+```
+
+A planner may request `executionProfile`, `requiredCapabilities`, a bounded `allowedExecutionProfiles` set, and a task `budget`. Goal budgets limit attempts, wall time, estimated tokens, and estimated cost micros; reservations happen before a child starts and terminal paths settle or release them. `policyMode: evaluated` is opt-in and chooses only from a task-declared allow-list; `fixed` preserves the selected/default profile.
+
+Memory retrieval is also opt-in through runtime composition (`memoryRetriever` plus `maxMemoryItems`). It uses deterministic local lexical scoring over active source-linked records. Retrieval decisions, profile decisions, budget facts, and evaluation facts are available through the Task Area audit API; raw memory text and provider options are never exposed there. Feedback through `long_task_record_memory_feedback` is revision-fenced and audit-only—it does not change ranking.
 
 ## Storage and integration boundary
 

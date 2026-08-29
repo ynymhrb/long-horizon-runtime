@@ -30,7 +30,7 @@
 
 These commits create the building blocks only. The following tasks close the unconnected behavior and release gates.
 
-### Task 1: Settle every budget reservation on every terminal path
+### Task 1: Settle every budget reservation on every terminal path — completed (`f96c084`)
 
 **Files:** Modify `src/adapters.ts`, `src/dsh-adapters.ts`, `src/scheduler.ts`, `src/projections.ts`, `src/event-store.ts`; test `tests/scheduler.spec.ts`, `tests/budgets.spec.ts`, `tests/event-store.spec.ts`.
 
@@ -57,7 +57,7 @@ test('settles reported usage rather than a fabricated value', async () => {
 - [ ] **Step 4: Verify green.** Run `pnpm vitest run tests/scheduler.spec.ts tests/budgets.spec.ts tests/event-store.spec.ts`.
 - [ ] **Step 5: Commit.** `git add src/adapters.ts src/dsh-adapters.ts src/scheduler.ts src/projections.ts src/event-store.ts tests/scheduler.spec.ts tests/budgets.spec.ts tests/event-store.spec.ts; git commit -m "fix: settle every long-task budget reservation"`.
 
-### Task 2: Apply opt-in evaluated profile policy in Scheduler
+### Task 2: Apply opt-in evaluated profile policy in Scheduler — completed (`1218d44`)
 
 **Files:** Modify `src/domain.ts`, `src/execution-profiles.ts`, `src/execution-policy.ts`, `src/projections.ts`, `src/event-store.ts`, `src/scheduler.ts`, `src/tools.ts`, `cordis.patch.yml`; test `tests/execution-policy.spec.ts`, `tests/scheduler.spec.ts`, `tests/event-store.spec.ts`, `tests/plugin.spec.ts`.
 
@@ -83,7 +83,7 @@ test('fixed mode keeps the selected profile and emits no adaptive decision', asy
 - [ ] **Step 4: Verify green.** Run `pnpm vitest run tests/execution-policy.spec.ts tests/scheduler.spec.ts tests/event-store.spec.ts tests/plugin.spec.ts`.
 - [ ] **Step 5: Commit.** `git add src/domain.ts src/execution-profiles.ts src/execution-policy.ts src/projections.ts src/event-store.ts src/scheduler.ts src/tools.ts cordis.patch.yml tests/execution-policy.spec.ts tests/scheduler.spec.ts tests/event-store.spec.ts tests/plugin.spec.ts; git commit -m "feat: apply opt-in execution profile policy"`.
 
-### Task 3: Retrieve source-linked memory in real task context
+### Task 3: Retrieve source-linked memory in real task context — completed (`d37ce57`)
 
 **Files:** Modify `src/context.ts`, `src/memory-retrieval.ts`, `src/projections.ts`, `src/event-store.ts`, `src/runtime.ts`, `src/scheduler.ts`; test `tests/context.spec.ts`, `tests/memory-retrieval.spec.ts`, `tests/scheduler.spec.ts`, `tests/event-store.spec.ts`.
 
@@ -109,7 +109,7 @@ test('disabled retrieval leaves legacy context unchanged', async () => {
 - [ ] **Step 4: Verify green.** Run `pnpm vitest run tests/context.spec.ts tests/memory-retrieval.spec.ts tests/scheduler.spec.ts tests/event-store.spec.ts`.
 - [ ] **Step 5: Commit.** `git add src/context.ts src/memory-retrieval.ts src/projections.ts src/event-store.ts src/runtime.ts src/scheduler.ts tests/context.spec.ts tests/memory-retrieval.spec.ts tests/scheduler.spec.ts tests/event-store.spec.ts; git commit -m "feat: retrieve source-linked memory in task context"`.
 
-### Task 4: Expose compact audit data and feedback controls
+### Task 4: Expose compact audit data and feedback controls — completed (`1fddf99`)
 
 **Files:** Modify `src/task-api.ts`, `src/task-ui-api.ts`, `src/remote.ts`, `src/tools.ts`, `client/task-events.js`, `client/TaskCockpit.js`; test `tests/task-api.spec.ts`, `tests/task-ui.spec.ts`, `tests/task-cockpit.spec.ts`, `tests/plugin.spec.ts`.
 
@@ -135,7 +135,7 @@ test('returns compact audit data without memory text or profile options', () => 
 - [ ] **Step 4: Verify green.** Run `pnpm vitest run tests/task-api.spec.ts tests/task-ui.spec.ts tests/task-cockpit.spec.ts tests/plugin.spec.ts`.
 - [ ] **Step 5: Commit.** `git add src/task-api.ts src/task-ui-api.ts src/remote.ts src/tools.ts client/task-events.js client/TaskCockpit.js tests/task-api.spec.ts tests/task-ui.spec.ts tests/task-cockpit.spec.ts tests/plugin.spec.ts; git commit -m "feat: expose long-task execution audit"`.
 
-### Task 5: Release evidence, documentation, and independent review handoff
+### Task 5: Release evidence, documentation, and independent review handoff — automation complete; isolated Web smoke/review handoff pending
 
 **Files:** Modify `README.md`, `docs/roadmaps/long-task-runtime-roadmap.md`, `docs/decisions/2026-08-22-long-task-runtime-v1.md`; test all suites.
 

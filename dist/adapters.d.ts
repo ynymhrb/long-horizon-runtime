@@ -10,6 +10,12 @@ export interface ExecutionResult {
         readonly mimeType?: string;
     }[];
     readonly evidence: readonly string[];
+    /** Optional provider-reported usage. Missing dimensions remain estimated. */
+    readonly usage?: {
+        readonly tokens?: number;
+        readonly costMicros?: number;
+        readonly estimated?: boolean;
+    };
     /** Durable reference to the child created by the DSH execution adapter. */
     readonly dshSessionId?: string;
 }
@@ -37,7 +43,8 @@ export interface ExecutionAdapter {
         readonly idempotencyKey?: string;
         readonly retryPolicy?: import('./domain.js').RetryPolicy;
         readonly sideEffectClass?: import('./domain.js').SideEffectClass; /** Per-task execution budget override; falls back to the adapter default when absent. */
-        readonly timeoutMs?: number; /** Called as soon as a child session exists, before its result settles. */
+        readonly timeoutMs?: number;
+        readonly profile?: import('./execution-profiles.js').ResolvedExecutionProfile; /** Called as soon as a child session exists, before its result settles. */
         readonly onSessionId?: (dshSessionId: string) => void;
     }): Promise<ExecutionResult>;
     cancel?(attemptId: string): void;

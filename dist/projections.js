@@ -15,6 +15,12 @@ export function createProjectionSchema(db) {
     CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, type TEXT NOT NULL, payload_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, level TEXT NOT NULL, content TEXT NOT NULL, refs_json TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE IF NOT EXISTS checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, event_seq INTEGER, revision INTEGER NOT NULL, payload_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS execution_profile_resolutions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT NOT NULL, provider_name TEXT NOT NULL, agent_options_hash TEXT NOT NULL, capabilities_json TEXT NOT NULL, tool_deny_json TEXT NOT NULL, timeout_ms INTEGER NOT NULL, selection_reason TEXT NOT NULL, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS budget_state (goal_id TEXT PRIMARY KEY, goal_limit_json TEXT NOT NULL DEFAULT '{}', usage_json TEXT NOT NULL DEFAULT '{"attempts":0,"wallTimeMs":0,"estimatedTokens":0,"estimatedCostMicros":0}', reservations_json TEXT NOT NULL DEFAULT '[]');
+    CREATE TABLE IF NOT EXISTS execution_evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT, outcome TEXT NOT NULL, wall_time_ms INTEGER NOT NULL, validator_ok INTEGER NOT NULL, artifact_contract_ok INTEGER NOT NULL, payload_json TEXT NOT NULL, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS execution_policy_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS memory_index_entries (goal_id TEXT NOT NULL, memory_id TEXT NOT NULL, content_hash TEXT NOT NULL, source_ref TEXT NOT NULL, active INTEGER NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, memory_id));
+    CREATE TABLE IF NOT EXISTS memory_records (goal_id TEXT NOT NULL, memory_id TEXT NOT NULL, text TEXT NOT NULL, source_ref TEXT NOT NULL, active INTEGER NOT NULL, workspace_id TEXT, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, memory_id));
     CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
@@ -69,6 +75,46 @@ export function projectEvent(db, event, seq) {
             if (taskId === undefined)
                 throw new Error('ContextManifestRecorded requires taskId');
             db.prepare('INSERT OR REPLACE INTO context_manifests (attempt_id, goal_id, task_id, revision, selection_reason, context_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision), String(p.selectionReason), JSON.stringify(p.context ?? {}), seq);
+            break;
+        case 'ExecutionProfileResolved':
+            if (taskId === undefined)
+                throw new Error('ExecutionProfileResolved requires taskId');
+            db.prepare('INSERT INTO execution_profile_resolutions (goal_id, task_id, attempt_id, profile_id, provider_name, agent_options_hash, capabilities_json, tool_deny_json, timeout_ms, selection_reason, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), String(p.profileId), String(p.providerName), String(p.agentOptionsHash), JSON.stringify(p.capabilities ?? []), JSON.stringify(p.toolDeny ?? []), Number(p.timeoutMs), String(p.selectionReason), seq);
+            break;
+        case 'BudgetConfigured':
+            if (p.scope === 'goal')
+                updateBudget(db, event.goalId, state => ({ ...state, goal: p.limit ?? {} }));
+            break;
+        case 'BudgetReserved':
+            updateBudget(db, event.goalId, state => ({ ...state, usage: addUsage(state.usage, usageValue(p.usage)), reservations: [...state.reservations, { attemptId: String(p.attemptId), usage: usageValue(p.usage) }] }));
+            break;
+        case 'BudgetReleased':
+            updateBudget(db, event.goalId, state => { const reservation = state.reservations.find(item => item.attemptId === String(p.attemptId)); return reservation === undefined ? state : { ...state, usage: subtractUsage(state.usage, reservation.usage), reservations: state.reservations.filter(item => item.attemptId !== reservation.attemptId) }; });
+            break;
+        case 'BudgetSettled':
+            updateBudget(db, event.goalId, state => { const reservation = state.reservations.find(item => item.attemptId === String(p.attemptId)) ?? { attemptId: String(p.attemptId), usage: usageValue(p.reservation) }; return { ...state, usage: addUsage(subtractUsage(state.usage, reservation.usage), usageValue(p.actual)), reservations: state.reservations.filter(item => item.attemptId !== reservation.attemptId) }; });
+            break;
+        case 'ExecutionEvaluationRecorded':
+            if (taskId === undefined)
+                throw new Error('ExecutionEvaluationRecorded requires taskId');
+            db.prepare('INSERT INTO execution_evaluations (goal_id, task_id, attempt_id, profile_id, outcome, wall_time_ms, validator_ok, artifact_contract_ok, payload_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), p.profileId == null ? null : String(p.profileId), String(p.outcome), Number(p.wallTimeMs), p.validatorOk ? 1 : 0, p.artifactContractOk ? 1 : 0, JSON.stringify(p), seq);
+            break;
+        case 'ExecutionPolicyDecided':
+            if (taskId === undefined)
+                throw new Error('ExecutionPolicyDecided requires taskId');
+            db.prepare('INSERT INTO execution_policy_decisions (goal_id, task_id, attempt_id, payload_json, created_order) VALUES (?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), JSON.stringify(p), seq);
+            break;
+        case 'MemoryIndexed':
+            db.prepare('INSERT INTO memory_index_entries (goal_id, memory_id, content_hash, source_ref, active, created_order) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id, memory_id) DO UPDATE SET content_hash=excluded.content_hash, source_ref=excluded.source_ref, active=excluded.active, created_order=excluded.created_order').run(event.goalId, String(p.memoryId), String(p.contentHash), String(p.sourceRef), p.active === false ? 0 : 1, seq);
+            break;
+        case 'MemoryRecorded':
+            db.prepare('INSERT INTO memory_records (goal_id, memory_id, text, source_ref, active, workspace_id, created_order) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id, memory_id) DO UPDATE SET text=excluded.text, source_ref=excluded.source_ref, active=excluded.active, workspace_id=excluded.workspace_id, created_order=excluded.created_order').run(event.goalId, String(p.memoryId), String(p.text), String(p.sourceRef), p.active === false ? 0 : 1, p.workspaceId == null ? null : String(p.workspaceId), seq);
+            break;
+        case 'MemoryInvalidated':
+            db.prepare('UPDATE memory_records SET active = 0 WHERE goal_id = ? AND memory_id = ?').run(event.goalId, String(p.memoryId));
+            break;
+        case 'MemoryIndexSuperseded':
+            db.prepare('UPDATE memory_index_entries SET active = 0 WHERE goal_id = ? AND memory_id = ?').run(event.goalId, String(p.memoryId));
             break;
         case 'PlanProposed':
             db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [], ...(p.baseRevision === undefined ? {} : { baseRevision: p.baseRevision }), ...(p.trigger === undefined ? {} : { trigger: p.trigger }) }));
@@ -224,4 +270,14 @@ function blockDependentTasks(db, goalId) {
             }
         }
     }
+}
+function zeroUsage() { return { attempts: 0, wallTimeMs: 0, estimatedTokens: 0, estimatedCostMicros: 0 }; }
+function usageValue(value) { const item = value; return { attempts: Number(item?.attempts ?? 0), wallTimeMs: Number(item?.wallTimeMs ?? 0), estimatedTokens: Number(item?.estimatedTokens ?? 0), estimatedCostMicros: Number(item?.estimatedCostMicros ?? 0) }; }
+function addUsage(left, right) { return { attempts: left.attempts + right.attempts, wallTimeMs: left.wallTimeMs + right.wallTimeMs, estimatedTokens: left.estimatedTokens + right.estimatedTokens, estimatedCostMicros: left.estimatedCostMicros + right.estimatedCostMicros }; }
+function subtractUsage(left, right) { return { attempts: left.attempts - right.attempts, wallTimeMs: left.wallTimeMs - right.wallTimeMs, estimatedTokens: left.estimatedTokens - right.estimatedTokens, estimatedCostMicros: left.estimatedCostMicros - right.estimatedCostMicros }; }
+function updateBudget(db, goalId, mutate) {
+    const row = db.prepare('SELECT goal_limit_json, usage_json, reservations_json FROM budget_state WHERE goal_id = ?').get(goalId);
+    const state = row === undefined ? { goal: {}, usage: zeroUsage(), reservations: [] } : { goal: JSON.parse(row.goal_limit_json), usage: JSON.parse(row.usage_json), reservations: JSON.parse(row.reservations_json) };
+    const next = mutate(state);
+    db.prepare('INSERT INTO budget_state (goal_id, goal_limit_json, usage_json, reservations_json) VALUES (?, ?, ?, ?) ON CONFLICT(goal_id) DO UPDATE SET goal_limit_json=excluded.goal_limit_json, usage_json=excluded.usage_json, reservations_json=excluded.reservations_json').run(goalId, JSON.stringify(next.goal), JSON.stringify(next.usage), JSON.stringify(next.reservations));
 }

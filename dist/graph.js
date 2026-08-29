@@ -32,6 +32,16 @@ export function validatePlan(draft) {
             throw new PlanValidationError(`task ${task.id} has invalid retry policy`);
         if (task.timeoutMs !== undefined && (!Number.isSafeInteger(task.timeoutMs) || task.timeoutMs < 1))
             throw new PlanValidationError(`task ${task.id} has invalid timeoutMs`);
+        if (task.executionProfile !== undefined && (typeof task.executionProfile !== 'string' || task.executionProfile.trim().length === 0))
+            throw new PlanValidationError(`task ${task.id} has invalid executionProfile`);
+        if (task.requiredCapabilities !== undefined && (!Array.isArray(task.requiredCapabilities) || task.requiredCapabilities.some(capability => typeof capability !== 'string' || capability.trim().length === 0)))
+            throw new PlanValidationError(`task ${task.id} has invalid requiredCapabilities`);
+        if (task.allowedExecutionProfiles !== undefined && (!Array.isArray(task.allowedExecutionProfiles) || task.allowedExecutionProfiles.length === 0 || task.allowedExecutionProfiles.some(profile => typeof profile !== 'string' || profile.trim().length === 0) || new Set(task.allowedExecutionProfiles).size !== task.allowedExecutionProfiles.length))
+            throw new PlanValidationError(`task ${task.id} has invalid allowedExecutionProfiles`);
+        if (task.budget !== undefined)
+            for (const [name, amount] of Object.entries(task.budget))
+                if (!['maxAttempts', 'maxWallTimeMs', 'maxEstimatedTokens', 'maxEstimatedCostMicros'].includes(name) || !Number.isSafeInteger(amount) || amount < 0)
+                    throw new PlanValidationError(`task ${task.id} has invalid budget`);
         for (const [name, contract] of [['inputContract', task.inputContract], ['outputContract', task.outputContract]])
             if (contract !== undefined && (contract === null || Array.isArray(contract) || typeof contract !== 'object'))
                 throw new PlanValidationError(`task ${task.id} ${name} must be an object`);

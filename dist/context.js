@@ -10,6 +10,7 @@ export class ContextBroker {
         if (task === undefined)
             throw new Error(`unknown task ${taskId}`);
         const directDependencies = new Set(task.dependsOn);
+        const retrieval = this.source.memoryRetriever === undefined || this.source.memories === undefined ? undefined : this.source.memoryRetriever.retrieve({ query: `${this.source.objective} ${task.objective}`, maxItems: this.source.maxMemoryItems ?? 0, memories: this.source.memories });
         return {
             objective: this.source.objective,
             task: { id: task.id, objective: task.objective },
@@ -19,6 +20,7 @@ export class ContextBroker {
                 return { taskId: dependencyId, objective: dependency?.objective ?? dependencyId, ...(dependency?.summary === undefined ? {} : { summary: dependency.summary }) };
             }),
             l2ProjectContext: { constraints: this.source.constraints ?? [], decisions: this.source.decisions ?? [], evidence: this.source.evidence ?? [] },
+            ...(retrieval === undefined ? {} : { retrieval }),
         };
     }
 }

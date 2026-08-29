@@ -3,6 +3,8 @@ import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } fro
 import { LongTaskRuntime } from './runtime.js';
 import { TaskControlApi } from './task-api.js';
 import { filterRoutingTools, routingPolicyText } from './routing-policy.js';
+import { normalizeExecutionProfiles, ProfileRouter } from './execution-profiles.js';
+import { ExecutionPolicy } from './execution-policy.js';
 export const name = 'long-task-runtime';
 export const inject = ['tools', 'subagents', 'systemPrompt'];
 /** Mount the runtime service and six stateless model-facing controls. */
@@ -12,7 +14,7 @@ export function apply(ctx, input) {
     const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile });
     const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.executionTimeoutMs, ...profile });
     const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-        databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true,
+        databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
     });
     ctx.provide('longTaskRuntime', runtime);
     ctx.systemPrompt.section({
@@ -87,6 +89,16 @@ export function apply(ctx, input) {
         parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true } }, output: toolOutput,
         execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.acceptReplan({ taskId: args.goal_id, expectedRevision: args.expected_revision }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
     }));
+    ctx.tools.register(defineTool({
+        name: 'long_task_extend_budget', description: 'Increase a durable task budget using the displayed control revision. Budget limits may only increase.',
+        parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, limit: { type: 'object', required: true, properties: { max_attempts: { type: 'number' }, max_wall_time_ms: { type: 'number' }, max_estimated_tokens: { type: 'number' }, max_estimated_cost_micros: { type: 'number' } }, additionalProperties: false } }, output: toolOutput,
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.extendBudget({ taskId: args.goal_id, expectedRevision: args.expected_revision, limit: { ...(args.limit.max_attempts === undefined ? {} : { maxAttempts: args.limit.max_attempts }), ...(args.limit.max_wall_time_ms === undefined ? {} : { maxWallTimeMs: args.limit.max_wall_time_ms }), ...(args.limit.max_estimated_tokens === undefined ? {} : { maxEstimatedTokens: args.limit.max_estimated_tokens }), ...(args.limit.max_estimated_cost_micros === undefined ? {} : { maxEstimatedCostMicros: args.limit.max_estimated_cost_micros }) } }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+    }));
+    ctx.tools.register(defineTool({
+        name: 'long_task_record_memory_feedback', description: 'Record revision-fenced user or validator feedback about one memory retrieval. This creates an audit record only and never changes ranking automatically.',
+        parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, memory_id: { type: 'string', required: true }, helpful: { type: 'boolean', required: true }, reason: { type: 'string', required: true } }, output: toolOutput,
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.recordMemoryRetrievalFeedback({ taskId: args.goal_id, expectedRevision: args.expected_revision, memoryId: args.memory_id, helpful: args.helpful, reason: args.reason }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+    }));
 }
 const goalParameter = { goal_id: { type: 'string', required: true } };
 const toolOutput = { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] };
@@ -112,6 +124,7 @@ function resolveConfig(config) {
     const artifactInlineLimitBytes = config.artifactInlineLimitBytes ?? 65_536;
     const retryPolicy = config.retryPolicy ?? { maxAttempts: 1 };
     const routingMode = config.routingMode ?? 'advisory';
+    const policyMode = config.policyMode ?? 'fixed';
     if (!Number.isSafeInteger(maxConcurrentTasks) || maxConcurrentTasks < 1)
         throw new TypeError('maxConcurrentTasks must be a positive safe integer');
     if (!Number.isSafeInteger(executionTimeoutMs) || executionTimeoutMs < 1)
@@ -125,7 +138,13 @@ function resolveConfig(config) {
         throw new TypeError('defaultPlanningMode must be auto or require_confirmation');
     if (routingMode !== 'advisory' && routingMode !== 'strict')
         throw new TypeError('routingMode must be advisory or strict');
-    return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode };
+    if (policyMode !== 'fixed' && policyMode !== 'evaluated')
+        throw new TypeError('policyMode must be fixed or evaluated');
+    const executionProfiles = normalizeExecutionProfiles({
+        ...(config.defaultExecutionProfile === undefined ? {} : { defaultProfile: config.defaultExecutionProfile }),
+        profiles: config.executionProfiles ?? [{ id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }) }],
+    });
+    return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode, policyMode, executionProfiles };
 }
 function requiredText(value, name) { if (value.trim().length === 0)
     throw new TypeError(`${name} must be non-empty`); }
