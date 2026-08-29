@@ -226,6 +226,7 @@ export class Scheduler {
       this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
       if (budgetActive) events.push({ type: 'BudgetSettled', goalId, taskId: task.id, payload: { attemptId, reservation, actual: { attempts: 1, wallTimeMs: Math.max(0, Date.now() - executionStartedAt), estimatedTokens: 0, estimatedCostMicros: 0 } } })
+      events.push({ type: 'ExecutionEvaluationRecorded', goalId, taskId: task.id, payload: { attemptId, ...(profile === undefined ? {} : { profileId: profile.id }), outcome: contract.ok ? 'succeeded' : 'failed', wallTimeMs: Math.max(0, Date.now() - executionStartedAt), validatorOk: contract.ok, artifactContractOk: outputContract.ok } })
       if (result.dshSessionId !== undefined) events.push({ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId: result.dshSessionId } })
       for (const [index, artifact] of result.artifacts.entries()) {
         const id = `${attemptId}:artifact:${index}`

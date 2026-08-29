@@ -20,6 +20,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, event_seq INTEGER, revision INTEGER NOT NULL, payload_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS execution_profile_resolutions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT NOT NULL, provider_name TEXT NOT NULL, agent_options_hash TEXT NOT NULL, capabilities_json TEXT NOT NULL, tool_deny_json TEXT NOT NULL, timeout_ms INTEGER NOT NULL, selection_reason TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS budget_state (goal_id TEXT PRIMARY KEY, goal_limit_json TEXT NOT NULL DEFAULT '{}', usage_json TEXT NOT NULL DEFAULT '{"attempts":0,"wallTimeMs":0,"estimatedTokens":0,"estimatedCostMicros":0}', reservations_json TEXT NOT NULL DEFAULT '[]');
+    CREATE TABLE IF NOT EXISTS execution_evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT, outcome TEXT NOT NULL, wall_time_ms INTEGER NOT NULL, validator_ok INTEGER NOT NULL, artifact_contract_ok INTEGER NOT NULL, payload_json TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
@@ -86,6 +87,10 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       break
     case 'BudgetSettled':
       updateBudget(db, event.goalId, state => { const reservation = state.reservations.find(item => item.attemptId === String(p.attemptId)) ?? { attemptId: String(p.attemptId), usage: usageValue(p.reservation) }; return { ...state, usage: addUsage(subtractUsage(state.usage, reservation.usage), usageValue(p.actual)), reservations: state.reservations.filter(item => item.attemptId !== reservation.attemptId) } })
+      break
+    case 'ExecutionEvaluationRecorded':
+      if (taskId === undefined) throw new Error('ExecutionEvaluationRecorded requires taskId')
+      db.prepare('INSERT INTO execution_evaluations (goal_id, task_id, attempt_id, profile_id, outcome, wall_time_ms, validator_ok, artifact_contract_ok, payload_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), p.profileId == null ? null : String(p.profileId), String(p.outcome), Number(p.wallTimeMs), p.validatorOk ? 1 : 0, p.artifactContractOk ? 1 : 0, JSON.stringify(p), seq)
       break
     case 'PlanProposed':
       db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [], ...(p.baseRevision === undefined ? {} : { baseRevision: p.baseRevision }), ...(p.trigger === undefined ? {} : { trigger: p.trigger }) }))

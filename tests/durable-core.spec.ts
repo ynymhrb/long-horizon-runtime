@@ -65,6 +65,7 @@ describe('durable runtime core', () => {
     const goal = await runtime.createGoal({ objective: 'ship' }, {})
     expect(receivedProfile).toMatchObject({ id: 'fast', providerName: 'spawn-fast' })
     expect(store.listExecutionProfileResolutions(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', taskId: 'a' })])
+    expect(store.listExecutionEvaluations(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', outcome: 'succeeded', validatorOk: true })])
   })
   test('archives a running goal by cancelling it first and can restore it', async () => {
     const store = createStore()

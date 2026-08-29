@@ -147,3 +147,16 @@ describe('budget projections', () => {
     expect(store.getBudgetSummary('lt_budget')?.usage.wallTimeMs).toBe(8)
   })
 })
+
+describe('execution evaluations', () => {
+  test('projects replayable execution evaluation facts', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_eval', payload: { objective: 'evaluate', constraints: [], planningMode: 'auto' } },
+      { type: 'ExecutionEvaluationRecorded', goalId: 'lt_eval', taskId: 'a', payload: { attemptId: 'a1', profileId: 'fast', outcome: 'succeeded', wallTimeMs: 12, validatorOk: true, artifactContractOk: true } },
+    ])
+    expect(store.listExecutionEvaluations('lt_eval')).toEqual([expect.objectContaining({ taskId: 'a', profileId: 'fast', outcome: 'succeeded', wallTimeMs: 12 })])
+    store.rebuild()
+    expect(store.listExecutionEvaluations('lt_eval')).toHaveLength(1)
+  })
+})
