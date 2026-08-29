@@ -60,6 +60,7 @@ export class ProfileRouter {
       selectionReason: input.task.executionProfile === undefined ? `default profile ${id}` : `task selected ${id}`,
     }
   }
+  profileIds(): readonly string[] { return [...this.profiles.profiles.keys()].sort() }
 }
 
 function requiredText(value: string, label: string): void { if (value.trim().length === 0) throw new TypeError(`${label} must be non-empty`) }

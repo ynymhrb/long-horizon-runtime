@@ -45,6 +45,8 @@ const PLAN_SCHEMA = {
           timeoutMs: { type: 'integer' },
           executionProfile: { type: 'string' },
           requiredCapabilities: { type: 'array', items: { type: 'string' } },
+          allowedExecutionProfiles: { type: 'array', items: { type: 'string' } },
+          budget: { type: 'object', properties: { maxAttempts: { type: 'integer' }, maxWallTimeMs: { type: 'integer' }, maxEstimatedTokens: { type: 'integer' }, maxEstimatedCostMicros: { type: 'integer' } }, additionalProperties: false },
         }, required: ['id', 'objective', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
       },
     },

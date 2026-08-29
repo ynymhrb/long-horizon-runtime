@@ -37,6 +37,8 @@ export interface TaskDraft {
   readonly executionProfile?: string
   /** Capabilities that the selected profile must advertise. */
   readonly requiredCapabilities?: readonly string[]
+  /** Profiles the evaluated policy may consider; omitted preserves fixed routing. */
+  readonly allowedExecutionProfiles?: readonly string[]
   /** Optional task budget composed with the durable goal budget. */
   readonly budget?: BudgetLimit
 }

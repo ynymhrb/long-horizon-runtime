@@ -6,6 +6,7 @@
         artifactDirectory: !!js dshHomePath('long-task-runtime', 'artifacts')
         plannerProvider: spawn
         executionProvider: spawn
+        policyMode: fixed
         defaultExecutionProfile: default
         executionProfiles:
           - id: default

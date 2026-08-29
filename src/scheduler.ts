@@ -6,6 +6,7 @@ import { RuntimeEventStore } from './event-store.js'
 import { ArtifactStore } from './artifacts.js'
 import { ProfileRouter, type ResolvedExecutionProfile } from './execution-profiles.js'
 import { BudgetLedger, type BudgetReservation } from './budgets.js'
+import { ExecutionPolicy } from './execution-policy.js'
 
 type MutableTask = { -readonly [Key in keyof TaskNode]: TaskNode[Key] }
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate'
@@ -22,6 +23,7 @@ export interface SchedulerOptions {
   readonly artifactStore?: ArtifactStore
   readonly onTerminalFailure?: (input: { readonly goalId: string; readonly task: TaskNode; readonly reason: string }) => Promise<void>
   readonly profileRouter?: ProfileRouter
+  readonly executionPolicy?: ExecutionPolicy
 }
 
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
@@ -35,6 +37,7 @@ export class Scheduler {
   private readonly artifactStore: ArtifactStore | undefined
   private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
   private readonly profileRouter: ProfileRouter | undefined
+  private readonly executionPolicy: ExecutionPolicy | undefined
   private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
 
   constructor(private readonly adapter: ExecutionAdapter, options: number | SchedulerOptions) {
@@ -50,6 +53,7 @@ export class Scheduler {
     this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore
     this.onTerminalFailure = typeof options === 'number' ? undefined : options.onTerminalFailure
     this.profileRouter = typeof options === 'number' ? undefined : options.profileRouter
+    this.executionPolicy = typeof options === 'number' ? undefined : options.executionPolicy
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
 
@@ -144,7 +148,19 @@ export class Scheduler {
     const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`
     this.aborters.set(attemptId, { goalId, controller })
     let profile: ResolvedExecutionProfile | undefined
-    try { profile = this.profileRouter?.resolve({ task, defaultTimeoutMs: task.timeoutMs ?? 300_000 }) }
+    let policyDecision: ReturnType<ExecutionPolicy['choose']> | undefined
+    try {
+      const requestedProfileId = task.executionProfile ?? task.allowedExecutionProfiles?.[0] ?? this.profileRouter?.profileIds()[0]
+      if (this.executionPolicy !== undefined && requestedProfileId !== undefined && task.allowedExecutionProfiles !== undefined) {
+        const evaluations = this.store!.listExecutionEvaluations(goalId)
+        policyDecision = this.executionPolicy.choose({ requestedProfileId, candidates: task.allowedExecutionProfiles.map(profileId => {
+          const facts = evaluations.filter(fact => fact.profileId === profileId)
+          const succeeded = facts.filter(fact => fact.outcome === 'succeeded').length
+          return { profileId, enabled: this.profileRouter!.profileIds().includes(profileId), compatible: true, ...(facts.length === 0 ? {} : { successRate: succeeded / facts.length, averageWallTimeMs: Math.round(facts.reduce((total, fact) => total + fact.wallTimeMs, 0) / facts.length) }) }
+        }) })
+        profile = this.profileRouter!.resolve({ task: { ...task, executionProfile: policyDecision.selectedProfileId }, defaultTimeoutMs: task.timeoutMs ?? 300_000 })
+      } else profile = this.profileRouter?.resolve({ task, defaultTimeoutMs: task.timeoutMs ?? 300_000 })
+    }
     catch (error) {
       this.aborters.delete(attemptId)
       executionSignal?.removeEventListener('abort', relayAbort)
@@ -187,6 +203,7 @@ export class Scheduler {
     }
     this.store!.transaction(() => this.store!.append([
       ...(profile === undefined ? [] : [{ type: 'ExecutionProfileResolved', goalId, taskId: task.id, payload: { attemptId, profileId: profile.id, providerName: profile.providerName, agentOptionsHash: profile.agentOptionsHash, capabilities: profile.capabilities, toolDeny: profile.toolDeny, timeoutMs: profile.timeoutMs, selectionReason: profile.selectionReason } }]),
+      ...(policyDecision === undefined ? [] : [{ type: 'ExecutionPolicyDecided', goalId, taskId: task.id, payload: { attemptId, ...policyDecision } }]),
       ...(budgetActive ? [{ type: 'BudgetReserved', goalId, taskId: task.id, payload: { attemptId, usage: reservation } }] : []),
       { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
       { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },

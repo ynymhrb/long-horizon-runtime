@@ -7,6 +7,7 @@ import { LongTaskRuntime } from '../src/runtime.js'
 import { ArtifactStore } from '../src/artifacts.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
 import { ProfileRouter, normalizeExecutionProfiles } from '../src/execution-profiles.js'
+import { ExecutionPolicy } from '../src/execution-policy.js'
 
 const directories: string[] = []
 const stores: RuntimeEventStore[] = []
@@ -80,6 +81,17 @@ describe('durable runtime core', () => {
     expect(receivedProfile).toMatchObject({ id: 'fast', providerName: 'spawn-fast' })
     expect(store.listExecutionProfileResolutions(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', taskId: 'a' })])
     expect(store.listExecutionEvaluations(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', outcome: 'succeeded', validatorOk: true })])
+  })
+  test('uses an evaluated policy only within a task declared profile allow-list', async () => {
+    const store = createStore()
+    let selected: string | undefined
+    const policyPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', allowedExecutionProfiles: ['cheap', 'reliable'] }] } } }
+    const router = new ProfileRouter(normalizeExecutionProfiles({ profiles: [{ id: 'default', providerName: 'spawn' }, { id: 'cheap', providerName: 'spawn-cheap' }, { id: 'reliable', providerName: 'spawn-reliable' }], defaultProfile: 'default' }))
+    store.append([{ type: 'GoalCreated', goalId: 'history', payload: { objective: 'history', planningMode: 'auto' } }, { type: 'ExecutionEvaluationRecorded', goalId: 'history', taskId: 'old', payload: { attemptId: 'old', profileId: 'reliable', outcome: 'succeeded', wallTimeMs: 1, validatorOk: true, artifactContractOk: true } }])
+    const runtime = new LongTaskRuntime(policyPlanner, { async execute(input) { selected = input.profile?.id; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, profileRouter: router, executionPolicy: new ExecutionPolicy('evaluated') })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(selected).toBe('cheap')
+    expect(store.listEvents(goal.id).find(event => event.type === 'ExecutionPolicyDecided')?.payload).toMatchObject({ selectedProfileId: 'cheap' })
   })
   test('archives a running goal by cancelling it first and can restore it', async () => {
     const store = createStore()
