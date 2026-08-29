@@ -128,6 +128,11 @@ export function apply(ctx: Context, input: Config): void {
     parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true } }, output: toolOutput,
     execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.acceptReplan({ taskId: args.goal_id, expectedRevision: args.expected_revision }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
   }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_extend_budget', description: 'Increase a durable task budget using the displayed control revision. Budget limits may only increase.',
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, limit: { type: 'object', required: true } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.extendBudget({ taskId: args.goal_id, expectedRevision: args.expected_revision, limit: args.limit as import('./budgets.js').BudgetLimit }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+  }))
 }
 
 const goalParameter = { goal_id: { type: 'string', required: true } } as const
