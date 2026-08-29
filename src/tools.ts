@@ -130,8 +130,8 @@ export function apply(ctx: Context, input: Config): void {
   }))
   ctx.tools.register(defineTool({
     name: 'long_task_extend_budget', description: 'Increase a durable task budget using the displayed control revision. Budget limits may only increase.',
-    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, limit: { type: 'object', required: true } }, output: toolOutput,
-    execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.extendBudget({ taskId: args.goal_id, expectedRevision: args.expected_revision, limit: args.limit as import('./budgets.js').BudgetLimit }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, limit: { type: 'object', required: true, properties: { max_attempts: { type: 'number' }, max_wall_time_ms: { type: 'number' }, max_estimated_tokens: { type: 'number' }, max_estimated_cost_micros: { type: 'number' } }, additionalProperties: false } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.extendBudget({ taskId: args.goal_id, expectedRevision: args.expected_revision, limit: { ...(args.limit.max_attempts === undefined ? {} : { maxAttempts: args.limit.max_attempts }), ...(args.limit.max_wall_time_ms === undefined ? {} : { maxWallTimeMs: args.limit.max_wall_time_ms }), ...(args.limit.max_estimated_tokens === undefined ? {} : { maxEstimatedTokens: args.limit.max_estimated_tokens }), ...(args.limit.max_estimated_cost_micros === undefined ? {} : { maxEstimatedCostMicros: args.limit.max_estimated_cost_micros }) } }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
   }))
 }
 
