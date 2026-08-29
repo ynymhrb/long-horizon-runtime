@@ -20,6 +20,7 @@ export interface ContextManifestProjection { readonly attemptId: string; readonl
 export interface ExecutionProfileResolutionProjection { readonly taskId: string; readonly attemptId: string; readonly profileId: string; readonly providerName: string; readonly agentOptionsHash: string; readonly capabilities: readonly string[]; readonly toolDeny: readonly string[]; readonly timeoutMs: number; readonly selectionReason: string }
 export interface BudgetSummaryProjection { readonly goal: BudgetLimit; readonly usage: BudgetUsage; readonly reservations: readonly { readonly attemptId: string; readonly usage: BudgetUsage }[] }
 export interface ExecutionEvaluationProjection { readonly taskId: string; readonly attemptId: string; readonly profileId?: string; readonly outcome: string; readonly wallTimeMs: number; readonly validatorOk: boolean; readonly artifactContractOk: boolean }
+export interface MemoryIndexEntryProjection { readonly memoryId: string; readonly contentHash: string; readonly sourceRef: string; readonly active: boolean }
 
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export class RuntimeEventStore {
@@ -40,7 +41,7 @@ export class RuntimeEventStore {
   /** Rebuild every owned projection from ordered append-only events. */
   rebuild(): void {
     this.transaction(() => {
-      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM execution_profile_resolutions; DELETE FROM execution_evaluations; DELETE FROM budget_state; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
+      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM execution_profile_resolutions; DELETE FROM execution_evaluations; DELETE FROM memory_index_entries; DELETE FROM budget_state; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
       const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all() as Array<{ seq: number; type: string; goal_id: string; task_id: string | null; payload_json: string }>
       for (const row of rows) projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }, row.seq)
     })
@@ -64,7 +65,7 @@ export class RuntimeEventStore {
     const remove = (table: string) => this.db.prepare(`DELETE FROM ${table} WHERE goal_id = ?`)
     for (const goalId of goalIds) {
       remove('current_task_bindings').run(goalId)
-      remove('task_session_links').run(goalId); remove('context_manifests').run(goalId); remove('execution_profile_resolutions').run(goalId); remove('execution_evaluations').run(goalId); remove('budget_state').run(goalId); remove('goal_versions').run(goalId)
+      remove('task_session_links').run(goalId); remove('context_manifests').run(goalId); remove('execution_profile_resolutions').run(goalId); remove('execution_evaluations').run(goalId); remove('memory_index_entries').run(goalId); remove('budget_state').run(goalId); remove('goal_versions').run(goalId)
       remove('plan_revisions').run(goalId); remove('task_nodes').run(goalId); remove('task_attempts').run(goalId); remove('artifacts').run(goalId)
       remove('evidence').run(goalId); remove('validation_results').run(goalId); remove('decisions').run(goalId); remove('memories').run(goalId); remove('checkpoints').run(goalId)
       remove('runtime_events').run(goalId)
@@ -101,6 +102,9 @@ export class RuntimeEventStore {
   }
   listExecutionEvaluations(goalId: string): ExecutionEvaluationProjection[] {
     return (this.db.prepare('SELECT task_id, attempt_id, profile_id, outcome, wall_time_ms, validator_ok, artifact_contract_ok FROM execution_evaluations WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<Record<string, unknown>>).map(row => ({ taskId: String(row.task_id), attemptId: String(row.attempt_id), ...(row.profile_id == null ? {} : { profileId: String(row.profile_id) }), outcome: String(row.outcome), wallTimeMs: Number(row.wall_time_ms), validatorOk: Boolean(row.validator_ok), artifactContractOk: Boolean(row.artifact_contract_ok) }))
+  }
+  listMemoryIndexEntries(goalId: string): MemoryIndexEntryProjection[] {
+    return (this.db.prepare('SELECT memory_id, content_hash, source_ref, active FROM memory_index_entries WHERE goal_id = ? ORDER BY created_order').all(goalId) as Array<Record<string, unknown>>).map(row => ({ memoryId: String(row.memory_id), contentHash: String(row.content_hash), sourceRef: String(row.source_ref), active: Boolean(row.active) }))
   }
   getPlan(goalId: string, revision?: number): { readonly revision: number; readonly state: string; readonly tasks: TaskNode[]; readonly invalidatedTaskIds: readonly string[]; readonly staleTaskIds: readonly string[]; readonly baseRevision?: number; readonly trigger?: Record<string, unknown> } | undefined {
     const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision])) as Record<string, unknown> | undefined

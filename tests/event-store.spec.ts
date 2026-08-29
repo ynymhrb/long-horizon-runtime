@@ -160,3 +160,16 @@ describe('execution evaluations', () => {
     expect(store.listExecutionEvaluations('lt_eval')).toHaveLength(1)
   })
 })
+
+describe('memory index projections', () => {
+  test('projects and rebuilds source-linked memory index entries', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_memory', payload: { objective: 'remember', constraints: [], planningMode: 'auto' } },
+      { type: 'MemoryIndexed', goalId: 'lt_memory', payload: { memoryId: 'm1', contentHash: 'hash1', sourceRef: 'event:1', active: true } },
+    ])
+    expect(store.listMemoryIndexEntries('lt_memory')).toEqual([{ memoryId: 'm1', contentHash: 'hash1', sourceRef: 'event:1', active: true }])
+    store.rebuild()
+    expect(store.listMemoryIndexEntries('lt_memory')).toHaveLength(1)
+  })
+})

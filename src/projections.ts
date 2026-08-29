@@ -21,6 +21,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS execution_profile_resolutions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT NOT NULL, provider_name TEXT NOT NULL, agent_options_hash TEXT NOT NULL, capabilities_json TEXT NOT NULL, tool_deny_json TEXT NOT NULL, timeout_ms INTEGER NOT NULL, selection_reason TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS budget_state (goal_id TEXT PRIMARY KEY, goal_limit_json TEXT NOT NULL DEFAULT '{}', usage_json TEXT NOT NULL DEFAULT '{"attempts":0,"wallTimeMs":0,"estimatedTokens":0,"estimatedCostMicros":0}', reservations_json TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE IF NOT EXISTS execution_evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT, outcome TEXT NOT NULL, wall_time_ms INTEGER NOT NULL, validator_ok INTEGER NOT NULL, artifact_contract_ok INTEGER NOT NULL, payload_json TEXT NOT NULL, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS memory_index_entries (goal_id TEXT NOT NULL, memory_id TEXT NOT NULL, content_hash TEXT NOT NULL, source_ref TEXT NOT NULL, active INTEGER NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, memory_id));
     CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
@@ -91,6 +92,12 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'ExecutionEvaluationRecorded':
       if (taskId === undefined) throw new Error('ExecutionEvaluationRecorded requires taskId')
       db.prepare('INSERT INTO execution_evaluations (goal_id, task_id, attempt_id, profile_id, outcome, wall_time_ms, validator_ok, artifact_contract_ok, payload_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(event.goalId, taskId, String(p.attemptId), p.profileId == null ? null : String(p.profileId), String(p.outcome), Number(p.wallTimeMs), p.validatorOk ? 1 : 0, p.artifactContractOk ? 1 : 0, JSON.stringify(p), seq)
+      break
+    case 'MemoryIndexed':
+      db.prepare('INSERT INTO memory_index_entries (goal_id, memory_id, content_hash, source_ref, active, created_order) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id, memory_id) DO UPDATE SET content_hash=excluded.content_hash, source_ref=excluded.source_ref, active=excluded.active, created_order=excluded.created_order').run(event.goalId, String(p.memoryId), String(p.contentHash), String(p.sourceRef), p.active === false ? 0 : 1, seq)
+      break
+    case 'MemoryIndexSuperseded':
+      db.prepare('UPDATE memory_index_entries SET active = 0 WHERE goal_id = ? AND memory_id = ?').run(event.goalId, String(p.memoryId))
       break
     case 'PlanProposed':
       db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, Number(p.revision), 'PROPOSED', JSON.stringify(p.tasks ?? []), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [], ...(p.baseRevision === undefined ? {} : { baseRevision: p.baseRevision }), ...(p.trigger === undefined ? {} : { trigger: p.trigger }) }))
