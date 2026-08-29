@@ -125,3 +125,13 @@ test('declares the Task UI query methods on the DSH remote service', () => {
     'listTasks', 'getTask', 'getTaskGraph', 'listTaskEvents', 'getCurrentTaskForSession', 'updateTask', 'attachCurrentSession', 'setCurrentSession', 'clearCurrentSession', 'rejectReplan',
   ]))
 })
+
+test('returns compact execution audit facts without raw memory text', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } })
+  const created = await new TaskControlApi(runtime).create({ objective: 'audit', planningMode: 'require_confirmation' }, {})
+  runtime.store.append([{ type: 'MemoryRecorded', goalId: created.id, payload: { memoryId: 'm1', text: 'private memory text', sourceRef: 'event:1', active: true } }])
+  const audit = new TaskUiApi(runtime, new TaskControlApi(runtime)).getTaskAudit({ taskId: created.id })
+  expect(audit).toMatchObject({ profiles: [], budget: null, memories: [expect.objectContaining({ memoryId: 'm1', sourceRef: 'event:1' })] })
+  expect(JSON.stringify(audit)).not.toContain('private memory text')
+})

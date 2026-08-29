@@ -42,6 +42,19 @@ export class TaskUiApi {
 
   getTask(input: { readonly taskId: string }): GoalView | null { return this.runtime.getStatus(input.taskId) ?? null }
 
+  /** Safe V5–V7 audit summaries; raw profile options and memory text stay host-private. */
+  getTaskAudit(input: { readonly taskId: string }): { readonly profiles: readonly import('./event-store.js').ExecutionProfileResolutionProjection[]; readonly budget: import('./event-store.js').BudgetSummaryProjection | null; readonly policy: readonly import('./event-store.js').ExecutionPolicyDecisionProjection[]; readonly evaluations: readonly import('./event-store.js').ExecutionEvaluationProjection[]; readonly memories: readonly { readonly memoryId: string; readonly sourceRef: string; readonly active: boolean; readonly workspaceId?: string }[]; readonly retrievals: readonly { readonly attemptId: string; readonly taskId: string; readonly retrieval: unknown }[] } | null {
+    if (this.runtime.getStatus(input.taskId) === undefined) return null
+    return {
+      profiles: this.runtime.store.listExecutionProfileResolutions(input.taskId),
+      budget: this.runtime.store.getBudgetSummary(input.taskId) ?? null,
+      policy: this.runtime.store.listExecutionPolicyDecisions(input.taskId),
+      evaluations: this.runtime.store.listExecutionEvaluations(input.taskId),
+      memories: this.runtime.store.listMemoryRecords(input.taskId).map(record => ({ memoryId: record.memoryId, sourceRef: record.sourceRef, active: record.active, ...(record.workspaceId === undefined ? {} : { workspaceId: record.workspaceId }) })),
+      retrievals: this.runtime.store.listContextManifests(input.taskId).flatMap(manifest => manifest.context.retrieval === undefined ? [] : [{ attemptId: manifest.attemptId, taskId: manifest.taskId, retrieval: manifest.context.retrieval }]),
+    }
+  }
+
   getTaskGraph(input: { readonly taskId: string; readonly revision?: number }): TaskGraphView | null {
     const task = this.runtime.getStatus(input.taskId)
     if (task === undefined) return null

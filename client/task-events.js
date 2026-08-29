@@ -5,7 +5,7 @@ const labels = {
   TaskAttemptFailed: '节点尝试失败', ValidationRecorded: '已完成验证', DecisionRecorded: '已记录决策',
   ExecutionProfileResolved: '已选择执行配置', ExecutionProfileRejected: '执行配置被拒绝',
   BudgetConfigured: '已配置预算', BudgetReserved: '已预留预算', BudgetSettled: '已结算预算', BudgetReleased: '已释放预算', BudgetExhausted: '预算已耗尽', BudgetExtended: '已扩展预算',
-  ExecutionEvaluationRecorded: '已记录执行评估', MemoryIndexed: '已索引记忆', MemoryIndexSuperseded: '记忆索引已失效', MemoryRetrievalFeedbackRecorded: '已记录检索反馈',
+  ExecutionEvaluationRecorded: '已记录执行评估', ExecutionPolicyDecided: '已记录执行策略决定', MemoryRecorded: '已记录记忆来源', MemoryInvalidated: '记忆已失效', MemoryIndexed: '已索引记忆', MemoryIndexSuperseded: '记忆索引已失效', MemoryRetrievalFeedbackRecorded: '已记录检索反馈',
 }
 
 export function formatTaskEvent(event) {

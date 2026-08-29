@@ -18,4 +18,6 @@ test('formats profile, budget, and retrieval events as readable audit rows', asy
   expect(formatTaskEvent({ type: 'BudgetExhausted', payload: { reason: 'maxAttempts exhausted' } }).detail).toContain('maxAttempts')
   expect(formatTaskEvent({ type: 'ExecutionProfileResolved', payload: { profileId: 'fast' } }).label).not.toBe('ExecutionProfileResolved')
   expect(formatTaskEvent({ type: 'MemoryRetrievalFeedbackRecorded', payload: { reason: 'useful' } }).label).not.toBe('MemoryRetrievalFeedbackRecorded')
+  expect(formatTaskEvent({ type: 'ExecutionPolicyDecided', payload: {} }).label).not.toBe('ExecutionPolicyDecided')
+  expect(formatTaskEvent({ type: 'MemoryRecorded', payload: {} }).label).not.toBe('MemoryRecorded')
 })
