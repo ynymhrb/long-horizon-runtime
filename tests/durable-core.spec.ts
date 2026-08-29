@@ -8,6 +8,7 @@ import { ArtifactStore } from '../src/artifacts.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
 import { ProfileRouter, normalizeExecutionProfiles } from '../src/execution-profiles.js'
 import { ExecutionPolicy } from '../src/execution-policy.js'
+import { MemoryRetriever } from '../src/memory-retrieval.js'
 
 const directories: string[] = []
 const stores: RuntimeEventStore[] = []
@@ -92,6 +93,15 @@ describe('durable runtime core', () => {
     const goal = await runtime.createGoal({ objective: 'ship' }, {})
     expect(selected).toBe('cheap')
     expect(store.listEvents(goal.id).find(event => event.type === 'ExecutionPolicyDecided')?.payload).toMatchObject({ selectedProfileId: 'cheap' })
+  })
+  test('dispatches an explainable retrieval from active source-linked memory only when enabled', async () => {
+    const store = createStore()
+    let retrieval: unknown
+    const runtime = new LongTaskRuntime(planner, { async execute(input) { retrieval = input.context.retrieval; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, memoryRetriever: new MemoryRetriever(), maxMemoryItems: 1 })
+    const goal = await runtime.createGoal({ objective: 'ship runtime', planningMode: 'require_confirmation' }, {})
+    store.append([{ type: 'MemoryRecorded', goalId: goal.id, payload: { memoryId: 'active', text: 'runtime shipping guidance', sourceRef: 'event:1', active: true } }, { type: 'MemoryRecorded', goalId: goal.id, payload: { memoryId: 'stale', text: 'runtime stale guidance', sourceRef: 'event:2', active: false } }])
+    await runtime.confirmGoal(goal.id, {})
+    expect(retrieval).toMatchObject({ selected: [expect.objectContaining({ memoryId: 'active' })], excluded: expect.arrayContaining([expect.objectContaining({ memoryId: 'stale', reason: 'inactive' })]) })
   })
   test('archives a running goal by cancelling it first and can restore it', async () => {
     const store = createStore()

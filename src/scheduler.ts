@@ -7,6 +7,7 @@ import { ArtifactStore } from './artifacts.js'
 import { ProfileRouter, type ResolvedExecutionProfile } from './execution-profiles.js'
 import { BudgetLedger, type BudgetReservation } from './budgets.js'
 import { ExecutionPolicy } from './execution-policy.js'
+import type { MemoryRetriever } from './memory-retrieval.js'
 
 type MutableTask = { -readonly [Key in keyof TaskNode]: TaskNode[Key] }
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate'
@@ -24,6 +25,8 @@ export interface SchedulerOptions {
   readonly onTerminalFailure?: (input: { readonly goalId: string; readonly task: TaskNode; readonly reason: string }) => Promise<void>
   readonly profileRouter?: ProfileRouter
   readonly executionPolicy?: ExecutionPolicy
+  readonly memoryRetriever?: MemoryRetriever
+  readonly maxMemoryItems?: number
 }
 
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
@@ -38,6 +41,8 @@ export class Scheduler {
   private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
   private readonly profileRouter: ProfileRouter | undefined
   private readonly executionPolicy: ExecutionPolicy | undefined
+  private readonly memoryRetriever: MemoryRetriever | undefined
+  private readonly maxMemoryItems: number | undefined
   private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
 
   constructor(private readonly adapter: ExecutionAdapter, options: number | SchedulerOptions) {
@@ -54,6 +59,8 @@ export class Scheduler {
     this.onTerminalFailure = typeof options === 'number' ? undefined : options.onTerminalFailure
     this.profileRouter = typeof options === 'number' ? undefined : options.profileRouter
     this.executionPolicy = typeof options === 'number' ? undefined : options.executionPolicy
+    this.memoryRetriever = typeof options === 'number' ? undefined : options.memoryRetriever
+    this.maxMemoryItems = typeof options === 'number' ? undefined : options.maxMemoryItems
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
 
@@ -136,7 +143,9 @@ export class Scheduler {
       const summary = this.store!.listAttempts(dependencyId, goalId).filter(attempt => attempt.state === 'SUCCEEDED').at(-1)?.summary
       return { taskId: dependencyId, objective: dependency?.objective ?? dependencyId, ...(summary === undefined ? {} : { summary }) }
     })
-    return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store!.listDecisions(goalId), evidence: this.store!.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) }
+    const records = this.store!.listMemoryRecords(goalId)
+    const retrieval = this.memoryRetriever === undefined || this.maxMemoryItems === undefined ? undefined : this.memoryRetriever.retrieve({ query: `${goal?.objective ?? goalId} ${task.objective} ${JSON.stringify(task.inputContract ?? {})} ${dependencySummaries.map(item => item.summary ?? '').join(' ')}`, maxItems: this.maxMemoryItems, memories: records.map(record => ({ id: record.memoryId, content: record.text, active: record.active, sourceRef: record.sourceRef })) })
+    return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store!.listDecisions(goalId), evidence: this.store!.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }), ...(retrieval === undefined ? {} : { retrieval }) }
   }
   private async executeOne(goalId: string, task: TaskNode, executionParent: unknown, executionSignal?: AbortSignal): Promise<void> {
     const attemptId = randomUUID()

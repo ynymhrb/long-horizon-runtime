@@ -23,6 +23,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS execution_evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, profile_id TEXT, outcome TEXT NOT NULL, wall_time_ms INTEGER NOT NULL, validator_ok INTEGER NOT NULL, artifact_contract_ok INTEGER NOT NULL, payload_json TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS execution_policy_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS memory_index_entries (goal_id TEXT NOT NULL, memory_id TEXT NOT NULL, content_hash TEXT NOT NULL, source_ref TEXT NOT NULL, active INTEGER NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, memory_id));
+    CREATE TABLE IF NOT EXISTS memory_records (goal_id TEXT NOT NULL, memory_id TEXT NOT NULL, text TEXT NOT NULL, source_ref TEXT NOT NULL, active INTEGER NOT NULL, workspace_id TEXT, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, memory_id));
     CREATE INDEX IF NOT EXISTS task_nodes_goal_state ON task_nodes(goal_id, state);
     CREATE INDEX IF NOT EXISTS task_attempts_task ON task_attempts(task_id, created_order);
     CREATE INDEX IF NOT EXISTS artifacts_goal_task ON artifacts(goal_id, task_id);
@@ -100,6 +101,12 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       break
     case 'MemoryIndexed':
       db.prepare('INSERT INTO memory_index_entries (goal_id, memory_id, content_hash, source_ref, active, created_order) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id, memory_id) DO UPDATE SET content_hash=excluded.content_hash, source_ref=excluded.source_ref, active=excluded.active, created_order=excluded.created_order').run(event.goalId, String(p.memoryId), String(p.contentHash), String(p.sourceRef), p.active === false ? 0 : 1, seq)
+      break
+    case 'MemoryRecorded':
+      db.prepare('INSERT INTO memory_records (goal_id, memory_id, text, source_ref, active, workspace_id, created_order) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id, memory_id) DO UPDATE SET text=excluded.text, source_ref=excluded.source_ref, active=excluded.active, workspace_id=excluded.workspace_id, created_order=excluded.created_order').run(event.goalId, String(p.memoryId), String(p.text), String(p.sourceRef), p.active === false ? 0 : 1, p.workspaceId == null ? null : String(p.workspaceId), seq)
+      break
+    case 'MemoryInvalidated':
+      db.prepare('UPDATE memory_records SET active = 0 WHERE goal_id = ? AND memory_id = ?').run(event.goalId, String(p.memoryId))
       break
     case 'MemoryIndexSuperseded':
       db.prepare('UPDATE memory_index_entries SET active = 0 WHERE goal_id = ? AND memory_id = ?').run(event.goalId, String(p.memoryId))
