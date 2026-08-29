@@ -110,6 +110,14 @@ export class TaskControlApi {
     const task = this.runtime.extendGoalBudget(request.taskId, request.limit)
     return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
   }
+  recordMemoryRetrievalFeedback(request: { readonly taskId: string; readonly expectedRevision: number; readonly memoryId: string; readonly helpful: boolean; readonly reason: string }, invocation: Pick<TaskInvocation, 'workspaceScope'>): TaskUpdateResult {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    if (request.memoryId.trim().length === 0 || request.reason.trim().length === 0) throw new Error('memory feedback requires a memory ID and reason')
+    this.runtime.store.transaction(() => this.runtime.store.append([{ type: 'MemoryRetrievalFeedbackRecorded', goalId: request.taskId, payload: { memoryId: request.memoryId, helpful: request.helpful, reason: request.reason } }]))
+    return { kind: 'applied', task: this.advance(request.taskId, current.controlRevision) }
+  }
 
   get(taskId: string, invocation?: Pick<TaskInvocation, 'workspaceScope'>): GoalView | undefined {
     const task = this.runtime.getStatus(taskId)

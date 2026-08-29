@@ -29,6 +29,14 @@ const execution: ExecutionAdapter = {
 }
 
 describe('TaskControlApi', () => {
+  test('records revision-fenced retrieval feedback without changing retrieval policy', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const task = await api.create({ objective: 'feedback', planningMode: 'require_confirmation' }, {})
+    const result = api.recordMemoryRetrievalFeedback({ taskId: task.id, expectedRevision: task.controlRevision, memoryId: 'm1', helpful: true, reason: 'validator confirmed relevance' }, {})
+    expect(result.kind).toBe('applied')
+    expect(runtime.store.listEvents(task.id).at(-2)?.type).toBe('MemoryRetrievalFeedbackRecorded')
+  })
   test('extends a budget only at the displayed control revision', async () => {
     const runtime = new LongTaskRuntime(planner, execution, { goalBudget: { maxAttempts: 1 } })
     const api = new TaskControlApi(runtime)
