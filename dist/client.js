@@ -4637,6 +4637,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			TaskAttemptSuperseded: "尝试已被新修订取代",
 			TaskReady: "节点已就绪",
 			TaskAttemptStarted: "节点开始执行",
+			AttemptProgressRecorded: "节点进度更新",
+			TaskAttemptTimedOut: "节点执行超时",
 			TaskRetryScheduled: "已计划重试",
 			TaskAttemptSessionRecorded: "已记录子会话",
 			ArtifactProduced: "已产出产物",
@@ -4678,6 +4680,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onClick: onBack
 			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
 			const selected = graph.nodes.find((node) => node.id === selectedId);
+			const activeAttempt = selected ? task.attempts?.find((attempt) => attempt.taskId === selected.id && attempt.state === "RUNNING") : void 0;
 			const state = taskStatePresentation(task.state);
 			const attached = sessionId && task.sessionLinks?.some((link) => link.sessionId === sessionId);
 			const invoke = (method, input) => {
@@ -4840,7 +4843,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId
-			}), e$3("aside", { className: "ltr-inspector" }, selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), e$3("h4", null, "近期事件"), e$3("ol", { className: "ltr-event-list" }, ...events.filter((event) => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => {
+			}), e$3("aside", { className: "ltr-inspector" }, selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: "ltr-event-list" }, ...events.filter((event) => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => {
 				const item = formatTaskEvent(event);
 				return e$3("li", {
 					key: `${event.seq ?? index}-${event.type}`,

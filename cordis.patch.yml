@@ -11,6 +11,9 @@
         routingMode: advisory
         defaultPlanningMode: require_confirmation
         executionTimeoutMs: 300000
+        # Five-minute inactivity lease; attempts may run up to five hours.
+        idleTimeoutMs: 300000
+        maxWallTimeMs: 18000000
         retryPolicy:
           maxAttempts: 2
 - insert:

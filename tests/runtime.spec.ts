@@ -311,4 +311,51 @@ describe('LongTaskRuntime', () => {
     await runtime.awaitBackground(created.id)
     expect(runtime.getStatus(created.id)?.state).toBe('SUCCEEDED')
   })
+  test('caps a per-task timeout at the configured maximum wall time', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ ...strictTask('a', 'heavy download'), timeoutMs: 900_000 }] } } }
+    let receivedTimeout: number | undefined
+    const execution: ExecutionAdapter = { async execute(input) { receivedTimeout = input.timeoutMs; return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { maxWallTimeMs: 1_000 })
+    const created = await runtime.createGoal({ objective: 'cap timeout override' })
+
+    await runtime.runUntilIdle(created.id, {})
+
+    expect(receivedTimeout).toBe(1_000)
+    expect(runtime.getStatus(created.id)?.attempts[0]?.maxWallExpiresAt).toBeDefined()
+  })
+  test('never automatically retries a failed external-effect task', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ ...strictTask('a', 'send request'), sideEffectClass: 'external_effect', retryPolicy: { maxAttempts: 3 } }] } } }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'failed' as const, summary: 'network failure', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const created = await runtime.createGoal({ objective: 'do not replay effects' })
+
+    await runtime.runUntilIdle(created.id, {})
+
+    expect(runtime.getStatus(created.id)?.state).toBe('PAUSED')
+    expect(runtime.getStatus(created.id)?.tasks[0]?.state).toBe('BLOCKED')
+    expect(runtime.store.listEvents(created.id, 0, 100).some(event => event.type === 'TaskRetryScheduled')).toBe(false)
+  })
+
+  test('background watchdog reconciles an idle child while its execution promise is still pending', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const execution: ExecutionAdapter = { async execute() { await gate; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { idleTimeoutMs: 20, maxWallTimeMs: 60_000 })
+    const created = await runtime.createGoal({ objective: 'watch idle child', planningMode: 'require_confirmation' })
+
+    await runtime.confirmGoal(created.id)
+    runtime.startBackground(created.id, {})
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    // Read the projection directly so this assertion cannot itself trigger a
+    // reconciliation through getStatus().
+    expect(runtime.store.getGoal(created.id)?.state).toBe('PAUSED')
+    expect(runtime.store.listEvents(created.id, 0, 100).some(event => event.type === 'TaskAttemptTimedOut')).toBe(true)
+    await expect(Promise.race([
+      runtime.awaitBackground(created.id)!,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('background loop did not settle')), 100)),
+    ])).resolves.toBeUndefined()
+    release()
+  })
 })

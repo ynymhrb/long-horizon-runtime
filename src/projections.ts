@@ -11,7 +11,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS context_manifests (attempt_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, selection_reason TEXT NOT NULL, context_json TEXT NOT NULL, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
-    CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, started_at TEXT, last_activity_at TEXT, lease_expires_at TEXT, max_wall_expires_at TEXT, latest_progress_json TEXT, created_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, type TEXT NOT NULL, content_hash TEXT NOT NULL, storage TEXT NOT NULL, content TEXT, path TEXT, mime_type TEXT, active INTEGER NOT NULL DEFAULT 1, validated INTEGER NOT NULL DEFAULT 0, superseded_by TEXT);
     CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT, attempt_id TEXT, value_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS validation_results (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, ok INTEGER NOT NULL, validator TEXT NOT NULL, reason TEXT);
@@ -28,6 +28,8 @@ export function createProjectionSchema(db: DatabaseSync): void {
   if (!goalColumns.some(column => column.name === 'control_revision')) db.exec('ALTER TABLE goals ADD COLUMN control_revision INTEGER NOT NULL DEFAULT 0')
   if (!goalColumns.some(column => column.name === 'workspace_scope')) db.exec('ALTER TABLE goals ADD COLUMN workspace_scope TEXT')
   if (!goalColumns.some(column => column.name === 'archived_at')) db.exec('ALTER TABLE goals ADD COLUMN archived_at TEXT')
+  const attemptColumns = db.prepare('PRAGMA table_info(task_attempts)').all() as Array<{ name: string }>
+  for (const column of ['started_at', 'last_activity_at', 'lease_expires_at', 'max_wall_expires_at', 'latest_progress_json']) if (!attemptColumns.some(item => item.name === column)) db.exec(`ALTER TABLE task_attempts ADD COLUMN ${column} TEXT`)
 }
 
 /** Applies exactly one durable event to materialized views. */
@@ -105,8 +107,12 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     }
     case 'TaskAttemptStarted':
       if (taskId === undefined) throw new Error('TaskAttemptStarted requires taskId')
-      db.prepare('INSERT INTO task_attempts (id, goal_id, task_id, revision, state, dsh_session_id, context_json, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision ?? 1), 'RUNNING', p.dshSessionId == null ? null : String(p.dshSessionId), JSON.stringify(p.context ?? {}), seq)
+      db.prepare('INSERT INTO task_attempts (id, goal_id, task_id, revision, state, dsh_session_id, context_json, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision ?? 1), 'RUNNING', p.dshSessionId == null ? null : String(p.dshSessionId), JSON.stringify(p.context ?? {}), p.startedAt == null ? null : String(p.startedAt), p.startedAt == null ? null : String(p.startedAt), p.leaseExpiresAt == null ? null : String(p.leaseExpiresAt), p.maxWallExpiresAt == null ? null : String(p.maxWallExpiresAt), seq)
       updateCurrentTask(db, event.goalId, taskId, 'RUNNING')
+      break
+    case 'AttemptProgressRecorded':
+      if (taskId === undefined) throw new Error('AttemptProgressRecorded requires taskId')
+      db.prepare('UPDATE task_attempts SET last_activity_at = ?, lease_expires_at = ?, latest_progress_json = ? WHERE id = ? AND state = ?').run(String(p.at), String(p.leaseExpiresAt), JSON.stringify({ phase: String(p.phase), message: String(p.message), ...(p.completed === undefined ? {} : { completed: Number(p.completed) }), ...(p.total === undefined ? {} : { total: Number(p.total) }) }), String(p.attemptId), 'RUNNING')
       break
     case 'ArtifactProduced':
       if (taskId === undefined) throw new Error('ArtifactProduced requires taskId')

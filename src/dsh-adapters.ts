@@ -82,7 +82,7 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
       let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }
       let dshSessionId: string | undefined
-      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId) }) }
+      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId) }, timeoutMs) }
       catch (error) {
         // The seam could not represent the outcome as a stop reason: an
         // infrastructure fault. A conversation stop through the caller signal
@@ -122,6 +122,7 @@ async function runStructured(
   outputSchema: Record<string, unknown>,
   signal: AbortSignal = new AbortController().signal,
   onStarted?: (dshSessionId: string) => void,
+  hardTimeoutMs?: number,
 ): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }> {
   const run = await subagents.start(options.providerName, {
     label,
@@ -133,7 +134,26 @@ async function runStructured(
     outputSchema: outputSchema as never,
   })
   onStarted?.(String(run.id))
-  return settleAndDispose(run)
+  const settled = settleAndDispose(run)
+  if (hardTimeoutMs === undefined) return settled
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      settled,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          // DSH providers are expected to observe the signal, but a provider
+          // that does not must never strand the durable scheduler forever.
+          void run.dispose().catch(() => undefined)
+          const error = new Error(`timeout after ${hardTimeoutMs}ms; consider raising executionTimeoutMs or splitting the task`)
+          Object.assign(error, { dshSessionId: String(run.id) })
+          reject(error)
+        }, hardTimeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }
 
 async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }> {
@@ -160,7 +180,7 @@ function plannerPrompt(input: Parameters<PlannerAdapter['plan']>[0]): string {
 }
 
 function executionPrompt(input: Parameters<ExecutionAdapter['execute']>[0]): string {
-  return `Execute the assigned task and return only JSON matching the supplied schema. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`
+  return `Execute the assigned task and return only JSON matching the supplied schema. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nLiveness: call long_task_report_progress with attempt_id ${input.attemptId} at each meaningful phase and before/after long tool work. Keep its message concise and never include raw logs, secrets, or full outputs.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`
 }
 
 function requireProviderName(value: string): void { if (value.trim().length === 0) throw new TypeError('providerName must be non-empty') }

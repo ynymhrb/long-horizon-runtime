@@ -6,6 +6,7 @@
 
 - Durable `lt_` task IDs that can continue from another conversation.
 - Versioned DAG plans, dependency-aware scheduling, retries, validated artifacts, and checkpoint recovery.
+- Five-hour per-attempt wall leases, compact child heartbeats, and durable recovery from a lost child session.
 - A Web Task Area with task list, status-colored DAG, timeline, goal editing, pause/resume, archive/restore, and linked-session navigation.
 - A compact current-task strip in conversations attached to a long task.
 - Goal versions and revision-fenced controls, so stale writes cannot overwrite newer state.

@@ -11,6 +11,10 @@ export interface Config {
     readonly maxConcurrentTasks?: number;
     readonly defaultPlanningMode?: 'auto' | 'require_confirmation';
     readonly executionTimeoutMs?: number;
+    /** Maximum no-progress interval; legacy executionTimeoutMs remains accepted for compatibility. */
+    readonly idleTimeoutMs?: number;
+    /** Maximum wall time of one child attempt; defaults to five hours. */
+    readonly maxWallTimeMs?: number;
     readonly retryPolicy?: {
         readonly maxAttempts: number;
     };
@@ -23,10 +27,12 @@ export interface Config {
     /** Test/composition seam; normal deployments use the configured DSH adapters. */
     readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime;
 }
-interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'retryPolicy' | 'artifactInlineLimitBytes'> {
+interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes'> {
     readonly maxConcurrentTasks: number;
     readonly defaultPlanningMode: 'auto' | 'require_confirmation';
     readonly executionTimeoutMs: number;
+    readonly idleTimeoutMs: number;
+    readonly maxWallTimeMs: number;
     readonly retryPolicy: {
         readonly maxAttempts: number;
     };
