@@ -90,7 +90,8 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
         const failure = error as Error & { dshSessionId?: string }
         const interrupted = input.signal.aborted === true
         const summary = timeout?.aborted === true ? `DSH child stopped: timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : failure.message
-        return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : 'infrastructure', artifacts: [], evidence: [], ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId! }) }
+        const quota = interrupted ? undefined : quotaFailure(summary, Date.now())
+        return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : quota?.failureKind ?? 'infrastructure', artifacts: [], evidence: [], ...(quota === undefined ? {} : quota), ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId! }) }
       }
       if (settled.stopReason !== 'completed') {
         // Preserve the child session id in the summary so the operator can
@@ -188,6 +189,18 @@ function objectValue(value: unknown, label: string): Record<string, unknown> { i
 function array(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw new Error(`${label} must be an array`); return value }
 function string(value: unknown, label: string): string { if (typeof value !== 'string') throw new Error(`${label} must be a string`); return value }
 function integer(value: unknown, label: string): number { if (!Number.isSafeInteger(value)) throw new Error(`${label} must be a safe integer`); return value as number }
+
+function quotaFailure(message: string, now: number): Pick<ExecutionResult, 'failureKind' | 'retryAt' | 'failureDiagnostic'> | undefined {
+  if (!/\b429\b|rate[ -]?limit|quota/i.test(message)) return undefined
+  const match = /(?:retry-after|retry_at|reset_at)\s*[:=]\s*(\S+)/i.exec(message)
+  const retryMs = match?.[1] === undefined ? Number.NaN : Date.parse(match[1])
+  if (!Number.isFinite(retryMs) || retryMs <= now || retryMs - now > 86_400_000) return undefined
+  return { failureKind: 'quota', retryAt: new Date(retryMs).toISOString(), failureDiagnostic: boundedDiagnostic(message) }
+}
+
+function boundedDiagnostic(message: string): string {
+  return message.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 240)
+}
 
 /**
  * Classify a non-completed child stop. `error`/`max-tokens` are model or

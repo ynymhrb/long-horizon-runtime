@@ -102,6 +102,18 @@ describe('DSH adapters', () => {
     expect(result.summary).toContain('child-session-error')
   })
 
+  test('preserves an explicit future retry-after quota diagnostic from a rejected child run', async () => {
+    const retryAt = new Date(Date.now() + 60_000).toISOString()
+    const adapter = createDshExecutionAdapter({
+      async start() { return { id: 'quota-child', localAgent: undefined, result: Promise.reject(new Error(`HTTP 429 rate limit; retry-after: ${retryAt}`)), async dispose() {} } },
+    } as never, { providerName: 'worker' })
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'quota', retryAt })
+  })
+
   test('classifies an aborted child as an interruption, never a validation failure', async () => {
     const adapter = createDshExecutionAdapter({
       async start() { return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'aborted', output: [] }), async dispose() {} } },
