@@ -1,10 +1,11 @@
 import React from 'react'
 import { taskStripPresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
+import { resumeDriverMode } from './task-model.js'
 const e = React.createElement
 
 /** Native GoalBar-shaped compact session face for the current long task. */
-export function TaskStrip({ sessionId, remote, onOpen }) {
+export function TaskStrip({ sessionId, remote, onOpen, openSession, driveInSession }) {
   const [task, setTask] = React.useState(null)
   const [pending, setPending] = React.useState(false)
   React.useEffect(() => {
@@ -18,7 +19,22 @@ export function TaskStrip({ sessionId, remote, onOpen }) {
   const view = taskStripPresentation(task)
   const update = action => {
     setPending(true)
-    Promise.resolve(remote.updateTask({ taskId: task.id, expectedRevision: task.controlRevision, action, sessionId })).then(result => setTask(remoteValue(result).task ?? remoteValue(result).current)).finally(() => setPending(false))
+    // updateTask resolves with a raw GoalView (no strip summary fields);
+    // reload the summary shape so the strip presentation never crashes.
+    Promise.resolve(remote.updateTask({ taskId: task.id, expectedRevision: task.controlRevision, action, sessionId }))
+      .catch(() => undefined)
+      .then(() => remote.getCurrentTaskForSession({ sessionId }))
+      .then(value => setTask(remoteValue(value)))
+      .then(() => action === 'resume' ? remote.getTaskNavigation({ taskId: task.id }) : null)
+      .then(nav => {
+        if (action !== 'resume') return
+        const navigation = remoteValue(nav)
+        const mode = resumeDriverMode(navigation, sessionId)
+        if (mode === 'inject' && typeof driveInSession === 'function') void driveInSession(sessionId, task.id, task.objective)
+        else if (mode === 'open' && navigation?.currentSessionId && typeof openSession === 'function') openSession(navigation.currentSessionId)
+      })
+      .catch(() => undefined)
+      .finally(() => setPending(false))
   }
   const clear = () => { setPending(true); Promise.resolve(remote.clearCurrentSession({ sessionId })).then(() => setTask(null)).finally(() => setPending(false)) }
   return e('div', { className: `ltr-strip tone-${view.tone}`, 'data-testid': 'long-task-strip' },

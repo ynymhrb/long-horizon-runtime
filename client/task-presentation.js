@@ -22,17 +22,24 @@ export function taskStatePresentation(state) {
  * the graph and its legend always agree. RUNNING must be visibly distinct
  * from pending work, so `tone-ongoing` gets the business accent like other
  * active tones; cancelled/superseded work is dashed to read as retired.
+ * The selection ring uses the foreground label color, never a state tone,
+ * so a selected pending node can not be mistaken for a running one.
  */
-export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}'
+export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}'
 
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
-  return { ...state, progress: formatTaskProgress(task.progress, task.currentOrLastNode), detail: task.reason ?? task.currentOrLastNode?.objective ?? '' }
+  // A web-side resume only marks the goal RUNNING; a live agent session must
+  // drive the actual rounds. Surface that "waiting for driver" state instead
+  // of pretending the task is executing on its own.
+  const waitingForDriver = task.state === 'RUNNING' && task.currentOrLastNode?.state !== undefined && task.currentOrLastNode.state !== 'RUNNING'
+  const current = task.currentOrLastNode?.objective
+  return { ...state, progress: formatTaskProgress(task.progress, task.currentOrLastNode), detail: waitingForDriver ? `等待会话驱动执行${current ? ` · ${current}` : ''}` : (task.reason ?? current ?? '') }
 }
 
 export function formatTaskProgress(progress, node) {
   const objective = node?.objective
   const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective
-  const settled = progress.settled ?? progress.succeeded
-  return `${settled}/${progress.total}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
+  const settled = progress?.settled ?? progress?.succeeded ?? 0
+  return `${settled}/${progress?.total ?? 0}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
 }
