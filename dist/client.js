@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
 		//#endregion
 		let react = require("react");
 		react = __toESM(react, 1);
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
 		var _a$1;
 		function $constructor(name, initializer, params) {
 			function init(inst, def) {
@@ -87,7 +87,7 @@ window.__ModuleLoader__.load({
 			return globalConfig;
 		}
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
 		function getEnumValues(entries) {
 			const numericValues = Object.values(entries).filter((v) => typeof v === "number");
 			return Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -401,7 +401,7 @@ window.__ModuleLoader__.load({
 			return { ...iss };
 		}
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
 		const initializer$1 = (inst, def) => {
 			inst.name = "$ZodError";
 			Object.defineProperty(inst, "_zod", {
@@ -461,7 +461,7 @@ window.__ModuleLoader__.load({
 			return fieldErrors;
 		}
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
 		const _parse = (_Err) => (schema, value, _ctx, _params) => {
 			const ctx = _ctx ? {
 				..._ctx,
@@ -575,7 +575,7 @@ window.__ModuleLoader__.load({
 			return _safeParseAsync(_Err)(schema, value, _ctx);
 		};
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
 		/**
 		* @deprecated CUID v1 is deprecated by its authors due to information leakage
 		* (timestamps embedded in the id). Use {@link cuid2} instead.
@@ -639,7 +639,7 @@ window.__ModuleLoader__.load({
 		const lowercase = /^[^A-Z]*$/;
 		const uppercase = /^[^a-z]*$/;
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
 		const $ZodCheck = /*@__PURE__*/ $constructor("$ZodCheck", (inst, def) => {
 			var _a;
 			inst._zod ?? (inst._zod = {});
@@ -1001,7 +1001,7 @@ window.__ModuleLoader__.load({
 			};
 		});
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
 		var Doc = class {
 			constructor(args = []) {
 				this.content = [];
@@ -1032,14 +1032,14 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
 		const version = {
 			major: 4,
 			minor: 4,
 			patch: 3
 		};
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
 		const $ZodType = /*@__PURE__*/ $constructor("$ZodType", (inst, def) => {
 			var _a;
 			inst ?? (inst = {});
@@ -2142,7 +2142,7 @@ window.__ModuleLoader__.load({
 			}
 		}
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
 		var _a;
 		var $ZodRegistry = class {
 			constructor() {
@@ -2189,7 +2189,7 @@ window.__ModuleLoader__.load({
 		(_a = globalThis).__zod_globalRegistry ?? (_a.__zod_globalRegistry = registry());
 		const globalRegistry = globalThis.__zod_globalRegistry;
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
 		// @__NO_SIDE_EFFECTS__
 		function _string(Class, params) {
 			return new Class({
@@ -2694,7 +2694,7 @@ window.__ModuleLoader__.load({
 			return ch;
 		}
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
 		function initializeContext(params) {
 			let target = params?.target ?? "draft-2020-12";
 			if (target === "draft-4") target = "draft-04";
@@ -2989,7 +2989,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			return finalize(ctx, schema);
 		};
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
 		const formatMap = {
 			guid: "uuid",
 			url: "uri",
@@ -3199,7 +3199,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			seen.ref = def.innerType;
 		};
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
 		const ZodISODateTime = /*@__PURE__*/ $constructor("ZodISODateTime", (inst, def) => {
 			$ZodISODateTime.init(inst, def);
 			ZodStringFormat.init(inst, def);
@@ -3229,7 +3229,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			return /* @__PURE__ */ _isoDuration(ZodISODuration, params);
 		}
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
 		const initializer = (inst, issues) => {
 			$ZodError.init(inst, issues);
 			inst.name = "ZodError";
@@ -3251,7 +3251,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		};
 		const ZodRealError = /*@__PURE__*/ $constructor("ZodError", initializer, { Parent: Error });
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
 		const parse = /* @__PURE__ */ _parse(ZodRealError);
 		const parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 		const safeParse = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -3265,7 +3265,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		const safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 		const safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 		//#endregion
-		//#region D:/code/long-horizon-runtime/node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
+		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
 		const _installedGroups = /* @__PURE__ */ new WeakMap();
 		function _installLazyMethods(inst, group, methods) {
 			const proto = Object.getPrototypeOf(inst);
@@ -4090,6 +4090,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		/**
 		* Deterministic left-to-right ranked layout for a read-only task DAG.
 		* Missing dependency IDs are reported rather than rendered as invented nodes.
+		*
+		* Layering follows Sugiyama's framework: longest-path ranks, then a
+		* barycenter sweep with local adjacent swaps that reorders each layer so
+		* long edges are split by dummy vertices and crossings between layers are
+		* minimized. Exact crossing minimization is NP-hard, so the heuristics below
+		* are the standard practical approximation used by dagre and Graphviz dot.
 		*/
 		function layoutTaskGraph(inputNodes) {
 			const nodes = [...inputNodes].sort((left, right) => left.id.localeCompare(right.id));
@@ -4125,27 +4131,24 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				ready.sort();
 			}
 			for (const node of nodes) if (!visited.has(node.id)) rank.set(node.id, 0);
-			const ranked = /* @__PURE__ */ new Map();
-			for (const node of nodes) {
-				const nodeRank = rank.get(node.id);
-				const lane = ranked.get(nodeRank) ?? [];
-				lane.push(node);
-				ranked.set(nodeRank, lane);
-			}
-			for (const lane of ranked.values()) lane.sort((left, right) => left.id.localeCompare(right.id));
+			const maxRank = Math.max(0, ...nodes.map((node) => rank.get(node.id)));
+			const orderedLayers = reduceCrossings(buildProperLayers(nodes, rank, edges, maxRank));
 			const positioned = [];
-			const maxRank = Math.max(0, ...ranked.keys());
 			let maxLanes = 1;
-			for (const [nodeRank, lane] of [...ranked.entries()].sort(([left], [right]) => left - right)) {
+			for (let nodeRank = 0; nodeRank < orderedLayers.length; nodeRank++) {
+				const lane = orderedLayers[nodeRank];
 				maxLanes = Math.max(maxLanes, lane.length);
-				lane.forEach((node, index) => positioned.push({
-					...node,
-					rank: nodeRank,
-					x: 40 + nodeRank * 292,
-					y: 40 + index * 100
-				}));
+				lane.forEach((entry, index) => {
+					const y = 40 + index * 100;
+					if (!entry.dummy) positioned.push({
+						...byId.get(entry.id),
+						rank: nodeRank,
+						x: 40 + nodeRank * 292,
+						y
+					});
+				});
 			}
-			positioned.sort((left, right) => left.rank - right.rank || left.id.localeCompare(right.id));
+			positioned.sort((left, right) => left.rank - right.rank || left.y - right.y || left.id.localeCompare(right.id));
 			return {
 				nodes: positioned,
 				edges: edges.sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to)),
@@ -4153,6 +4156,172 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				width: 80 + (maxRank + 1) * 196 + maxRank * 96,
 				height: 80 + maxLanes * 72 + Math.max(0, maxLanes - 1) * 28
 			};
+		}
+		function dummyKey(from, to, rank) {
+			return `\u0000dummy:${from}\u0000${to}\u0000${rank}`;
+		}
+		const CROSSING_SWEEPS = 24;
+		const SIFT_ROUNDS = 6;
+		/**
+		* Splits every edge that spans more than one rank into unit segments joined
+		* by dummy vertices, so crossings can be counted between adjacent layers only
+		* (the standard "proper layering" of the Sugiyama framework). Returns
+		* `{ layers, segments }` where segments[r] are the edges from layer r to r+1.
+		*/
+		function buildProperLayers(nodes, rank, edges, maxRank) {
+			const layers = Array.from({ length: maxRank + 1 }, () => []);
+			const segments = Array.from({ length: maxRank + 1 }, () => []);
+			for (const node of nodes) layers[rank.get(node.id)].push({
+				id: node.id,
+				dummy: false
+			});
+			for (const edge of edges) {
+				const fromRank = rank.get(edge.from);
+				const toRank = rank.get(edge.to);
+				if (toRank <= fromRank) continue;
+				let previous = edge.from;
+				for (let r = fromRank + 1; r < toRank; r++) {
+					const key = dummyKey(edge.from, edge.to, r);
+					layers[r].push({
+						id: key,
+						dummy: true
+					});
+					segments[r - 1].push({
+						from: previous,
+						to: key
+					});
+					previous = key;
+				}
+				segments[toRank - 1].push({
+					from: previous,
+					to: edge.to
+				});
+			}
+			return {
+				layers,
+				segments
+			};
+		}
+		/**
+		* Reorders each layer to minimize crossings between adjacent layers: repeated
+		* downward/upward barycenter sweeps keep the best ordering found, then local
+		* adjacent swaps refine it. Every step is deterministic.
+		*/
+		function reduceCrossings({ layers, segments }) {
+			let working = layers.map((layer) => [...layer]);
+			let best = {
+				order: working.map((layer) => [...layer]),
+				crossings: totalCrossings(working, segments)
+			};
+			let stagnant = 0;
+			for (let iteration = 0; iteration < CROSSING_SWEEPS; iteration++) {
+				for (let r = 1; r < working.length; r++) working[r] = orderByWeights(working[r], barycenterWeights(working[r], working[r - 1], segments[r - 1]));
+				recordBest();
+				for (let r = working.length - 2; r >= 0; r--) working[r] = orderByWeights(working[r], barycenterWeights(working[r], working[r + 1], segments[r]));
+				recordBest();
+				if (stagnant >= 4) break;
+			}
+			working = best.order.map((layer) => [...layer]);
+			sift(working, segments);
+			recordBest();
+			return best.order;
+			function recordBest() {
+				const crossings = totalCrossings(working, segments);
+				if (crossings < best.crossings) {
+					best = {
+						order: working.map((layer) => [...layer]),
+						crossings
+					};
+					stagnant = 0;
+				} else stagnant += 1;
+			}
+		}
+		/** Barycenter of each entry in `layer` from its neighbors in `fixedLayer`. */
+		function barycenterWeights(layer, fixedLayer, segments) {
+			const fixedPosition = new Map(fixedLayer.map((entry, index) => [entry.id, index]));
+			const sums = new Map(layer.map((entry) => [entry.id, [0, 0]]));
+			for (const segment of segments) {
+				const fromSum = sums.get(segment.from);
+				if (fromSum) {
+					fromSum[0] += fixedPosition.get(segment.to) ?? 0;
+					fromSum[1] += 1;
+				}
+				const toSum = sums.get(segment.to);
+				if (toSum) {
+					toSum[0] += fixedPosition.get(segment.from) ?? 0;
+					toSum[1] += 1;
+				}
+			}
+			return layer.map((entry, index) => {
+				const [sum, count] = sums.get(entry.id);
+				return count === 0 ? index : sum / count;
+			});
+		}
+		/** Stable ascending sort by weight; ties preserve the previous order. */
+		function orderByWeights(layer, weights) {
+			return layer.map((entry, index) => [entry, weights[index]]).sort((left, right) => left[1] - right[1]).map((pair) => pair[0]);
+		}
+		/** Adjacent-swap refinement: keep a swap only when it lowers total crossings. */
+		function sift(layers, segments) {
+			let improved = true;
+			let rounds = 0;
+			while (improved && rounds++ < SIFT_ROUNDS) {
+				improved = false;
+				for (let r = 0; r < layers.length; r++) {
+					const layer = layers[r];
+					for (let i = 0; i < layer.length - 1; i++) {
+						const before = layerCrossings(layers, segments, r);
+						swap(layer, i, i + 1);
+						if (layerCrossings(layers, segments, r) < before) improved = true;
+						else swap(layer, i, i + 1);
+					}
+				}
+			}
+		}
+		function swap(array, left, right) {
+			const value = array[left];
+			array[left] = array[right];
+			array[right] = value;
+		}
+		/** Crossings that involve layer r with its two adjacent layers. */
+		function layerCrossings(layers, segments, r) {
+			let total = 0;
+			if (r > 0) total += crossingsBetween(layers[r - 1], layers[r], segments[r - 1]);
+			if (r < layers.length - 1) total += crossingsBetween(layers[r], layers[r + 1], segments[r]);
+			return total;
+		}
+		function totalCrossings(layers, segments) {
+			let total = 0;
+			for (let r = 0; r < segments.length; r++) total += crossingsBetween(layers[r], layers[r + 1], segments[r]);
+			return total;
+		}
+		/** Crossings between two adjacent layers, counted as inversions in O(E log E). */
+		function crossingsBetween(layerA, layerB, segments) {
+			if (segments.length === 0) return 0;
+			const positionA = new Map(layerA.map((entry, index) => [entry.id, index]));
+			const positionB = new Map(layerB.map((entry, index) => [entry.id, index]));
+			return inversionCount(segments.map((segment) => [positionA.get(segment.from) ?? 0, positionB.get(segment.to) ?? 0]).sort((left, right) => left[0] - right[0]).map((pair) => pair[1]));
+		}
+		function inversionCount(values) {
+			const copy = [...values];
+			const buffer = new Array(values.length);
+			const count = (lo, hi) => {
+				if (hi - lo < 2) return 0;
+				const mid = lo + hi >> 1;
+				let total = count(lo, mid) + count(mid, hi);
+				let left = lo;
+				let right = mid;
+				let out = lo;
+				while (left < mid && right < hi) if (copy[right] < copy[left]) {
+					buffer[out++] = copy[right++];
+					total += mid - left;
+				} else buffer[out++] = copy[left++];
+				while (left < mid) buffer[out++] = copy[left++];
+				while (right < hi) buffer[out++] = copy[right++];
+				for (let i = lo; i < hi; i++) copy[i] = buffer[i];
+				return total;
+			};
+			return count(0, copy.length);
 		}
 		//#endregion
 		//#region client/task-presentation.js
@@ -4214,19 +4383,24 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		* the graph and its legend always agree. RUNNING must be visibly distinct
 		* from pending work, so `tone-ongoing` gets the business accent like other
 		* active tones; cancelled/superseded work is dashed to read as retired.
+		* The selection ring uses the foreground label color, never a state tone,
+		* so a selected pending node can not be mistaken for a running one.
 		*/
-		const dagToneCss = ".ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}";
+		const dagToneCss = ".ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}";
 		function taskStripPresentation(task) {
+			const state = taskStatePresentation(task.state);
+			const waitingForDriver = task.state === "RUNNING" && task.currentOrLastNode?.state !== void 0 && task.currentOrLastNode.state !== "RUNNING";
+			const current = task.currentOrLastNode?.objective;
 			return {
-				...taskStatePresentation(task.state),
+				...state,
 				progress: formatTaskProgress(task.progress, task.currentOrLastNode),
-				detail: task.reason ?? task.currentOrLastNode?.objective ?? ""
+				detail: waitingForDriver ? `等待会话驱动执行${current ? ` · ${current}` : ""}` : task.reason ?? current ?? ""
 			};
 		}
 		function formatTaskProgress(progress, node) {
 			const objective = node?.objective;
 			const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective;
-			return `${progress.settled ?? progress.succeeded}/${progress.total}${compactObjective ? ` · 当前：${compactObjective}` : ""}`;
+			return `${progress?.settled ?? progress?.succeeded ?? 0}/${progress?.total ?? 0}${compactObjective ? ` · 当前：${compactObjective}` : ""}`;
 		}
 		//#endregion
 		//#region client/TaskDag.js
@@ -4256,17 +4430,21 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const hasChildren = (id) => nodes.some((node) => (node.dependsOn ?? []).includes(id));
 			return e$4("section", { className: "ltr-dag-wrap" }, e$4("div", { className: "ltr-dag-tools" }, e$4("div", null, e$4("button", {
 				type: "button",
+				className: "ltr-btn",
 				onClick: fit
 			}, "适应视图"), e$4("button", {
 				type: "button",
+				className: "ltr-btn",
 				onClick: () => setCollapsedIds(/* @__PURE__ */ new Set())
 			}, "全部展开"), e$4("button", {
 				type: "button",
+				className: "ltr-btn",
 				onClick: () => setCollapsedIds(new Set(nodes.filter((node) => hasChildren(node.id)).map((node) => node.id)))
 			}, "全部折叠")), e$4("span", null, `${graph.nodes.length}/${nodes.length} 个节点`)), e$4("div", {
 				className: "ltr-dag-legend",
 				"aria-label": "节点状态图例"
 			}, ...[
+				["selected", "选中"],
 				["ongoing", "运行中"],
 				["neutral", "待执行"],
 				["warning", "等待确认 / 暂停"],
@@ -4315,14 +4493,17 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				const from = graph.nodes.find((node) => node.id === edge.from);
 				const to = graph.nodes.find((node) => node.id === edge.to);
 				const selected = selectedId === edge.from || selectedId === edge.to;
-				return from && to ? e$4("line", {
+				if (!from || !to) return null;
+				const x1 = from.x + 196;
+				const y1 = from.y + 36;
+				const x2 = to.x;
+				const y2 = to.y + 36;
+				const bend = Math.max(10, Math.min(44, (x2 - x1) / 3));
+				return e$4("path", {
 					key: `${edge.from}-${edge.to}`,
 					className: `ltr-edge${selected ? " is-selected" : ""}`,
-					x1: from.x + 196,
-					y1: from.y + 36,
-					x2: to.x,
-					y2: to.y + 36
-				}) : null;
+					d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
+				});
 			}), ...graph.nodes.map((node) => {
 				const state = taskStatePresentation(node.state);
 				const selected = node.id === selectedId;
@@ -4403,6 +4584,29 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (graph === null) return "no-plan";
 			return "ready";
 		}
+		/**
+		* Build the message injected into the bound session after a web-side resume.
+		* The session's model receives it as its next prompt and drives the DAG with
+		* `long_task_resume` (its Agent becomes the live parent), so the user never
+		* has to type a second message.
+		*/
+		function resumeDriverMessage(taskId, objective) {
+			return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ""}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认。`;
+		}
+		/**
+		* Decide how a web resume hands execution to a live parent session.
+		* - 'inject': the bound session is the current one -> push the driver message
+		*   into it so the model starts the round automatically.
+		* - 'open': the bound session is elsewhere -> navigate there (its model drives
+		*   the resume on arrival / next prompt).
+		* - 'attach': no bound session -> the user must attach one first.
+		*/
+		function resumeDriverMode(navigation, currentSessionId) {
+			const bound = navigation?.currentSessionId;
+			if (bound === void 0) return "attach";
+			if (bound === currentSessionId) return "inject";
+			return "open";
+		}
 		//#endregion
 		//#region client/remote-value.js
 		function remoteValue(result) {
@@ -4427,7 +4631,18 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			TaskFailed: "节点失败",
 			TaskAttemptFailed: "节点尝试失败",
 			ValidationRecorded: "已完成验证",
-			DecisionRecorded: "已记录决策"
+			DecisionRecorded: "已记录决策",
+			TaskRetryBudgetExhausted: "重试预算已耗尽",
+			TaskInterrupted: "节点已中断",
+			TaskAttemptSuperseded: "尝试已被新修订取代",
+			TaskReady: "节点已就绪",
+			TaskAttemptStarted: "节点开始执行",
+			TaskRetryScheduled: "已计划重试",
+			TaskAttemptSessionRecorded: "已记录子会话",
+			ArtifactProduced: "已产出产物",
+			EvidenceRecorded: "已记录证据",
+			TaskRecoveryBlocked: "恢复受阻",
+			GoalSucceeded: "任务成功"
 		};
 		function formatTaskEvent(event) {
 			const payload = event.payload ?? {};
@@ -4442,7 +4657,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		//#endregion
 		//#region client/TaskCockpit.js
 		const e$3 = react.default.createElement;
-		function TaskCockpit({ task, graph, events, onBack, remote, sessionId, openSession, isCurrent, onTaskChanged, onCurrentChanged }) {
+		function TaskCockpit({ task, graph, events, onBack, remote, sessionId, openSession, driveInSession, isCurrent, onTaskChanged, onCurrentChanged }) {
 			const [selectedId, setSelectedId] = react.default.useState(() => initialSelectedNode(graph?.nodes ?? []));
 			const [pending, setPending] = react.default.useState(false);
 			const [error, setError] = react.default.useState(null);
@@ -4454,10 +4669,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (dataState === "loading") return e$3("p", null, "正在加载任务…");
 			if (dataState === "missing") return e$3("section", { className: "ltr-cockpit" }, e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				onClick: onBack
 			}, "← 全部任务"), e$3("p", { className: "ltr-error" }, "任务不存在或已被清理。"));
 			if (dataState === "no-plan") return e$3("section", { className: "ltr-cockpit ltr-no-plan" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				onClick: onBack
 			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
 			const selected = graph.nodes.find((node) => node.id === selectedId);
@@ -4466,12 +4683,34 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const invoke = (method, input) => {
 				setPending(true);
 				setError(null);
-				Promise.resolve(remote[method](input)).then((result) => {
+				return Promise.resolve(remote[method](input)).then((result) => {
 					const value = remoteValue(result);
 					onTaskChanged(value.kind === "conflict" ? value.current : value.task);
 					if (method === "attachCurrentSession" || method === "setCurrentSession" || method === "acceptReplan" || method === "updateTask" && ["confirm", "resume"].includes(input?.action)) onCurrentChanged?.(task.id);
+					if (method === "updateTask" && input?.action === "resume" && value.kind === "applied") return guideAfterResume();
 				}).catch((reason) => setError(String(reason))).finally(() => setPending(false));
 			};
+			const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
+				const navigation = remoteValue(result);
+				const mode = resumeDriverMode(navigation, sessionId);
+				if (mode === "inject") {
+					if (typeof driveInSession !== "function") {
+						setError("任务已标记为运行：本会话无法自动注入驱动消息，请让模型调用 long_task_resume 继续执行。");
+						return;
+					}
+					setError(null);
+					Promise.resolve(driveInSession(sessionId, task.id, task.objective)).then((driven) => setError(driven ? "任务已标记为运行，已向本会话发送继续执行指令。" : "任务已标记为运行：本会话未能注入驱动消息，请直接让模型继续执行。")).catch(() => setError("任务已标记为运行：注入驱动消息失败，请直接让模型继续执行。"));
+					return;
+				}
+				if (mode === "open") {
+					if (typeof openSession === "function") {
+						setError(null);
+						openSession(navigation.currentSessionId);
+					} else setError("任务已标记为运行，但绑定会话不在当前窗口，且当前 DSH 槽未提供会话跳转能力。");
+					return;
+				}
+				setError("任务已标记为运行，但尚未绑定可跳转的会话：先点击“附加到当前会话”绑定本会话，再让模型继续执行。");
+			}).catch((value) => setError(String(value)));
 			const action = (label, recoveryResolution) => invoke("updateTask", {
 				taskId: task.id,
 				expectedRevision: task.controlRevision,
@@ -4503,7 +4742,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			};
 			const jump = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
 				const target = remoteValue(result)?.currentSessionId;
-				if (target && typeof openSession === "function") openSession(target);
+				if (target && target === sessionId) setError("该任务绑定的会话就是当前会话，无需跳转。");
+				else if (target && typeof openSession === "function") openSession(target);
 				else setError(target ? "当前 DSH 槽未提供会话跳转能力。" : "此任务尚未关联可跳转的会话：先点击“附加到当前会话”绑定本会话，或从创建它的会话继续运行。");
 			}).catch((value) => setError(String(value)));
 			const labels = {
@@ -4513,15 +4753,19 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				cancel: "取消任务"
 			};
 			const externalResolutionRequired = task.state === "PAUSED" && task.tasks?.some((node) => node.state === "BLOCKED" && node.sideEffectClass === "external_effect");
+			const waitingForDriver = task.state === "RUNNING" && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				onClick: onBack
 			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label), sessionId ? e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending || isCurrent,
 				onClick: attach
 			}, isCurrent ? "当前会话任务" : attached ? "设为当前任务" : "附加到当前会话") : null, task.pendingProposal ? e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: () => invoke("rejectReplan", {
 					taskId: task.id,
@@ -4529,6 +4773,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				})
 			}, "拒绝改计划") : null, task.pendingProposal ? e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: () => invoke("acceptReplan", {
 					taskId: task.id,
@@ -4537,6 +4782,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				})
 			}, "接受重规划") : null, e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: () => {
 					setEditing((value) => !value);
@@ -4545,25 +4791,30 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				}
 			}, "修改原始目标"), e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: jump
 			}, "当前会话"), e$3("button", {
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: task.archivedAt ? restore : archive
 			}, task.archivedAt ? "恢复归档任务" : "删除"), ...(task.availableActions ?? []).filter((name) => labels[name]).flatMap((name) => name === "resume" && externalResolutionRequired ? [e$3("button", {
 				key: "resume-retry",
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: () => action("resume", "retry")
 			}, "重试外部操作"), e$3("button", {
 				key: "resume-confirmed",
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: () => action("resume", "confirmed_succeeded")
 			}, "外部操作已完成")] : [e$3("button", {
 				key: name,
 				type: "button",
+				className: "ltr-btn",
 				disabled: pending,
 				onClick: () => action(name)
 			}, labels[name])])), error ? e$3("p", {
@@ -4583,8 +4834,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onChange: (event) => setReason(event.target.value)
 			})), e$3("button", {
 				type: "submit",
+				className: "ltr-btn",
 				disabled: pending || !objective.trim() || !reason.trim()
-			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: "ltr-cockpit-body" }, e$3(TaskDag, {
+			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: "ltr-cockpit-body" }, e$3(TaskDag, {
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId
@@ -4607,7 +4859,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			"FAILED",
 			"CANCELLED"
 		];
-		function TaskArea({ open, onClose, remote, initialTaskId, useSessions, openSession }) {
+		function TaskArea({ open, onClose, remote, initialTaskId, useSessions, openSession, driveInSession }) {
 			const [items, setItems] = react.default.useState([]);
 			const [selectedId, setSelectedId] = react.default.useState(initialTaskId ?? null);
 			const [task, setTask] = react.default.useState(void 0);
@@ -4744,7 +4996,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				role: "dialog",
 				"aria-label": "任务区"
 			}, e$2("button", {
-				className: "ltr-close",
+				className: "ltr-btn ltr-close",
 				type: "button",
 				onClick: onClose
 			}, "关闭"), error ? e$2("p", { className: "ltr-error" }, error) : null, selectedId ? e$2(TaskCockpit, {
@@ -4754,6 +5006,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				remote,
 				sessionId,
 				openSession,
+				driveInSession,
 				isCurrent: selectedId === currentTaskId,
 				onCurrentChanged: setCurrentTaskId,
 				onTaskChanged: setTask,
@@ -4764,7 +5017,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		//#region client/TaskStrip.js
 		const e$1 = react.default.createElement;
 		/** Native GoalBar-shaped compact session face for the current long task. */
-		function TaskStrip({ sessionId, remote, onOpen }) {
+		function TaskStrip({ sessionId, remote, onOpen, openSession, driveInSession }) {
 			const [task, setTask] = react.default.useState(null);
 			const [pending, setPending] = react.default.useState(false);
 			react.default.useEffect(() => {
@@ -4791,7 +5044,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					expectedRevision: task.controlRevision,
 					action,
 					sessionId
-				})).then((result) => setTask(remoteValue(result).task ?? remoteValue(result).current)).finally(() => setPending(false));
+				})).catch(() => void 0).then(() => remote.getCurrentTaskForSession({ sessionId })).then((value) => setTask(remoteValue(value))).then(() => action === "resume" ? remote.getTaskNavigation({ taskId: task.id }) : null).then((nav) => {
+					if (action !== "resume") return;
+					const navigation = remoteValue(nav);
+					const mode = resumeDriverMode(navigation, sessionId);
+					if (mode === "inject" && typeof driveInSession === "function") driveInSession(sessionId, task.id, task.objective);
+					else if (mode === "open" && navigation?.currentSessionId && typeof openSession === "function") openSession(navigation.currentSessionId);
+				}).catch(() => void 0).finally(() => setPending(false));
 			};
 			const clear = () => {
 				setPending(true);
@@ -4851,12 +5110,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		const e = react.default.createElement;
 		const CSS = `
 .ltr-modal-layer{position:absolute;inset:0;z-index:50}.ltr-mask{position:absolute;inset:0;background:rgb(15 23 42 / .26)}
-.ltr-modal{position:relative;margin:24px auto;width:min(1160px,calc(100vw - 48px));height:calc(100vh - 48px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-close{float:right}
+.ltr-modal{position:relative;margin:24px auto;width:min(1160px,calc(100vw - 48px));height:calc(100vh - 48px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
 .ltr-task-filter{display:flex;align-items:center;gap:8px;margin:16px 0}.ltr-task-filter input,.ltr-task-filter select{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.ltr-task-filter input{min-width:260px}.ltr-task-filter .ltr-check{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px}.ltr-task-filter .ltr-check input{min-width:0;margin:0}
 .ltr-task-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0;border-top:1px solid var(--dsw-alias-border-l1)}.ltr-task-list button{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;align-items:center;width:100%;min-height:54px;padding:10px 4px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;text-align:left}.ltr-task-list button:hover{background:var(--dsw-alias-interactive-bg-hover)}.ltr-task-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.ltr-task-list small{overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-empty-task-list{margin:0;padding:18px 4px;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .ltr-strip{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));height:36px;margin:0 auto 8px;padding:4px 5px 4px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-specific-tip);color:var(--dsw-alias-label-primary)}.ltr-strip-glyph{color:var(--dsw-alias-label-tertiary)}.ltr-strip-label{flex:none;font-size:13px;font-weight:500}.ltr-strip-objective{flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;text-align:left;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.ltr-strip-progress{flex:0 1 auto;min-width:0;max-width:38%;overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-strip-actions{display:flex;gap:3px}.ltr-icon-button{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.ltr-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ltr-icon-button:disabled{opacity:.4;cursor:default}
-.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-header>div{flex:1}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
-.ltr-cockpit-body{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;margin-top:16px}.ltr-dag-wrap{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;width:100%;height:570px;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-state-business-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.is-selected rect{stroke:var(--dsw-alias-state-business-primary);stroke-width:3}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-body{grid-template-columns:1fr}.ltr-modal{width:calc(100vw - 20px);height:calc(100vh - 20px);margin:10px}.ltr-dag{height:420px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
+.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-header>div{flex:1}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
+.ltr-cockpit-body{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;margin-top:16px}.ltr-dag-wrap{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;width:100%;height:570px;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-body{grid-template-columns:1fr}.ltr-modal{width:calc(100vw - 20px);height:calc(100vh - 20px);margin:10px}.ltr-dag{height:420px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
 `;
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime\"]")) {
 			const tag = document.createElement("style");
@@ -4867,7 +5126,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-overrides\"]")) {
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "long-task-runtime-overrides";
-			tag.textContent = `.ltr-task-list-title{margin:18px 0 8px;font-size:14px}.ltr-task-list-header{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;padding:0 4px 8px;color:var(--dsw-alias-label-tertiary);font-size:12px}.ltr-node>rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-state-business-primary);stroke-width:1.5}${dagToneCss}@media(max-width:800px){.ltr-task-list-header{grid-template-columns:80px 1fr}.ltr-task-list-header span:last-child{grid-column:2}}`;
+			tag.textContent = `.ltr-task-list-title{margin:18px 0 8px;font-size:14px}.ltr-task-list-header{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;padding:0 4px 8px;color:var(--dsw-alias-label-tertiary);font-size:12px}.ltr-node>rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}${dagToneCss}@media(max-width:800px){.ltr-task-list-header{grid-template-columns:80px 1fr}.ltr-task-list-header span:last-child{grid-column:2}}`;
 			document.head.appendChild(tag);
 		}
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-collapse-fix\"]")) {
@@ -4905,27 +5164,30 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const open = useOpen();
 			return e("button", {
 				type: "button",
-				className: "dsh-long-task-header-button",
+				className: "ltr-btn ltr-header-btn",
 				onClick: () => open ? closeTaskArea() : openTaskArea()
 			}, "任务区");
 		}
-		function Overlay({ props, remote, openSession }) {
+		function Overlay({ props, remote, openSession, driveInSession }) {
 			return e(TaskArea, {
 				open: useOpen(),
 				onClose: closeTaskArea,
 				remote,
 				initialTaskId: selectedTaskId,
 				useSessions: props?.useSessions,
-				openSession
+				openSession,
+				driveInSession
 			});
 		}
-		function Dock({ useSessions, remote }) {
+		function Dock({ useSessions, remote, openSession, driveInSession }) {
 			const sessions = typeof useSessions === "function" ? useSessions((value) => value) : void 0;
 			const id = sessions?.current;
 			return (id === void 0 ? void 0 : sessions?.byId?.[id])?.blank === false ? e(TaskStrip, {
 				sessionId: id,
 				remote,
-				onOpen: openTaskArea
+				onOpen: openTaskArea,
+				openSession,
+				driveInSession
 			}) : null;
 		}
 		const descriptor = (method, schema) => ({
@@ -5027,6 +5289,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const openSession = (sessionId) => {
 				ctx.sessions.open(sessionId);
 			};
+			const driveInSession = async (sessionId, taskId, objective) => {
+				const session = ctx.sessions.binding?.(sessionId)?.session;
+				if (!session || typeof session.prompt !== "function") return false;
+				return (await session.prompt([{
+					type: "text",
+					text: resumeDriverMessage(taskId, objective)
+				}], "queue"))?.ok === true;
+			};
 			ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
 				name: "conversation.session.header.actions",
 				id: "long-task-header",
@@ -5039,7 +5309,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				order: 20
 			}, (props) => e(Dock, {
 				...props,
-				remote
+				remote,
+				openSession,
+				driveInSession
 			})));
 			ctx.slots.inject("shell.overlay", () => ctx.slots.register({
 				name: "shell.overlay",
@@ -5048,7 +5320,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, (props) => e(Overlay, {
 				props,
 				remote,
-				openSession
+				openSession,
+				driveInSession
 			})));
 		}
 		//#endregion
