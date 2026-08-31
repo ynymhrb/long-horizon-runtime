@@ -10,7 +10,7 @@ export interface TaskSessionLink { readonly sessionId: string; readonly kind: 'o
 export interface CurrentTaskBinding { readonly sessionId: string; readonly taskId: string; readonly controlRevision: number; readonly updatedOrder: number }
 export interface GoalProjection { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly planningMode: 'auto' | 'require_confirmation'; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly pauseReason?: string; readonly archivedAt?: string }
 export interface GoalVersion { readonly version: number; readonly objective: string; readonly reason: string; readonly source: string; readonly createdAt: string }
-export interface AttemptProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly revision: number; readonly state: string; readonly dshSessionId?: string; readonly context: Record<string, unknown>; readonly summary?: string }
+export interface AttemptProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly revision: number; readonly state: string; readonly dshSessionId?: string; readonly context: Record<string, unknown>; readonly summary?: string; readonly startedAt?: string; readonly lastActivityAt?: string; readonly leaseExpiresAt?: string; readonly maxWallExpiresAt?: string; readonly latestProgress?: { readonly phase: string; readonly message: string; readonly completed?: number; readonly total?: number } }
 export interface ArtifactProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly attemptId: string; readonly type: string; readonly contentHash: string; readonly storage: 'inline' | 'file'; readonly content?: string; readonly path?: string; readonly mimeType?: string; readonly active: boolean; readonly validated: boolean }
 export interface DecisionProjection { readonly type: string; readonly payload: Record<string, unknown> }
 export interface EvidenceProjection { readonly taskId?: string; readonly attemptId?: string; readonly value: unknown }
@@ -99,14 +99,18 @@ export class RuntimeEventStore {
   getTask(goalId: string, taskId: string): TaskNode | undefined { return this.listTasks(goalId).find(task => task.id === taskId) }
   listAttempts(taskId: string, goalId?: string): AttemptProjection[] {
     const rows = this.db.prepare(goalId === undefined
-      ? 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE task_id = ? ORDER BY created_order'
-      : 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE task_id = ? AND goal_id = ? ORDER BY created_order')
+      ? 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE task_id = ? ORDER BY created_order'
+      : 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE task_id = ? AND goal_id = ? ORDER BY created_order')
       .all(...(goalId === undefined ? [taskId] : [taskId, goalId])) as Array<Record<string, unknown>>
-    return rows.map(row => ({ id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), revision: Number(row.revision), state: String(row.state), ...(row.dsh_session_id == null ? {} : { dshSessionId: String(row.dsh_session_id) }), context: JSON.parse(String(row.context_json)) as Record<string, unknown>, ...(row.summary == null ? {} : { summary: String(row.summary) }) }))
+    return rows.map(attemptProjection)
   }
   listRunningAttempts(): AttemptProjection[] {
-    const rows = this.db.prepare("SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary FROM task_attempts WHERE state = 'RUNNING'").all() as Array<Record<string, unknown>>
-    return rows.map(row => ({ id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), revision: Number(row.revision), state: String(row.state), ...(row.dsh_session_id == null ? {} : { dshSessionId: String(row.dsh_session_id) }), context: JSON.parse(String(row.context_json)) as Record<string, unknown>, ...(row.summary == null ? {} : { summary: String(row.summary) }) }))
+    const rows = this.db.prepare("SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE state = 'RUNNING'").all() as Array<Record<string, unknown>>
+    return rows.map(attemptProjection)
+  }
+  getRunningAttemptBySession(sessionId: string): AttemptProjection | undefined {
+    const row = this.db.prepare("SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE state = 'RUNNING' AND dsh_session_id = ? LIMIT 1").get(sessionId) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : attemptProjection(row)
   }
   listActiveValidatedArtifacts(goalId: string, taskIds?: readonly string[]): ArtifactProjection[] {
     const rows = this.db.prepare('SELECT id, goal_id, task_id, attempt_id, type, content_hash, storage, content, path, mime_type, active, validated FROM artifacts WHERE goal_id = ? AND active = 1 AND validated = 1 ORDER BY rowid').all(goalId) as Array<Record<string, unknown>>
@@ -141,5 +145,19 @@ function goalProjection(row: Record<string, unknown>): GoalProjection {
   return {
     id: String(row.id), objective: String(row.objective), constraints: JSON.parse(String(row.constraints_json)) as string[], planningMode: String(row.planning_mode) as GoalProjection['planningMode'], state: String(row.state) as GoalState, revision: Number(row.revision), controlRevision: Number(row.control_revision),
     ...(row.workspace_scope == null ? {} : { workspaceScope: String(row.workspace_scope) }), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }), ...(row.archived_at == null ? {} : { archivedAt: String(row.archived_at) }),
+  }
+}
+
+function attemptProjection(row: Record<string, unknown>): AttemptProjection {
+  return {
+    id: String(row.id), goalId: String(row.goal_id), taskId: String(row.task_id), revision: Number(row.revision), state: String(row.state),
+    ...(row.dsh_session_id == null ? {} : { dshSessionId: String(row.dsh_session_id) }),
+    context: JSON.parse(String(row.context_json)) as Record<string, unknown>,
+    ...(row.summary == null ? {} : { summary: String(row.summary) }),
+    ...(row.started_at == null ? {} : { startedAt: String(row.started_at) }),
+    ...(row.last_activity_at == null ? {} : { lastActivityAt: String(row.last_activity_at) }),
+    ...(row.lease_expires_at == null ? {} : { leaseExpiresAt: String(row.lease_expires_at) }),
+    ...(row.max_wall_expires_at == null ? {} : { maxWallExpiresAt: String(row.max_wall_expires_at) }),
+    ...(row.latest_progress_json == null ? {} : { latestProgress: JSON.parse(String(row.latest_progress_json)) as NonNullable<AttemptProjection['latestProgress']> }),
   }
 }

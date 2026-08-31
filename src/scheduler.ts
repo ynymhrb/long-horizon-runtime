@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { validateExecutionResult, type ExecutionAdapter } from './adapters.js'
+import { validateExecutionResult, type ExecutionAdapter, type ExecutionResult } from './adapters.js'
 import type { ContextView } from './context.js'
 import { V1_ARTIFACT_TYPES, type TaskNode, type TaskState } from './domain.js'
 import { RuntimeEventStore } from './event-store.js'
@@ -15,6 +15,8 @@ export interface SchedulerOptions {
   readonly retryBackoffMs?: number
   /** Upper bound for the exponential retry delay. */
   readonly maxRetryBackoffMs?: number
+  readonly idleTimeoutMs?: number
+  readonly maxWallTimeMs?: number
   /** Injectable clock for deterministic backoff tests. */
   readonly now?: () => number
   readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>
@@ -34,6 +36,8 @@ export class Scheduler {
   private readonly defaultAttempts: number
   private readonly retryBackoffMs: number
   private readonly maxRetryBackoffMs: number
+  private readonly idleTimeoutMs: number
+  private readonly maxWallTimeMs: number
   private readonly now: () => number
   private readonly recoveryValidator?: SchedulerOptions['recoveryValidator']
   private readonly validator?: SchedulerOptions['validator']
@@ -41,12 +45,16 @@ export class Scheduler {
   private readonly artifactStore: ArtifactStore | undefined
   private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
   private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
+  /** Resolves an in-process dispatch when its durable lease is terminalized. */
+  private readonly livenessSettlers = new Map<string, () => void>()
   /** Durable retry due timestamps keyed by `${goalId}\u0000${taskId}`; respected by ready selection. */
   private readonly retryAfter = new Map<string, number>()
 
   constructor(private readonly adapter: ExecutionAdapter, options: number | SchedulerOptions) {
     this.maxConcurrentTasks = typeof options === 'number' ? options : options.maxConcurrentTasks
     this.store = typeof options === 'number' ? undefined : options.store
+    this.idleTimeoutMs = typeof options === 'number' ? 300_000 : options.idleTimeoutMs ?? 300_000
+    this.maxWallTimeMs = typeof options === 'number' ? 18_000_000 : options.maxWallTimeMs ?? 18_000_000
     this.defaultAttempts = typeof options === 'number' ? 1 : options.defaultRetryPolicy?.maxAttempts ?? 1
     this.retryBackoffMs = typeof options === 'number' ? 1000 : options.retryBackoffMs ?? 1000
     this.maxRetryBackoffMs = typeof options === 'number' ? 60_000 : options.maxRetryBackoffMs ?? 60_000
@@ -65,6 +73,7 @@ export class Scheduler {
   /** Dispatch one bounded ready set. Legacy map mode is retained for a narrow unit-test boundary. */
   async runRound(goalId: string, legacyTasks?: Map<string, TaskNode>, executionParent?: unknown, executionSignal?: AbortSignal): Promise<boolean> {
     if (this.store === undefined) { if (legacyTasks === undefined) throw new Error('legacy scheduler requires tasks'); await this.runLegacyRound(goalId, legacyTasks); return true }
+    this.reconcileLiveness(goalId)
     const goal = this.store.getGoal(goalId)
     if (goal?.state !== 'RUNNING') return false
     const tasks = this.store.listTasks(goalId)
@@ -91,6 +100,61 @@ export class Scheduler {
       this.store!.append(events)
     })
     return ready.length > 0
+  }
+
+  /** Reconcile durable leases even when a provider promise or host process is lost. */
+  reconcileLiveness(goalId?: string): void {
+    if (this.store === undefined) return
+    const now = this.now()
+    for (const attempt of this.store.listRunningAttempts()) {
+      if (goalId !== undefined && attempt.goalId !== goalId) continue
+      const wallExpired = attempt.maxWallExpiresAt !== undefined && Date.parse(attempt.maxWallExpiresAt) <= now
+      const idleExpired = attempt.leaseExpiresAt !== undefined && Date.parse(attempt.leaseExpiresAt) <= now
+      if (!wallExpired && !idleExpired) continue
+      const task = this.store.getTask(attempt.goalId, attempt.taskId)
+      if (task === undefined) continue
+      const reason = wallExpired ? 'maximum wall-time lease expired; operator confirmation required' : 'idle lease expired; child progress stopped'
+      const attemptCount = this.store.listAttempts(task.id, attempt.goalId).length
+      const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
+      const retryIdle = idleExpired && !wallExpired && task.sideEffectClass !== 'external_effect' && attemptCount < maxAttempts
+      const active = this.aborters.get(attempt.id)
+      active?.controller.abort()
+      this.adapter.cancel?.(attempt.id)
+      this.store.transaction(() => {
+        const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = [
+          { type: 'TaskAttemptTimedOut', goalId: attempt.goalId, taskId: attempt.taskId, payload: { attemptId: attempt.id, kind: wallExpired ? 'wall' : 'idle', reason } },
+          { type: 'ValidationRecorded', goalId: attempt.goalId, taskId: attempt.taskId, payload: { attemptId: attempt.id, ok: false, validator: 'liveness', reason, failureKind: 'infrastructure' } },
+          { type: 'TaskAttemptFailed', goalId: attempt.goalId, taskId: attempt.taskId, payload: { attemptId: attempt.id, reason, failureKind: 'infrastructure' } },
+        ]
+        if (retryIdle) {
+          const retryInMs = this.backoffMs(attemptCount)
+          const retryAt = this.now() + retryInMs
+          this.retryAfter.set(this.key(attempt.goalId, task.id), retryAt)
+          events.push({ type: 'TaskRetryScheduled', goalId: attempt.goalId, taskId: task.id, payload: { attemptId: attempt.id, failureKind: 'infrastructure', retryInMs, retryAfter: new Date(retryAt).toISOString() } })
+        }
+        else if (task.sideEffectClass === 'external_effect') {
+          events.push({ type: 'TaskRecoveryBlocked', goalId: attempt.goalId, taskId: task.id, payload: { attemptId: attempt.id, reason: 'external effect timed out; operator resolution is required before another attempt' } })
+          events.push({ type: 'GoalPaused', goalId: attempt.goalId, payload: { reason } })
+        }
+        else {
+          events.push({ type: 'TaskRetryBudgetExhausted', goalId: attempt.goalId, taskId: attempt.taskId, payload: { attemptId: attempt.id, reason, failureKind: 'infrastructure' } })
+          events.push({ type: 'GoalPaused', goalId: attempt.goalId, payload: { reason } })
+        }
+        this.store!.append(events)
+      })
+      // A provider may ignore cancellation.  The durable state above is
+      // authoritative; do not let its unresolved promise keep the parent
+      // scheduler loop alive until the five-hour adapter guard expires.
+      this.livenessSettlers.get(attempt.id)?.()
+    }
+  }
+
+  /** Accept a bounded heartbeat only from the child session that owns the running attempt. */
+  reportProgress(sessionId: string, attemptId: string, phase: string, message: string, completed?: number, total?: number): void {
+    const attempt = this.store?.getRunningAttemptBySession(sessionId)
+    if (attempt === undefined || attempt.id !== attemptId) throw new Error('progress reporter does not own this running attempt')
+    const now = new Date(this.now()).toISOString()
+    this.store!.transaction(() => this.store!.append([{ type: 'AttemptProgressRecorded', goalId: attempt.goalId, taskId: attempt.taskId, payload: { attemptId, at: now, leaseExpiresAt: new Date(this.now() + this.idleTimeoutMs).toISOString(), phase: boundedProgress(phase, 48, 'phase'), message: boundedProgress(message, 512, 'message'), ...(completed === undefined ? {} : { completed }), ...(total === undefined ? {} : { total }) } }]))
   }
 
   /** Recover nonterminal attempts. No agent is persisted or used unless a caller provides one later. */
@@ -200,19 +264,22 @@ export class Scheduler {
     }
     this.store!.transaction(() => this.store!.append([
       { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
-      { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
+      { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined, startedAt: new Date(this.now()).toISOString(), leaseExpiresAt: new Date(this.now() + this.idleTimeoutMs).toISOString(), maxWallExpiresAt: new Date(this.now() + Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs)).toISOString() } },
     ]))
     let result
     let sessionRecorded = false
-    try { result = await this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs }), onSessionId: dshSessionId => { sessionRecorded = true; this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])) }, ...(executionParent === undefined ? {} : { parent: executionParent }) }) } catch (error) {
+    const leaseExpired = new Promise<ExecutionResult>(resolve => { this.livenessSettlers.set(attemptId, () => resolve({ status: 'failed', summary: 'attempt lease expired', failureKind: 'infrastructure', artifacts: [], evidence: [] })) })
+    const effectiveTimeoutMs = Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs)
+    try { result = await Promise.race([this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, timeoutMs: effectiveTimeoutMs, onSessionId: dshSessionId => { sessionRecorded = true; this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])) }, ...(executionParent === undefined ? {} : { parent: executionParent }) }), leaseExpired]) } catch (error) {
       const failure = error as Error & { dshSessionId?: string }
       // An adapter that throws is an environment fault the seam could not
       // represent as a result, so it is classified as infrastructure.
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), failureKind: 'infrastructure' as const, artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
+    this.livenessSettlers.delete(attemptId)
     this.aborters.delete(attemptId)
     executionSignal?.removeEventListener('abort', relayAbort)
-    if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
+    if (this.store!.getGoal(goalId)?.state === 'CANCELLED' || this.store!.listAttempts(task.id, goalId).find(item => item.id === attemptId)?.state !== 'RUNNING') return
     // A conversation stop is an operator interruption, not a failed unit of
     // work.  In particular, it must never feed the automatic-replan loop.
     if (controller.signal.aborted) {
@@ -269,7 +336,12 @@ export class Scheduler {
       else {
         const reason = contract.reason ?? result.summary
         events.push({ type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason, ...(failureKind === 'output' ? {} : { failureKind }) } })
-        if (attemptCount < maxAttempts) {
+        if (task.sideEffectClass === 'external_effect') {
+          this.retryAfter.delete(this.key(goalId, task.id))
+          events.push({ type: 'TaskRecoveryBlocked', goalId, taskId: task.id, payload: { attemptId, reason: 'external effect failed; operator resolution is required before another attempt' } })
+          events.push({ type: 'GoalPaused', goalId, payload: { reason: `external effect for ${task.id} failed; operator resolution is required` } })
+        }
+        else if (attemptCount < maxAttempts) {
           const retryInMs = this.backoffMs(attemptCount)
           const retryAt = this.now() + retryInMs
           this.retryAfter.set(this.key(goalId, task.id), retryAt)
@@ -290,7 +362,7 @@ export class Scheduler {
       }
       this.store!.append(events)
       })
-      if (!contract.ok && attemptCount >= maxAttempts) {
+      if (!contract.ok && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
         if (failureKind === 'output') await this.onTerminalFailure?.({ goalId, task, reason: contract.reason ?? result.summary })
         // An exhausted infrastructure retry budget is not validation evidence:
         // pause the goal for an operator to resume once the environment
@@ -307,7 +379,9 @@ export class Scheduler {
       ...(dshSessionId === undefined || sessionRecorded ? [] : [{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]),
       { type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: false, validator: task.validator ?? 'runtime', reason } },
       { type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason } },
-      ...(attemptCount < maxAttempts ? [{ type: 'TaskRetryScheduled', goalId, taskId: task.id, payload: { attemptId } }] : [{ type: 'TaskFailed', goalId, taskId: task.id, payload: { attemptId, reason } }]),
+      ...(task.sideEffectClass === 'external_effect'
+        ? [{ type: 'TaskRecoveryBlocked', goalId, taskId: task.id, payload: { attemptId, reason: 'external effect failed; operator resolution is required before another attempt' } }, { type: 'GoalPaused', goalId, payload: { reason: `external effect for ${task.id} failed; operator resolution is required` } }]
+        : attemptCount < maxAttempts ? [{ type: 'TaskRetryScheduled', goalId, taskId: task.id, payload: { attemptId } }] : [{ type: 'TaskFailed', goalId, taskId: task.id, payload: { attemptId, reason } }]),
     ]))
   }
   private async runLegacyRound(goalId: string, tasks: Map<string, TaskNode>): Promise<void> {
@@ -339,3 +413,9 @@ function validateOutputContract(task: TaskNode, result: import('./adapters.js').
 }
 
 function failureMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+function boundedProgress(value: string, limit: number, name: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > limit) throw new Error(`progress ${name} must be 1-${limit} characters`)
+  return trimmed
+}

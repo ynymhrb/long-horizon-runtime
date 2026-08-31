@@ -62,6 +62,18 @@ describe('RuntimeEventStore', () => {
     expect(runtime.listAttempts('same', 'g-1').map(item => item.id)).toEqual(['a-1'])
   })
 
+  test('projects compact attempt progress and lease timestamps from append-only events', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'TaskAttemptStarted', goalId: 'g', taskId: 't', payload: { attemptId: 'a', startedAt: '2026-08-31T00:00:00.000Z', leaseExpiresAt: '2026-08-31T00:05:00.000Z', maxWallExpiresAt: '2026-08-31T05:00:00.000Z' } },
+      { type: 'AttemptProgressRecorded', goalId: 'g', taskId: 't', payload: { attemptId: 'a', at: '2026-08-31T00:01:00.000Z', leaseExpiresAt: '2026-08-31T00:06:00.000Z', phase: 'tool', message: 'running tests' } },
+    ])
+
+    expect(runtime.listAttempts('t', 'g')[0]).toMatchObject({
+      startedAt: '2026-08-31T00:00:00.000Z', lastActivityAt: '2026-08-31T00:01:00.000Z', leaseExpiresAt: '2026-08-31T00:06:00.000Z', maxWallExpiresAt: '2026-08-31T05:00:00.000Z', latestProgress: { phase: 'tool', message: 'running tests' },
+    })
+  })
+
   test('replays one current task per session without deleting historic links', () => {
     const runtime = store()
     runtime.append([

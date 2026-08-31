@@ -12,13 +12,15 @@ export class LongTaskRuntime {
     ownsStore;
     artifactStore;
     scheduler;
+    livenessCheckIntervalMs;
     constructor(planner, execution, options = {}) {
         this.planner = planner;
         const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options;
         this.ownsStore = normalized.store === undefined;
         this.store = normalized.store ?? new RuntimeEventStore(normalized.databasePath ?? ':memory:');
         this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536);
-        this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
+        this.livenessCheckIntervalMs = Math.max(10, Math.min(normalized.idleTimeoutMs ?? 300_000, 30_000));
+        this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
     }
     async createGoal(request, executionParent, executionSignal) {
         if (request.objective.trim().length === 0)
@@ -55,7 +57,15 @@ export class LongTaskRuntime {
             await this.runUntilIdle(goalId, executionParent, executionSignal);
         return this.view(goalId);
     }
-    getStatus(goalId) { return this.store.getGoal(goalId) === undefined ? undefined : this.view(goalId); }
+    getStatus(goalId) {
+        if (this.store.getGoal(goalId) === undefined)
+            return undefined;
+        this.scheduler.reconcileLiveness(goalId);
+        return this.view(goalId);
+    }
+    reportAttemptProgress(sessionId, attemptId, phase, message, completed, total) {
+        this.scheduler.reportProgress(sessionId, attemptId, phase, message, completed, total);
+    }
     /** Profile-local task inventory for the cross-session Task Area. */
     listGoals(options = {}) { return this.store.listGoals(options).map(goal => this.view(goal.id)); }
     /** Archive hides a task from the default inventory without discarding its audit history. */
@@ -282,14 +292,36 @@ export class LongTaskRuntime {
     startBackground(goalId, executionParent) {
         if (this.background.has(goalId) || executionParent === undefined)
             return;
+        let watchdog;
         const promise = withDshParent(executionParent, () => this.runUntilIdle(goalId, executionParent))
-            .catch(() => undefined)
-            .finally(() => { this.background.delete(goalId); });
+            .catch(error => {
+            // A failed supervisory loop is itself durable operator information;
+            // silently swallowing it used to leave a goal apparently RUNNING.
+            if (this.store.getGoal(goalId)?.state === 'RUNNING')
+                this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: `background scheduler failed: ${error instanceof Error ? error.message : String(error)}` } }]));
+        })
+            .finally(() => {
+            if (watchdog !== undefined)
+                clearInterval(watchdog);
+            this.background.delete(goalId);
+        });
         this.background.set(goalId, promise);
+        watchdog = setInterval(() => {
+            try {
+                this.scheduler.reconcileLiveness(goalId);
+            }
+            catch (error) {
+                if (this.store.getGoal(goalId)?.state === 'RUNNING')
+                    this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: `liveness watchdog failed: ${error instanceof Error ? error.message : String(error)}` } }]));
+            }
+        }, this.livenessCheckIntervalMs);
     }
     /** Resolve the in-flight background execution for a goal, if any (test seam). */
     awaitBackground(goalId) { return this.background.get(goalId); }
     async recover(executionParent) {
+        // Preserve the actual lease-expiry evidence across a host restart before
+        // generic interruption recovery examines the same running attempt.
+        this.scheduler.reconcileLiveness();
         const recoveredGoals = await this.scheduler.recover();
         if (executionParent !== undefined)
             for (const goal of recoveredGoals) {

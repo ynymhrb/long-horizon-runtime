@@ -10,9 +10,9 @@ export function apply(ctx, input) {
     const config = resolveConfig(input);
     const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile };
     const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile });
-    const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.executionTimeoutMs, ...profile });
+    const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.maxWallTimeMs, ...profile });
     const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-        databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, autoReplan: config.autoReplan ?? true,
+        databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true,
     });
     ctx.provide('longTaskRuntime', runtime);
     ctx.systemPrompt.section({
@@ -31,6 +31,17 @@ export function apply(ctx, input) {
     // Reconcile persisted attempts at activation. Execution itself remains tied to a later live tool parent.
     runtime.purgeExpiredArchives();
     void runtime.recover().catch(() => undefined);
+    // This is deliberately not a lifecycle control. A child can prove liveness
+    // only for its own session-bound attempt; it cannot inspect or mutate a goal.
+    ctx.tools.register(defineTool({
+        name: 'long_task_report_progress', description: 'Report compact execution progress for your own current long-task attempt. Call at meaningful phases and before/after long tool work; do not include raw logs or secrets.',
+        parameters: { attempt_id: { type: 'string', required: true }, phase: { type: 'string', required: true }, message: { type: 'string', required: true }, completed: { type: 'number' }, total: { type: 'number' } }, output: toolOutput,
+        execute: (args, exec) => toolValue(async () => {
+            const agent = requireParent(exec.agent);
+            runtime.reportAttemptProgress(String(agent.id), args.attempt_id, args.phase, args.message, args.completed, args.total);
+            return { recorded: true };
+        }),
+    }));
     ctx.tools.register(defineTool({
         name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" execution begins immediately in the background and this call returns right away; poll long_task_status or long_task_events for progress. Use planning_mode "require_confirmation" to review the generated plan before execution.',
         parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
@@ -128,6 +139,8 @@ function resolveConfig(config) {
     requiredText(config.executionProvider, 'executionProvider');
     const maxConcurrentTasks = config.maxConcurrentTasks ?? 1;
     const executionTimeoutMs = config.executionTimeoutMs ?? 300_000;
+    const idleTimeoutMs = config.idleTimeoutMs ?? executionTimeoutMs;
+    const maxWallTimeMs = config.maxWallTimeMs ?? 18_000_000;
     const artifactInlineLimitBytes = config.artifactInlineLimitBytes ?? 65_536;
     const retryPolicy = config.retryPolicy ?? { maxAttempts: 1 };
     const routingMode = config.routingMode ?? 'advisory';
@@ -135,6 +148,10 @@ function resolveConfig(config) {
         throw new TypeError('maxConcurrentTasks must be a positive safe integer');
     if (!Number.isSafeInteger(executionTimeoutMs) || executionTimeoutMs < 1)
         throw new TypeError('executionTimeoutMs must be a positive safe integer');
+    if (!Number.isSafeInteger(idleTimeoutMs) || idleTimeoutMs < 1)
+        throw new TypeError('idleTimeoutMs must be a positive safe integer');
+    if (!Number.isSafeInteger(maxWallTimeMs) || maxWallTimeMs < idleTimeoutMs)
+        throw new TypeError('maxWallTimeMs must be a positive safe integer no smaller than idleTimeoutMs');
     if (!Number.isSafeInteger(artifactInlineLimitBytes) || artifactInlineLimitBytes < 0)
         throw new TypeError('artifactInlineLimitBytes must be a non-negative safe integer');
     if (!Number.isSafeInteger(retryPolicy.maxAttempts) || retryPolicy.maxAttempts < 1)
@@ -144,7 +161,7 @@ function resolveConfig(config) {
         throw new TypeError('defaultPlanningMode must be auto or require_confirmation');
     if (routingMode !== 'advisory' && routingMode !== 'strict')
         throw new TypeError('routingMode must be advisory or strict');
-    return { ...config, maxConcurrentTasks, executionTimeoutMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode };
+    return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode };
 }
 function requiredText(value, name) { if (value.trim().length === 0)
     throw new TypeError(`${name} must be non-empty`); }

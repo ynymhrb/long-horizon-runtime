@@ -54,6 +54,8 @@ export interface RuntimeOptions {
     };
     readonly retryBackoffMs?: number;
     readonly maxRetryBackoffMs?: number;
+    readonly idleTimeoutMs?: number;
+    readonly maxWallTimeMs?: number;
     readonly now?: () => number;
     readonly recoveryValidator?: (input: {
         readonly goalId: string;
@@ -71,10 +73,12 @@ export declare class LongTaskRuntime {
     private readonly ownsStore;
     private readonly artifactStore;
     private readonly scheduler;
+    private readonly livenessCheckIntervalMs;
     constructor(planner: PlannerAdapter, execution: ExecutionAdapter, options?: number | RuntimeOptions);
     createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
     confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
     getStatus(goalId: string): GoalView | undefined;
+    reportAttemptProgress(sessionId: string, attemptId: string, phase: string, message: string, completed?: number, total?: number): void;
     /** Profile-local task inventory for the cross-session Task Area. */
     listGoals(options?: {
         readonly archived?: boolean;

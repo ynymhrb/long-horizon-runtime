@@ -22,6 +22,7 @@ The adapters request DSH structured output, fall back to parsing a final JSON te
 * **Cancellation:** cancellation terminalizes every active attempt and all nonterminal nodes in the current revision. A late child result is ignored after the durable goal cancellation event.
 * **Artifact handoff:** file-backed artifacts are SHA-256 verified before their text is included in a child context. Output contracts may constrain `artifactTypes` and `mimeTypes`, and validation failures cannot activate task output.
 * **Startup recovery:** plugin activation reconciles persisted attempts immediately, but does not execute a DSH child without a live parent Agent. Read-only/idempotent attempts become eligible for the next explicit resume; indeterminate external effects pause the goal.
+* **Liveness leases:** an attempt has a five-minute no-progress lease and a five-hour wall lease. A child reports compact phase progress through `long_task_report_progress`; progress is append-only and visible in the Cockpit without copying raw output into the parent context. A past-due lease is reconciled during activation, scheduling, and status reads. Wall expiry pauses for an operator decision; external-effect work is never silently replayed.
 
 ## Final hardening rulings
 

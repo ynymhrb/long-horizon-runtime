@@ -89,6 +89,39 @@ describe('durable runtime core', () => {
     expect(executions).toBe(1)
   })
 
+  test('retries a past-due durable safe attempt through the normal retry policy', async () => {
+    const store = createStore()
+    store.append([
+      { type: 'GoalCreated', goalId: 'expired', payload: { objective: 'ship', planningMode: 'auto' } },
+      { type: 'PlanRevisionApplied', goalId: 'expired', payload: { revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 2 }, sideEffectClass: 'read_only', validator: 'required' }] } },
+      { type: 'TaskAttemptStarted', goalId: 'expired', taskId: 'a', payload: { attemptId: 'lost', revision: 1, context: {}, startedAt: '2026-08-31T00:00:00.000Z', leaseExpiresAt: '2026-08-31T00:05:00.000Z', maxWallExpiresAt: '2026-08-31T05:00:00.000Z' } },
+    ])
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, now: () => Date.parse('2026-08-31T00:06:00.000Z') })
+
+    await (runtime as unknown as { scheduler: { runRound(goalId: string): Promise<boolean> } }).scheduler.runRound('expired')
+
+    expect(store.getGoal('expired')?.state).toBe('RUNNING')
+    expect(store.getTask('expired', 'a')?.state).toBe('PENDING')
+    expect(store.listAttempts('a', 'expired')[0]?.state).toBe('FAILED')
+    expect(store.listRecentEvents('expired').map(event => event.type)).toContain('TaskAttemptTimedOut')
+    expect(store.listRecentEvents('expired').map(event => event.type)).toContain('TaskRetryScheduled')
+  })
+
+  test('records only compact progress from the child session that owns its attempt', () => {
+    const store = createStore()
+    store.append([
+      { type: 'GoalCreated', goalId: 'progress', payload: { objective: 'ship', planningMode: 'auto' } },
+      { type: 'PlanRevisionApplied', goalId: 'progress', payload: { revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } },
+      { type: 'TaskAttemptStarted', goalId: 'progress', taskId: 'a', payload: { attemptId: 'a1', revision: 1, context: {}, dshSessionId: 'child-1' } },
+    ])
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, now: () => Date.parse('2026-08-31T00:00:00.000Z') })
+
+    runtime.reportAttemptProgress('child-1', 'a1', 'tool', 'running tests')
+
+    expect(store.listAttempts('a', 'progress')[0]?.latestProgress).toEqual({ phase: 'tool', message: 'running tests' })
+    expect(() => runtime.reportAttemptProgress('child-2', 'a1', 'tool', 'forged')).toThrow(/own/i)
+  })
+
   test('terminalizes an attempt when artifact persistence throws after it started', async () => {
     const store = createStore()
     const strictPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
@@ -179,6 +212,22 @@ describe('durable runtime core', () => {
     expect(store.getGoal('g')?.state).toBe('PAUSED')
     await runtime.resumeGoal('g', {}, 'retry')
     expect(store.getGoal('g')?.state).toBe('SUCCEEDED')
+  })
+
+  test('recovery records an already-expired durable lease before generic interruption handling', async () => {
+    const store = createStore()
+    store.append([
+      { type: 'GoalCreated', goalId: 'g-expired', payload: { objective: 'inspect', planningMode: 'auto' } },
+      { type: 'PlanRevisionApplied', goalId: 'g-expired', payload: { revision: 1, tasks: [{ id: 'a', objective: 'inspect', dependsOn: [], priority: 0, sideEffectClass: 'read_only', inputContract: {}, outputContract: {}, completionCriteria: 'done' }] } },
+      { type: 'TaskAttemptStarted', goalId: 'g-expired', taskId: 'a', payload: { attemptId: 'attempt-1', revision: 1, context: {}, startedAt: '2026-01-01T00:00:00.000Z', leaseExpiresAt: '2026-01-01T00:01:00.000Z', maxWallExpiresAt: '2026-01-01T05:00:00.000Z' } },
+    ])
+    const execution: ExecutionAdapter = { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { store, now: () => Date.parse('2026-01-01T00:02:00.000Z') })
+
+    await runtime.recover()
+
+    expect(store.listEvents('g-expired', 0, 100).some(event => event.type === 'TaskAttemptTimedOut')).toBe(true)
+    expect(store.listEvents('g-expired', 0, 100).some(event => event.type === 'TaskInterrupted')).toBe(false)
   })
 
   test('fences an in-flight attempt from an obsolete plan revision', async () => {

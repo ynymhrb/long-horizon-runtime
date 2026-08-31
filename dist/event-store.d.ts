@@ -46,6 +46,16 @@ export interface AttemptProjection {
     readonly dshSessionId?: string;
     readonly context: Record<string, unknown>;
     readonly summary?: string;
+    readonly startedAt?: string;
+    readonly lastActivityAt?: string;
+    readonly leaseExpiresAt?: string;
+    readonly maxWallExpiresAt?: string;
+    readonly latestProgress?: {
+        readonly phase: string;
+        readonly message: string;
+        readonly completed?: number;
+        readonly total?: number;
+    };
 }
 export interface ArtifactProjection {
     readonly id: string;
@@ -122,6 +132,7 @@ export declare class RuntimeEventStore {
     getTask(goalId: string, taskId: string): TaskNode | undefined;
     listAttempts(taskId: string, goalId?: string): AttemptProjection[];
     listRunningAttempts(): AttemptProjection[];
+    getRunningAttemptBySession(sessionId: string): AttemptProjection | undefined;
     listActiveValidatedArtifacts(goalId: string, taskIds?: readonly string[]): ArtifactProjection[];
     listDecisions(goalId: string): DecisionProjection[];
     listEvidence(goalId: string): EvidenceProjection[];

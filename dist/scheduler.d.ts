@@ -13,6 +13,8 @@ export interface SchedulerOptions {
     readonly retryBackoffMs?: number;
     /** Upper bound for the exponential retry delay. */
     readonly maxRetryBackoffMs?: number;
+    readonly idleTimeoutMs?: number;
+    readonly maxWallTimeMs?: number;
     /** Injectable clock for deterministic backoff tests. */
     readonly now?: () => number;
     readonly recoveryValidator?: (input: {
@@ -48,6 +50,8 @@ export declare class Scheduler {
     private readonly defaultAttempts;
     private readonly retryBackoffMs;
     private readonly maxRetryBackoffMs;
+    private readonly idleTimeoutMs;
+    private readonly maxWallTimeMs;
     private readonly now;
     private readonly recoveryValidator?;
     private readonly validator?;
@@ -55,11 +59,17 @@ export declare class Scheduler {
     private readonly artifactStore;
     private readonly onTerminalFailure?;
     private readonly aborters;
+    /** Resolves an in-process dispatch when its durable lease is terminalized. */
+    private readonly livenessSettlers;
     /** Durable retry due timestamps keyed by `${goalId}\u0000${taskId}`; respected by ready selection. */
     private readonly retryAfter;
     constructor(adapter: ExecutionAdapter, options: number | SchedulerOptions);
     /** Dispatch one bounded ready set. Legacy map mode is retained for a narrow unit-test boundary. */
     runRound(goalId: string, legacyTasks?: Map<string, TaskNode>, executionParent?: unknown, executionSignal?: AbortSignal): Promise<boolean>;
+    /** Reconcile durable leases even when a provider promise or host process is lost. */
+    reconcileLiveness(goalId?: string): void;
+    /** Accept a bounded heartbeat only from the child session that owns the running attempt. */
+    reportProgress(sessionId: string, attemptId: string, phase: string, message: string, completed?: number, total?: number): void;
     /** Recover nonterminal attempts. No agent is persisted or used unless a caller provides one later. */
     recover(): Promise<readonly string[]>;
     cancel(goalId: string): void;

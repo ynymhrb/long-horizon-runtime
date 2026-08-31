@@ -158,4 +158,26 @@ describe('DSH adapters', () => {
     expect(result.summary).toContain('timeout after 30ms')
     expect(Date.now() - started).toBeLessThan(1000)
   })
+
+  test('settles locally when a child ignores the timeout abort signal', async () => {
+    let disposed = false
+    const adapter = createDshExecutionAdapter({
+      async start() {
+        return {
+          id: 'lost-child', localAgent: undefined,
+          result: new Promise(() => {}),
+          async dispose() { disposed = true },
+        }
+      },
+    } as never, { providerName: 'worker', timeoutMs: 30 })
+
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'infrastructure', dshSessionId: 'lost-child' })
+    expect(result.summary).toContain('timeout after 30ms')
+    expect(disposed).toBe(true)
+  }, 1_000)
 })
