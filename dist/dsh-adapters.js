@@ -57,6 +57,7 @@ export function createDshPlannerAdapter(subagents, options) {
 /** Build an isolated task-attempt adapter backed by a configured DSH one-shot provider. */
 export function createDshExecutionAdapter(subagents, options) {
     requireProviderName(options.providerName);
+    const liveAttempts = new Map();
     return {
         async execute(input) {
             // A per-task timeoutMs overrides the deployment default, which itself
@@ -68,40 +69,46 @@ export function createDshExecutionAdapter(subagents, options) {
             let settled;
             let dshSessionId;
             try {
-                settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId); }, timeoutMs);
+                try {
+                    settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId); }, timeoutMs);
+                }
+                catch (error) {
+                    // The seam could not represent the outcome as a stop reason: an
+                    // infrastructure fault. A conversation stop through the caller signal
+                    // is an interruption, not a failure.
+                    const failure = error;
+                    const interrupted = input.signal.aborted === true;
+                    const summary = timeout?.aborted === true ? `DSH child stopped: timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : failure.message;
+                    const quota = interrupted ? undefined : quotaFailure(summary, Date.now());
+                    return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : quota?.failureKind ?? 'infrastructure', artifacts: [], evidence: [], ...(quota === undefined ? {} : quota), ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId }) };
+                }
+                if (settled.stopReason !== 'completed') {
+                    // Preserve the child session id in the summary so the operator can
+                    // jump into the child's own log when the detail is unavailable.
+                    const reason = timeout?.aborted === true ? `timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : settled.stopReason;
+                    return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
+                }
+                try {
+                    const value = objectValue(settled.value, 'execution result');
+                    return {
+                        status: 'succeeded', summary: string(value.summary, 'execution summary'),
+                        artifacts: array(value.artifacts, 'execution artifacts').map((artifact) => {
+                            const item = objectValue(artifact, 'artifact');
+                            return { type: string(item.type, 'artifact type'), content: string(item.content, 'artifact content'), ...(item.mimeType === undefined ? {} : { mimeType: string(item.mimeType, 'artifact mimeType') }) };
+                        }),
+                        evidence: array(value.evidence, 'execution evidence').map(item => string(item, 'evidence')),
+                        dshSessionId: settled.dshSessionId,
+                    };
+                }
+                catch (error) {
+                    return { status: 'failed', summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
+                }
             }
-            catch (error) {
-                // The seam could not represent the outcome as a stop reason: an
-                // infrastructure fault. A conversation stop through the caller signal
-                // is an interruption, not a failure.
-                const failure = error;
-                const interrupted = input.signal.aborted === true;
-                const summary = timeout?.aborted === true ? `DSH child stopped: timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : failure.message;
-                const quota = interrupted ? undefined : quotaFailure(summary, Date.now());
-                return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : quota?.failureKind ?? 'infrastructure', artifacts: [], evidence: [], ...(quota === undefined ? {} : quota), ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId }) };
-            }
-            if (settled.stopReason !== 'completed') {
-                // Preserve the child session id in the summary so the operator can
-                // jump into the child's own log when the detail is unavailable.
-                const reason = timeout?.aborted === true ? `timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : settled.stopReason;
-                return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
-            }
-            try {
-                const value = objectValue(settled.value, 'execution result');
-                return {
-                    status: 'succeeded', summary: string(value.summary, 'execution summary'),
-                    artifacts: array(value.artifacts, 'execution artifacts').map((artifact) => {
-                        const item = objectValue(artifact, 'artifact');
-                        return { type: string(item.type, 'artifact type'), content: string(item.content, 'artifact content'), ...(item.mimeType === undefined ? {} : { mimeType: string(item.mimeType, 'artifact mimeType') }) };
-                    }),
-                    evidence: array(value.evidence, 'execution evidence').map(item => string(item, 'evidence')),
-                    dshSessionId: settled.dshSessionId,
-                };
-            }
-            catch (error) {
-                return { status: 'failed', summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
+            finally {
+                liveAttempts.delete(input.attemptId);
             }
         },
+        isAttemptAlive(attemptId) { return liveAttempts.has(attemptId); },
     };
 }
 async function runStructured(subagents, options, label, prompt, outputSchema, signal = new AbortController().signal, onStarted, hardTimeoutMs) {

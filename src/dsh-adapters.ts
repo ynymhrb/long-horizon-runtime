@@ -72,6 +72,7 @@ export function createDshPlannerAdapter(subagents: Pick<SubagentRuntime, 'start'
 /** Build an isolated task-attempt adapter backed by a configured DSH one-shot provider. */
 export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'start'>, options: DshAdapterOptions): ExecutionAdapter {
   requireProviderName(options.providerName)
+  const liveAttempts = new Map<string, string>()
   return {
     async execute(input): Promise<ExecutionResult> {
       // A per-task timeoutMs overrides the deployment default, which itself
@@ -82,8 +83,9 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
       let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }
       let dshSessionId: string | undefined
-      try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId) }, timeoutMs) }
-      catch (error) {
+      try {
+        try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId) }, timeoutMs) }
+        catch (error) {
         // The seam could not represent the outcome as a stop reason: an
         // infrastructure fault. A conversation stop through the caller signal
         // is an interruption, not a failure.
@@ -91,8 +93,8 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
         const interrupted = input.signal.aborted === true
         const summary = timeout?.aborted === true ? `DSH child stopped: timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : failure.message
         const quota = interrupted ? undefined : quotaFailure(summary, Date.now())
-        return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : quota?.failureKind ?? 'infrastructure', artifacts: [], evidence: [], ...(quota === undefined ? {} : quota), ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId! }) }
-      }
+          return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : quota?.failureKind ?? 'infrastructure', artifacts: [], evidence: [], ...(quota === undefined ? {} : quota), ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId! }) }
+        }
       if (settled.stopReason !== 'completed') {
         // Preserve the child session id in the summary so the operator can
         // jump into the child's own log when the detail is unavailable.
@@ -111,7 +113,9 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
         dshSessionId: settled.dshSessionId,
         } as ExecutionResult
       } catch (error) { return { status: 'failed', summary: error instanceof Error ? error.message : String(error), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId } }
+    } finally { liveAttempts.delete(input.attemptId) }
     },
+    isAttemptAlive(attemptId) { return liveAttempts.has(attemptId) },
   }
 }
 

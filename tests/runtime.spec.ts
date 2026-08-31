@@ -438,4 +438,26 @@ describe('LongTaskRuntime', () => {
     ])).resolves.toBeUndefined()
     release()
   })
+
+  test('background watchdog renews an idle lease while the child session remains live', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const execution: ExecutionAdapter & { isAttemptAlive: (attemptId: string) => boolean } = {
+      async execute() { await gate; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } },
+      isAttemptAlive: () => true,
+    }
+    const runtime = new LongTaskRuntime(planner, execution, { idleTimeoutMs: 20, maxWallTimeMs: 60_000 })
+    const created = await runtime.createGoal({ objective: 'keep live child running', planningMode: 'require_confirmation' })
+
+    await runtime.confirmGoal(created.id)
+    runtime.startBackground(created.id, {})
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(runtime.store.getGoal(created.id)?.state).toBe('RUNNING')
+    expect(runtime.store.listEvents(created.id, 0, 100).some(event => event.type === 'TaskAttemptTimedOut')).toBe(false)
+    release()
+    await runtime.awaitBackground(created.id)
+    expect(runtime.getStatus(created.id)?.state).toBe('SUCCEEDED')
+  })
 })

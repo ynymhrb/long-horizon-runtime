@@ -38,6 +38,8 @@ export interface ExecutionAdapter {
   /** parent is a live, opaque DSH Agent supplied by a tool call and is never durable state. */
   execute(input: { readonly attemptId: string; readonly taskId: string; readonly context: ContextView; readonly signal: AbortSignal; readonly parent?: unknown; /** Always present for runtime dispatch; optional for legacy test adapters. */ readonly idempotencyKey?: string; readonly retryPolicy?: import('./domain.js').RetryPolicy; readonly sideEffectClass?: import('./domain.js').SideEffectClass; /** Per-task execution budget override; falls back to the adapter default when absent. */ readonly timeoutMs?: number; /** Called as soon as a child session exists, before its result settles. */ readonly onSessionId?: (dshSessionId: string) => void }): Promise<ExecutionResult>
   cancel?(attemptId: string): void
+  /** Whether this process still owns a published, unsettled child session. */
+  isAttemptAlive?(attemptId: string): boolean
 }
 
 /** Validate a planner's untrusted structured output. */

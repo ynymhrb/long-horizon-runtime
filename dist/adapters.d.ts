@@ -56,6 +56,8 @@ export interface ExecutionAdapter {
         readonly onSessionId?: (dshSessionId: string) => void;
     }): Promise<ExecutionResult>;
     cancel?(attemptId: string): void;
+    /** Whether this process still owns a published, unsettled child session. */
+    isAttemptAlive?(attemptId: string): boolean;
 }
 /** Validate a planner's untrusted structured output. */
 export declare function planWithValidation(adapter: PlannerAdapter, input: Parameters<PlannerAdapter['plan']>[0]): Promise<ValidatedPlan>;

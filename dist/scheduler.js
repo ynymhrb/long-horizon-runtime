@@ -98,6 +98,18 @@ export class Scheduler {
             const task = this.store.getTask(attempt.goalId, attempt.taskId);
             if (task === undefined)
                 continue;
+            // A DSH child that has been published and has not settled is still doing
+            // work even when it has not emitted a model-facing progress message.
+            // Keep the durable lease current, but retain the wall-time ceiling so a
+            // genuinely stuck child cannot run forever.  After a host restart no
+            // adapter-owned handle exists, so the normal recovery path still wins.
+            if (idleExpired && !wallExpired && this.adapter.isAttemptAlive?.(attempt.id) === true) {
+                this.store.transaction(() => this.store.append([{
+                        type: 'AttemptProgressRecorded', goalId: attempt.goalId, taskId: attempt.taskId,
+                        payload: { attemptId: attempt.id, at: new Date(now).toISOString(), leaseExpiresAt: new Date(now + this.idleTimeoutMs).toISOString(), phase: 'transport_liveness', message: 'child session remains live' },
+                    }]));
+                continue;
+            }
             const reason = wallExpired ? 'maximum wall-time lease expired; operator confirmation required' : 'idle lease expired; child progress stopped';
             const attemptCount = this.store.listAttempts(task.id, attempt.goalId).length;
             const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts);

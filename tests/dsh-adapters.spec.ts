@@ -76,6 +76,27 @@ describe('DSH adapters', () => {
     expect(result).toMatchObject({ status: 'succeeded', summary: 'complete', artifacts: [{ type: 'report', content: 'result' }], evidence: ['source'], dshSessionId: 'child-session-2' })
   })
 
+  test('reports a published unsettled child as live and clears it after settlement', async () => {
+    let release!: (result: { stopReason: 'completed'; output: never[]; structured: { summary: string; artifacts: never[]; evidence: never[] } }) => void
+    const pending = new Promise<{ stopReason: 'completed'; output: never[]; structured: { summary: string; artifacts: never[]; evidence: never[] } }>(resolve => { release = resolve })
+    const adapter = createDshExecutionAdapter({
+      async start() { return { id: 'live-child', localAgent: undefined, result: pending, async dispose() {} } },
+    } as never, { providerName: 'worker' })
+    let started!: () => void
+    const published = new Promise<void>(resolve => { started = resolve })
+    const execution = withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'attempt-live', taskId: 'task-1', signal: new AbortController().signal,
+      context: { objective: 'goal', task: { id: 'task-1', objective: 'do it' }, artifacts: [] },
+      onSessionId: () => started(),
+    }))
+
+    await published
+    expect(adapter.isAttemptAlive?.('attempt-live')).toBe(true)
+    release({ stopReason: 'completed', output: [], structured: { summary: 'complete', artifacts: [], evidence: [] } })
+    await execution
+    expect(adapter.isAttemptAlive?.('attempt-live')).toBe(false)
+  })
+
   test('maps non-completed DSH stop reasons to a classified failed execution result', async () => {
     const adapter = createDshExecutionAdapter({
       async start() { return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'max-tokens', output: [] }), async dispose() {} } },
