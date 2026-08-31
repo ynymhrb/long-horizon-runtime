@@ -304,11 +304,15 @@ safe"，但规划器仍改写了已完成任务文本（本会话在 t01/t02 obj
 | 16:15:01 | DecisionRecorded{automatic_replan, await_confirmation}；PlanProposed revision 2；CheckpointCreated(过期)；`long_task_confirm` 返回（阻塞 42 分钟后） |
 | 16:15:02 | 父模型续步撞 429，重试 2 次仍失败，turn 以 error 结束；用户未收到回执 |
 
-## 附录 B：本次事件中确认的越界写入清单（需人工清理）
+## 附录 B：越界写入清单（已于 2026-08-31 清理）
 
-- `src/validation/{contracts,policy,evidence,runner,scenarios,cli}.ts`
-- `tests/validation/{contracts,policy,evidence,runner,cli}.spec.ts`、`helpers.ts`
-- `dist/validation/*`
-- `validation/scenarios/{state,faults,ui-manual,runner-selftest}.json`
-- `docs/superpowers/validation/{t01-handbook-extraction.md, scenarios/**}`
-- `package.json`（新增 `dependencies.yaml: ^2.9.0`）、`pnpm-lock.yaml`
+> 已删除/回滚，工作区不再包含下列内容；`git status` 已确认无残留。
+
+- `src/validation/{contracts,policy,evidence,runner,scenarios,cli}.ts` —— 已删除
+- `tests/validation/{contracts,policy,evidence,runner,cli}.spec.ts`、`helpers.ts` —— 已删除
+- `dist/validation/*` —— 已删除
+- `validation/scenarios/{state,faults,ui-manual,runner-selftest}.json` —— 已删除
+- `docs/superpowers/validation/{t01-handbook-extraction.md, scenarios/**}` —— 已删除
+- `package.json`（新增 `dependencies.yaml: ^2.9.0`）、`pnpm-lock.yaml` —— 已回滚至 HEAD，`pnpm install --frozen-lockfile` 已从 node_modules 清除 yaml
+
+清理后全量验证：162 → 118 项测试通过、typecheck 通过、build 通过、`git diff --check` 通过；已提交的 dist 与重建产物一致（diff 为空）。
