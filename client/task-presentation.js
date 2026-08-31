@@ -17,6 +17,11 @@ export function taskStatePresentation(state) {
   return STATES[state] ?? { tone: 'muted', label: '未知状态' }
 }
 
+export function quotaRecoveryPresentation(recovery, now = new Date()) {
+  if (Date.parse(recovery.retryAt) <= now.getTime()) return { tone: 'warning', label: '额度恢复时间已到，请在已关联会话中继续' }
+  return { tone: 'warning', label: `LLM 额度耗尽，预计 ${new Date(recovery.retryAt).toLocaleString()} 后重试` }
+}
+
 /**
  * SVG node stroke rules for every DAG tone, embedded by the client bundle so
  * the graph and its legend always agree. RUNNING must be visibly distinct

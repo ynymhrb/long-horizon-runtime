@@ -1,7 +1,7 @@
 import React from 'react'
 import { TaskDag } from './TaskDag.js'
 import { cockpitDataState, initialSelectedNode, resumeDriverMode } from './task-model.js'
-import { taskStatePresentation } from './task-presentation.js'
+import { quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 import { formatTaskEvent } from './task-events.js'
 const e = React.createElement
@@ -70,6 +70,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   // A web-side resume only marks the goal RUNNING; an agent session must drive
   // the rounds. Surface that instead of implying the task is executing alone.
   const waitingForDriver = task.state === 'RUNNING' && task.tasks.length > 0 && !task.tasks.some(node => node.state === 'RUNNING')
+  const quotaRecovery = task.quotaRecovery ? quotaRecoveryPresentation(task.quotaRecovery) : undefined
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },
       e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'),
@@ -86,7 +87,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
         : [e('button', { key: name, type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action(name) }, labels[name])])),
     error ? e('p', { className: 'ltr-error', role: 'alert' }, error) : null,
     editing ? e('form', { className: 'ltr-goal-edit', onSubmit: event => { event.preventDefault(); if (objective.trim() && reason.trim()) edit() } }, e('label', null, '新原始目标', e('textarea', { value: objective, onChange: event => setObjective(event.target.value) })), e('label', null, '修改原因', e('input', { value: reason, onChange: event => setReason(event.target.value) })), e('button', { type: 'submit', className: 'ltr-btn', disabled: pending || !objective.trim() || !reason.trim() }, '生成重规划')) : null,
-    e('p', { className: 'ltr-plan-hint' }, waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
+    e('p', { className: 'ltr-plan-hint' }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
     e('div', { className: 'ltr-cockpit-body' },
       e(TaskDag, { nodes: graph.nodes, selectedId, onSelect: setSelectedId }),
       e('aside', { className: 'ltr-inspector' }, selected ? e(React.Fragment, null,

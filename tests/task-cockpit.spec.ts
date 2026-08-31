@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode } from '../client/task-model.js'
+import { quotaRecoveryPresentation } from '../client/task-presentation.js'
 
 test('prefers a running node then pending work for the Cockpit inspector', () => {
   expect(initialSelectedNode([{ id: 'done', state: 'SUCCEEDED' }, { id: 'run', state: 'RUNNING' }, { id: 'pending', state: 'PENDING' }])).toBe('run')
@@ -25,4 +26,9 @@ test('decides how to hand a web resume to a live parent session', () => {
   expect(resumeDriverMode({ currentSessionId: 'session-2' }, 'session-1')).toBe('open')
   expect(resumeDriverMode({}, 'session-1')).toBe('attach')
   expect(resumeDriverMode({ currentSessionId: 'session-2' }, undefined)).toBe('open')
+})
+
+test('renders a due quota recovery as an actionable continuation message', () => {
+  expect(quotaRecoveryPresentation({ retryAt: '2026-09-01T10:05:00.000Z', diagnostic: 'HTTP 429 rate limit' }, new Date('2026-09-01T10:06:00.000Z')))
+    .toMatchObject({ tone: 'warning', label: '额度恢复时间已到，请在已关联会话中继续' })
 })

@@ -109,6 +109,7 @@ For an intentional machine-local customization only, add this to the `long-task-
 - Automatic replanning never applies a change that expands scope, touches external effects, invalidates completed work, or deactivates verified artifacts.
 - Deleting a task first cancels active work, then archives it. Archives are restorable for 30 days before purge.
 - An interrupted external-effect node remains blocked until an operator explicitly resolves its outcome.
+- A provider-reported LLM quota reset pauses the affected task without consuming its ordinary retry budget. While its originating conversation remains live, the runtime retries at the recorded recovery time; after a host restart, the Task Area preserves that time and asks you to continue from the linked conversation instead of starting a child autonomously.
 
 ## Storage and integration boundary
 
