@@ -76,7 +76,7 @@ describe('DSH adapters', () => {
     expect(result).toMatchObject({ status: 'succeeded', summary: 'complete', artifacts: [{ type: 'report', content: 'result' }], evidence: ['source'], dshSessionId: 'child-session-2' })
   })
 
-  test('maps non-completed DSH stop reasons to a failed execution result', async () => {
+  test('maps non-completed DSH stop reasons to a classified failed execution result', async () => {
     const adapter = createDshExecutionAdapter({
       async start() { return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'max-tokens', output: [] }), async dispose() {} } },
     } as never, { providerName: 'worker' })
@@ -84,7 +84,34 @@ describe('DSH adapters', () => {
       attemptId: 'a', taskId: 't', signal: new AbortController().signal,
       context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
     }))
-    expect(result).toMatchObject({ status: 'failed', summary: 'DSH child stopped: max-tokens' })
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'infrastructure' })
+    expect(result.summary).toContain('max-tokens')
+  })
+
+  test('classifies a child model/transport error as infrastructure and preserves its session id', async () => {
+    const adapter = createDshExecutionAdapter({
+      async start() { return { id: 'child-session-error', localAgent: undefined, result: Promise.resolve({ stopReason: 'error', output: [] }), async dispose() {} } },
+    } as never, { providerName: 'worker' })
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'infrastructure', dshSessionId: 'child-session-error' })
+    // The opaque "DSH child stopped: error" detail must not be the whole story.
+    expect(result.summary).not.toBe('DSH child stopped: error')
+    expect(result.summary).toContain('child-session-error')
+  })
+
+  test('classifies an aborted child as an interruption, never a validation failure', async () => {
+    const adapter = createDshExecutionAdapter({
+      async start() { return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'aborted', output: [] }), async dispose() {} } },
+    } as never, { providerName: 'worker' })
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'interrupted' })
+    expect(result.summary).toContain('aborted')
   })
 
   test('reports a child timeout with its budget and a remedy instead of a bare abort', async () => {

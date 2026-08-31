@@ -1,9 +1,20 @@
 import type { PlanDraft, ValidatedPlan } from './domain.js';
 import type { ContextView } from './context.js';
+/**
+ * Why a failed attempt failed. Only `output` failures are task-result
+ * validation failures (deterministic, may trigger replanning after the retry
+ * budget is exhausted). `infrastructure` covers environment/transport/LLM
+ * failures that are retriable and must never count as validation evidence.
+ * `interrupted` means the child was stopped or cancelled — an operator
+ * interruption, never failure evidence.
+ */
+export type FailureKind = 'output' | 'infrastructure' | 'interrupted';
 /** Result returned by a planner or task child agent. */
 export interface ExecutionResult {
     readonly status: 'succeeded' | 'failed';
     readonly summary: string;
+    /** Classifies a failed result. Absent means `output` (legacy adapters). */
+    readonly failureKind?: FailureKind;
     readonly artifacts: readonly {
         readonly type: string;
         readonly content: string;

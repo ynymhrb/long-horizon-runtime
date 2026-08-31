@@ -145,6 +145,9 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
     case 'TaskRetryScheduled':
       if (taskId !== undefined) updateCurrentTask(db, event.goalId, taskId, 'PENDING')
       break
+    case 'TaskRetryBudgetExhausted':
+      if (taskId !== undefined) updateCurrentTask(db, event.goalId, taskId, 'PENDING')
+      break
     case 'TaskInterrupted':
       if (taskId === undefined) throw new Error('TaskInterrupted requires taskId')
       db.prepare('UPDATE task_attempts SET state = ? WHERE id = ?').run('INTERRUPTED', String(p.attemptId))

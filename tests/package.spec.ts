@@ -11,7 +11,8 @@ describe('package surface', () => {
     expect(inject).toEqual(['tools', 'subagents', 'systemPrompt'])
     // Git installs must load the checked-in bundle directly. A prepare hook
     // would try to resolve this repository's private DSH development links.
-    expect(manifest.scripts.prepare).toBeUndefined()
+    const scripts = manifest.scripts as Record<string, string | undefined>
+    expect(scripts.prepare).toBeUndefined()
     expect(manifest.exports['.'].import).toBe('./dist/index.js')
     expect(existsSync(resolve(import.meta.dirname, '../dist/index.js'))).toBe(true)
   })

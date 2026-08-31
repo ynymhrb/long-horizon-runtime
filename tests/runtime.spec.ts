@@ -153,6 +153,31 @@ describe('LongTaskRuntime', () => {
     expect(goal.pauseReason).toBe('planning interrupted by conversation stop')
   })
 
+  test('drives rounds when a live parent resumes an already-running goal', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const calls: string[] = []
+    const execution: ExecutionAdapter = { async execute(input) { calls.push(input.taskId); return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    // A web-side confirm marks the goal RUNNING without a live parent, so no round dispatches.
+    const goal = await runtime.createGoal({ objective: 'web marked running', planningMode: 'require_confirmation' })
+    const running = await runtime.confirmGoal(goal.id)
+    expect(running.state).toBe('RUNNING')
+    expect(calls).toEqual([])
+    // A later model-side resume with a live parent must drive the DAG, not fail with "not paused".
+    const driven = await runtime.resumeGoal(goal.id, {})
+    expect(calls).toEqual(['a'])
+    expect(driven.state).toBe('SUCCEEDED')
+  })
+
+  test('idempotently accepts a web-side resume of an already-running goal without a live parent', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } })
+    const goal = await runtime.createGoal({ objective: 'double resume', planningMode: 'require_confirmation' })
+    await runtime.confirmGoal(goal.id)
+    const again = await runtime.resumeGoal(goal.id)
+    expect(again.state).toBe('RUNNING')
+  })
+
   test('pauses an executing goal on conversation stop without automatic replanning', async () => {
     let started!: () => void
     const running = new Promise<void>(resolve => { started = resolve })
@@ -173,5 +198,117 @@ describe('LongTaskRuntime', () => {
     expect(goal.revision).toBe(1)
     expect(goal.tasks[0]?.state).toBe('PENDING')
     expect(goal.decisions.some(decision => decision.type === 'automatic_replan')).toBe(false)
+  })
+
+  test('pauses instead of replanning when an infrastructure failure exhausts its attempt budget', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'failed', summary: '429 AccountQuotaExceeded', failureKind: 'infrastructure', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const goal = await runtime.createGoal({ objective: 'quota exhausted' }, {})
+
+    expect(goal.state).toBe('PAUSED')
+    expect(goal.pauseReason).toContain('infrastructure')
+    // The task is not terminalized: an infrastructure failure is not a
+    // validation outcome, so a later resume can re-run it.
+    expect(goal.tasks[0]?.state).toBe('PENDING')
+    expect(goal.decisions.some(decision => decision.type === 'automatic_replan')).toBe(false)
+  })
+
+  test('retries an infrastructure failure after a backoff delay and succeeds', async () => {
+    let executions = 0
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ ...strictTask('a', 'flaky'), retryPolicy: { maxAttempts: 3 } }] } } }
+    const execution: ExecutionAdapter = { async execute() {
+      executions += 1
+      return executions === 1
+        ? { status: 'failed' as const, summary: '429 rate limit', failureKind: 'infrastructure' as const, artifacts: [], evidence: [] }
+        : { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] }
+    } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true, retryBackoffMs: 5 })
+    const goal = await runtime.createGoal({ objective: 'backoff' }, {})
+
+    expect(goal.state).toBe('SUCCEEDED')
+    const retryEvents = runtime.store.listEvents(goal.id, 0, 200).filter(event => event.type === 'TaskRetryScheduled')
+    expect(retryEvents).toHaveLength(1)
+    expect(retryEvents[0]?.payload).toMatchObject({ failureKind: 'infrastructure' })
+    expect(retryEvents[0]?.payload.retryInMs).toBeGreaterThanOrEqual(5)
+    expect(retryEvents[0]?.payload.retryAfter).toEqual(expect.any(String))
+  })
+
+  test('records the child session once per attempt despite the settle-time id', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute(input) {
+      input.onSessionId?.('child-session-1')
+      return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [], dshSessionId: 'child-session-1' }
+    } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const goal = await runtime.createGoal({ objective: 'dedupe session' }, {})
+
+    const sessionEvents = runtime.store.listEvents(goal.id, 0, 200).filter(event => event.type === 'TaskAttemptSessionRecorded')
+    expect(sessionEvents).toHaveLength(1)
+    expect(sessionEvents[0]?.payload).toMatchObject({ dshSessionId: 'child-session-1' })
+  })
+
+  test('does not append a stale checkpoint after a replan proposal supersedes the round', async () => {
+    const planner: PlannerAdapter = {
+      async plan(input) {
+        if (input.baseRevision === undefined) return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] }
+        return { goalId: input.goalId, revision: 2, tasks: [{ ...strictTask('b', 'external replacement'), sideEffectClass: 'external_effect' as const }] }
+      },
+    }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'failed', summary: 'broken', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const goal = await runtime.createGoal({ objective: 'checkpoint' })
+    await runtime.runUntilIdle(goal.id, {})
+
+    expect(runtime.getStatus(goal.id)?.state).toBe('AWAITING_CONFIRMATION')
+    const events = runtime.store.listEvents(goal.id, 0, 300)
+    const proposalIndex = events.findLastIndex(event => event.type === 'PlanProposed')
+    expect(proposalIndex).toBeGreaterThan(-1)
+    expect(events.slice(proposalIndex + 1).some(event => event.type === 'CheckpointCreated')).toBe(false)
+  })
+
+  test('auto-applies a replan that only rewrites the text of a completed task and keeps its original objective', async () => {
+    let planningCalls = 0
+    const planner: PlannerAdapter = { async plan(input) {
+      planningCalls += 1
+      if (planningCalls === 1) return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work'), { ...strictTask('b', 'second'), priority: 1 }] }
+      return { goalId: input.goalId, revision: 2, tasks: [{ ...strictTask('a', 'work') }, { ...strictTask('b', 'second【已完成于 revision 1，保留成果】') }] }
+    } }
+    // Single concurrency + higher priority guarantees `b` is durably SUCCEEDED
+    // before `a` fails and triggers the automatic replan.
+    const failedOnce = new Set<string>()
+    const execution: ExecutionAdapter = { async execute(input) {
+      if (input.taskId === 'a' && !failedOnce.has('a')) { failedOnce.add('a'); return { status: 'failed' as const, summary: 'broken', artifacts: [], evidence: [] } }
+      return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] }
+    } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const goal = await runtime.createGoal({ objective: 'text rewrite' }, {})
+
+    expect(goal.state).toBe('SUCCEEDED')
+    expect(goal.revision).toBe(2)
+    // The planner's text edit to the completed task must neither force a
+    // confirmation nor mutate the applied plan's historical objective.
+    expect(goal.tasks.find(task => task.id === 'b')?.objective).toBe('second')
+  })
+
+  test('confirms without blocking and drives the remaining DAG in the background', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const started: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const execution: ExecutionAdapter = { async execute(input) { started.push(input.taskId); await gate; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const created = await runtime.createGoal({ objective: 'background', planningMode: 'require_confirmation' })
+
+    const confirmed = await runtime.confirmGoal(created.id)
+    expect(confirmed.state).toBe('RUNNING')
+    expect(started).toEqual([])
+    // A live parent starts a background loop instead of blocking the tool call.
+    runtime.startBackground(created.id, {})
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(started).toEqual(['a'])
+    release()
+    await runtime.awaitBackground(created.id)
+    expect(runtime.getStatus(created.id)?.state).toBe('SUCCEEDED')
   })
 })

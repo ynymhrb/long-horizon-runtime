@@ -71,13 +71,19 @@ export function createDshExecutionAdapter(subagents, options) {
                 settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; input.onSessionId?.(sessionId); });
             }
             catch (error) {
+                // The seam could not represent the outcome as a stop reason: an
+                // infrastructure fault. A conversation stop through the caller signal
+                // is an interruption, not a failure.
                 const failure = error;
+                const interrupted = input.signal.aborted === true;
                 const summary = timeout?.aborted === true ? `DSH child stopped: timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : failure.message;
-                return { status: 'failed', summary, artifacts: [], evidence: [], ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId }) };
+                return { status: 'failed', summary, failureKind: interrupted ? 'interrupted' : 'infrastructure', artifacts: [], evidence: [], ...(failure.dshSessionId === undefined && dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId ?? dshSessionId }) };
             }
             if (settled.stopReason !== 'completed') {
+                // Preserve the child session id in the summary so the operator can
+                // jump into the child's own log when the detail is unavailable.
                 const reason = timeout?.aborted === true ? `timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : settled.stopReason;
-                return { status: 'failed', summary: `DSH child stopped: ${reason}`, artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
+                return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
             }
             try {
                 const value = objectValue(settled.value, 'execution result');
@@ -136,10 +142,10 @@ function parseJsonOutput(output) {
     }
 }
 function plannerPrompt(input) {
-    return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Tasks that need a different child execution budget than the deployment default may declare a positive integer timeoutMs. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`;
+    return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Tasks that need a different child execution budget than the deployment default may declare a positive integer timeoutMs. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe. Never alter the id, dependsOn, objective text, or contracts of tasks that have already succeeded; leave them exactly as they are.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`;
 }
 function executionPrompt(input) {
-    return `Execute the assigned task and return only JSON matching the supplied schema. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`;
+    return `Execute the assigned task and return only JSON matching the supplied schema. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`;
 }
 function requireProviderName(value) { if (value.trim().length === 0)
     throw new TypeError('providerName must be non-empty'); }
@@ -151,3 +157,29 @@ function string(value, label) { if (typeof value !== 'string')
     throw new Error(`${label} must be a string`); return value; }
 function integer(value, label) { if (!Number.isSafeInteger(value))
     throw new Error(`${label} must be a safe integer`); return value; }
+/**
+ * Classify a non-completed child stop. `error`/`max-tokens` are model or
+ * transport failures (retriable infrastructure); `aborted` is an operator
+ * interruption or cancellation (never failure evidence); `refusal` is a
+ * deterministic child decision (an output-class failure). Unknown reasons are
+ * treated as infrastructure so they never fabricate validation evidence.
+ */
+function failureKindOf(reason) {
+    switch (reason) {
+        case 'aborted': return 'interrupted';
+        case 'refusal': return 'output';
+        case 'error':
+        case 'max-tokens':
+        default: return 'infrastructure';
+    }
+}
+/** Human-readable detail for a non-completed stop, including the child session id when useful. */
+function stopReasonSummary(reason, dshSessionId) {
+    switch (reason) {
+        case 'error': return `error (child session ${dshSessionId} ended with a model/transport failure)`;
+        case 'max-tokens': return `max-tokens (child session ${dshSessionId} exceeded its token ceiling)`;
+        case 'refusal': return `refusal (child session ${dshSessionId} declined the task)`;
+        case 'aborted': return 'aborted (operator interruption or cancellation)';
+        default: return String(reason);
+    }
+}

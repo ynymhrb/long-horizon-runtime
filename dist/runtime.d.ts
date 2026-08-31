@@ -52,6 +52,9 @@ export interface RuntimeOptions {
     readonly defaultRetryPolicy?: {
         readonly maxAttempts: number;
     };
+    readonly retryBackoffMs?: number;
+    readonly maxRetryBackoffMs?: number;
+    readonly now?: () => number;
     readonly recoveryValidator?: (input: {
         readonly goalId: string;
         readonly task: import('./domain.js').TaskNode;
@@ -101,6 +104,16 @@ export declare class LongTaskRuntime {
     rejectReplan(goalId: string): GoalView;
     /** Advance at most one round repeatedly, used by non-DSH callers and tests with a live parent. */
     runUntilIdle(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<void>;
+    private readonly background;
+    /**
+     * Begin background execution of a RUNNING goal with a live parent and return
+     * immediately. The model tool call no longer blocks for the whole DAG; the
+     * loop keeps dispatching rounds until the goal is idle, awaiting confirmation,
+     * paused, or terminal. Idempotent per goal.
+     */
+    startBackground(goalId: string, executionParent: unknown): void;
+    /** Resolve the in-flight background execution for a goal, if any (test seam). */
+    awaitBackground(goalId: string): Promise<void> | undefined;
     recover(executionParent?: unknown): Promise<void>;
     close(): void;
     private requireGoal;

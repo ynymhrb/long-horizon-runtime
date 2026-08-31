@@ -32,19 +32,26 @@ export function apply(ctx, input) {
     runtime.purgeExpiredArchives();
     void runtime.recover().catch(() => undefined);
     ctx.tools.register(defineTool({
-        name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" this call executes the whole DAG synchronously and returns only after the goal reaches a terminal or awaiting-confirmation state, so it can take minutes and you cannot observe intermediate progress; use planning_mode "require_confirmation" to review the generated plan before execution, or create with auto and poll long_task_status.',
+        name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" execution begins immediately in the background and this call returns right away; poll long_task_status or long_task_events for progress. Use planning_mode "require_confirmation" to review the generated plan before execution.',
         parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
         execute: (args, exec) => {
             const agent = requireParent(exec.agent);
-            return toolValue(() => withDshParent(agent, () => taskApi.create({
-                objective: args.objective,
-                ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
-                planningMode: args.planning_mode ?? config.defaultPlanningMode,
-                ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
-            }, {
-                sessionId: String(agent.id), parent: agent, signal: exec.signal,
-                ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
-            })));
+            return toolValue(() => withDshParent(agent, async () => {
+                const task = await taskApi.create({
+                    objective: args.objective,
+                    ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
+                    planningMode: args.planning_mode ?? config.defaultPlanningMode,
+                    ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
+                }, {
+                    sessionId: String(agent.id), signal: exec.signal,
+                    ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
+                });
+                // Planning-only creation never runs inline; an auto-mode goal is
+                // executed in the background so the tool call does not block the turn.
+                if (task.state === 'RUNNING')
+                    runtime.startBackground(task.id, agent);
+                return task;
+            }));
         },
     }));
     ctx.tools.register(defineTool({
@@ -52,15 +59,22 @@ export function apply(ctx, input) {
         execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.get(args.goal_id, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }) ?? { task: null })),
     }));
     ctx.tools.register(defineTool({
-        name: 'long_task_update', description: 'Apply a compare-and-swap task action. On conflict, reread its current control revision before retrying.',
+        name: 'long_task_update', description: 'Apply a compare-and-swap task action. On conflict, reread its current control revision before retrying. Confirm and resume start background execution and return immediately.',
         parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, action: { type: 'string', required: true, enum: ['confirm', 'resume', 'pause', 'cancel'] }, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput,
-        execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.update({ taskId: args.goal_id, expectedRevision: args.expected_revision, action: args.action, ...(args.recovery_resolution === undefined ? {} : { recoveryResolution: args.recovery_resolution }) }, { parent: exec.agent, signal: exec.signal, ...(exec.agent === undefined ? {} : { sessionId: String(exec.agent.id) }), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => {
+            const result = await taskApi.update({ taskId: args.goal_id, expectedRevision: args.expected_revision, action: args.action, ...(args.recovery_resolution === undefined ? {} : { recoveryResolution: args.recovery_resolution }) }, { signal: exec.signal, ...(exec.agent === undefined ? {} : { sessionId: String(exec.agent.id) }), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) });
+            // Confirming or resuming a plan must not block the turn for the whole
+            // DAG; a live parent continues execution in the background.
+            if (result.kind === 'applied' && (args.action === 'confirm' || args.action === 'resume') && result.task.state === 'RUNNING')
+                runtime.startBackground(args.goal_id, exec.agent);
+            return result;
+        })),
     }));
-    ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
-            taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); return runtime.confirmGoal(args.goal_id, exec.agent, exec.signal); })) }));
+    ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution in the background; returns immediately with the running task, poll long_task_status for progress.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
+            taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = runtime.confirmGoal(args.goal_id); runtime.startBackground(args.goal_id, exec.agent); return goal; })) }));
     ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }));
-    ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal. A web-side resume only marks the goal RUNNING without dispatching rounds; this tool with a live parent drives the actual execution. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
-            taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); return runtime.resumeGoal(args.goal_id, exec.agent, args.recovery_resolution, exec.signal); })) }));
+    ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal and continue its execution in the background; returns immediately. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
+            taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = await runtime.resumeGoal(args.goal_id, undefined, args.recovery_resolution); runtime.startBackground(args.goal_id, exec.agent); return goal; })) }));
     ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }));
     ctx.tools.register(defineTool({
         name: 'long_task_events', description: 'Read a page of durable runtime events for a long task, oldest first, with a cursor for incremental polling. Payloads are compact summaries: context manifests and inline artifact content are excluded. Use this to observe what the scheduler and task children actually did (TaskAttemptStarted, ValidationRecorded, TaskCompleted, replan decisions, etc.).',
@@ -83,9 +97,14 @@ export function apply(ctx, input) {
         execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.editGoal({ taskId: args.goal_id, expectedRevision: args.expected_revision, objective: args.objective, reason: args.reason }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
     }));
     ctx.tools.register(defineTool({
-        name: 'long_task_accept_replan', description: 'Accept the current revision-fenced long-task replan proposal.',
+        name: 'long_task_accept_replan', description: 'Accept the current revision-fenced long-task replan proposal and continue execution in the background; returns immediately.',
         parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true } }, output: toolOutput,
-        execute: (args, exec) => toolValue(() => withParent(exec.agent, () => taskApi.acceptReplan({ taskId: args.goal_id, expectedRevision: args.expected_revision }, { parent: exec.agent, signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => {
+            const result = await taskApi.acceptReplan({ taskId: args.goal_id, expectedRevision: args.expected_revision }, { signal: exec.signal, ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) });
+            if (result.kind === 'applied' && result.task.state === 'RUNNING')
+                runtime.startBackground(args.goal_id, exec.agent);
+            return result;
+        })),
     }));
 }
 const goalParameter = { goal_id: { type: 'string', required: true } };

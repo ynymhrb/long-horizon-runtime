@@ -5,13 +5,14 @@ import type { GoalState, GraphMutation, InterruptionCause, RecoveryPolicyOutcome
 import { RuntimeEventStore, type TaskSessionLink } from './event-store.js'
 import { Scheduler, type RecoveryResult } from './scheduler.js'
 import { ArtifactStore } from './artifacts.js'
+import { withDshParent } from './dsh-adapters.js'
 
 export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
 export interface OriginalGoalEdit { readonly objective: string; readonly reason: string; readonly source?: 'user' | 'model' }
 
 export interface CreateGoalRequest { readonly objective: string; readonly constraints?: readonly string[]; readonly planningMode?: 'auto' | 'require_confirmation'; readonly workspaceScope?: string }
 export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[] }
-export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators']; readonly autoReplan?: boolean }
+export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly retryBackoffMs?: number; readonly maxRetryBackoffMs?: number; readonly now?: () => number; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators']; readonly autoReplan?: boolean }
 
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
 export class LongTaskRuntime {
@@ -24,7 +25,7 @@ export class LongTaskRuntime {
     this.ownsStore = normalized.store === undefined
     this.store = normalized.store ?? new RuntimeEventStore(normalized.databasePath ?? ':memory:')
     this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536)
-    this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
+    this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
   }
   async createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
     if (request.objective.trim().length === 0) throw new Error('goal objective must not be empty')
@@ -137,29 +138,35 @@ export class LongTaskRuntime {
   }
   async resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal): Promise<GoalView> {
     const goal = this.requireGoal(goalId)
-    if (goal.state !== 'PAUSED') throw new Error(`goal ${goalId} is not paused`)
-    if (this.store.getPlan(goalId) === undefined) {
-      this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: { reason: 'resume interrupted planning' } }]))
-      try {
-        const plan = await planWithValidation(this.planner, { goalId, objective: goal.objective, constraints: goal.constraints, ...(executionSignal === undefined ? {} : { signal: executionSignal }) })
-        this.store.transaction(() => this.store.append([{ type: goal.planningMode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
-        if (goal.planningMode === 'auto' && executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
-      } catch (error) {
-        this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]))
+    // A web-side resume/confirm marks the goal RUNNING without a live parent
+    // (durably eligible, nothing dispatched). A later model-side resume must
+    // therefore accept an already-running goal and drive it with a live parent
+    // instead of failing with "not paused" and stranding the task.
+    if (goal.state !== 'PAUSED' && goal.state !== 'RUNNING') throw new Error(`goal ${goalId} cannot be resumed while ${goal.state}`)
+    if (goal.state === 'PAUSED') {
+      if (this.store.getPlan(goalId) === undefined) {
+        this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: { reason: 'resume interrupted planning' } }]))
+        try {
+          const plan = await planWithValidation(this.planner, { goalId, objective: goal.objective, constraints: goal.constraints, ...(executionSignal === undefined ? {} : { signal: executionSignal }) })
+          this.store.transaction(() => this.store.append([{ type: goal.planningMode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
+          if (goal.planningMode === 'auto' && executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
+        } catch (error) {
+          this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]))
+        }
+        return this.view(goalId)
       }
-      return this.view(goalId)
-    }
-    const blockedExternalTask = this.store.listTasks(goalId).find(task => task.state === 'BLOCKED' && task.sideEffectClass === 'external_effect')
-    if (blockedExternalTask !== undefined) {
-      if (recoveryResolution === undefined) throw new Error(`goal ${goalId} requires an explicit recovery resolution for external task ${blockedExternalTask.id}`)
-      this.store.transaction(() => this.store.append([
-        { type: 'DecisionRecorded', goalId, payload: { type: 'external_recovery_resolution', taskId: blockedExternalTask.id, resolution: recoveryResolution } },
-        { type: 'TaskRecoveryResolved', goalId, taskId: blockedExternalTask.id, payload: { resolution: recoveryResolution } },
-        { type: 'GoalResumed', goalId, payload: { recoveryResolution, taskId: blockedExternalTask.id } },
-      ]))
-    } else {
-      if (recoveryResolution !== undefined) throw new Error(`goal ${goalId} has no indeterminate external effect to resolve`)
-      this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]))
+      const blockedExternalTask = this.store.listTasks(goalId).find(task => task.state === 'BLOCKED' && task.sideEffectClass === 'external_effect')
+      if (blockedExternalTask !== undefined) {
+        if (recoveryResolution === undefined) throw new Error(`goal ${goalId} requires an explicit recovery resolution for external task ${blockedExternalTask.id}`)
+        this.store.transaction(() => this.store.append([
+          { type: 'DecisionRecorded', goalId, payload: { type: 'external_recovery_resolution', taskId: blockedExternalTask.id, resolution: recoveryResolution } },
+          { type: 'TaskRecoveryResolved', goalId, taskId: blockedExternalTask.id, payload: { resolution: recoveryResolution } },
+          { type: 'GoalResumed', goalId, payload: { recoveryResolution, taskId: blockedExternalTask.id } },
+        ]))
+      } else {
+        if (recoveryResolution !== undefined) throw new Error(`goal ${goalId} has no indeterminate external effect to resolve`)
+        this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]))
+      }
     }
     if (executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
     return this.view(goalId)
@@ -223,9 +230,35 @@ export class LongTaskRuntime {
     for (;;) {
       const dispatched = await this.scheduler.runRound(goalId, undefined, executionParent, executionSignal)
       const state = this.requireGoal(goalId).state
-      if (!dispatched || ['SUCCEEDED', 'FAILED', 'CANCELLED', 'PAUSED'].includes(state)) return
+      if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'PAUSED'].includes(state)) return
+      if (dispatched) continue
+      // Nothing was ready, but a failed attempt may be in retry backoff: wait
+      // until the earliest retry is due instead of returning while the goal is
+      // still running. Without a pending retry the goal is idle.
+      const delay = this.scheduler.nextRetryDelayMs(goalId)
+      if (delay === undefined) return
+      await sleep(delay, executionSignal)
     }
   }
+
+  private readonly background = new Map<string, Promise<void>>()
+
+  /**
+   * Begin background execution of a RUNNING goal with a live parent and return
+   * immediately. The model tool call no longer blocks for the whole DAG; the
+   * loop keeps dispatching rounds until the goal is idle, awaiting confirmation,
+   * paused, or terminal. Idempotent per goal.
+   */
+  startBackground(goalId: string, executionParent: unknown): void {
+    if (this.background.has(goalId) || executionParent === undefined) return
+    const promise = withDshParent(executionParent as import('@deepseek-ai/dsh-agent').Agent, () => this.runUntilIdle(goalId, executionParent))
+      .catch(() => undefined)
+      .finally(() => { this.background.delete(goalId) })
+    this.background.set(goalId, promise)
+  }
+
+  /** Resolve the in-flight background execution for a goal, if any (test seam). */
+  awaitBackground(goalId: string): Promise<void> | undefined { return this.background.get(goalId) }
   async recover(executionParent?: unknown): Promise<void> {
     const recoveredGoals = await this.scheduler.recover()
     if (executionParent !== undefined) for (const goal of recoveredGoals) {
@@ -235,7 +268,7 @@ export class LongTaskRuntime {
       if (this.store.getGoal(goal)?.state === 'PAUSED' && !requiresResolution) await this.resumeGoal(goal, executionParent)
     }
   }
-  close(): void { if (this.ownsStore) this.store.close() }
+  close(): void { this.background.clear(); if (this.ownsStore) this.store.close() }
   private requireGoal(goalId: string) { const goal = this.store.getGoal(goalId); if (goal === undefined) throw new Error(`unknown goal ${goalId}`); return goal }
   private view(goalId: string): GoalView {
     const goal = this.requireGoal(goalId)
@@ -250,13 +283,33 @@ export class LongTaskRuntime {
 function automaticReplanIsSafe(previous: readonly import('./domain.js').TaskNode[], candidate: readonly import('./domain.js').TaskNode[]): boolean {
   const next = new Map(candidate.map(task => [task.id, task]))
   for (const task of previous) {
+    if (task.state !== 'SUCCEEDED') continue
+    // A completed task's identity is structural: id, dependencies, and side
+    // effect class. Planner text edits to a completed task's objective are not
+    // plan changes and must not force a safe replan into confirmation.
     const replacement = next.get(task.id)
-    if (task.state === 'SUCCEEDED' && (replacement === undefined || replacement.objective !== task.objective || replacement.sideEffectClass !== task.sideEffectClass || JSON.stringify(replacement.dependsOn) !== JSON.stringify(task.dependsOn))) return false
+    if (replacement === undefined) return false
+    if (replacement.sideEffectClass !== task.sideEffectClass) return false
+    if (JSON.stringify(replacement.dependsOn) !== JSON.stringify(task.dependsOn)) return false
   }
   return candidate.every(task => task.sideEffectClass !== 'external_effect')
 }
 
 function preserveCompletedTasks(previous: readonly import('./domain.js').TaskNode[], candidate: readonly import('./domain.js').TaskNode[]): import('./domain.js').TaskNode[] {
   const old = new Map(previous.map(task => [task.id, task]))
-  return candidate.map(task => old.get(task.id)?.state === 'SUCCEEDED' ? { ...task, state: 'SUCCEEDED' as const } : task)
+  return candidate.map(task => {
+    const prior = old.get(task.id)
+    if (prior?.state !== 'SUCCEEDED') return task
+    // Completed work is immutable: keep the original objective text so a safe
+    // replan stays auto-applicable and the applied plan never mutates history.
+    return { ...task, objective: prior.objective, state: 'SUCCEEDED' as const }
+  })
+}
+
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted === true) return
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+  })
 }

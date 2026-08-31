@@ -154,6 +154,10 @@ export function projectEvent(db, event, seq) {
             if (taskId !== undefined)
                 updateCurrentTask(db, event.goalId, taskId, 'PENDING');
             break;
+        case 'TaskRetryBudgetExhausted':
+            if (taskId !== undefined)
+                updateCurrentTask(db, event.goalId, taskId, 'PENDING');
+            break;
         case 'TaskInterrupted':
             if (taskId === undefined)
                 throw new Error('TaskInterrupted requires taskId');
