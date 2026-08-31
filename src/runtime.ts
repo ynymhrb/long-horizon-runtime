@@ -46,7 +46,7 @@ export class LongTaskRuntime {
       return this.view(id)
     }
     this.store.transaction(() => this.store.append([{ type: mode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId: id, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
-    if (mode === 'auto' && executionParent !== undefined) await this.runUntilIdle(id, executionParent, executionSignal)
+    if (mode === 'auto' && executionParent !== undefined) { await this.runUntilIdle(id, executionParent, executionSignal); this.scheduleQuotaRecovery(id, executionParent) }
     return this.view(id)
   }
   async confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
@@ -56,7 +56,7 @@ export class LongTaskRuntime {
     if (plan === undefined) throw new Error(`goal ${goalId} has no proposed plan`)
     const invalidatedTaskIds = plan.invalidatedTaskIds.length > 0 ? plan.invalidatedTaskIds : plan.tasks.filter(task => task.state === 'INVALIDATED').map(task => task.id)
     this.store.transaction(() => this.store.append([{ type: 'PlanConfirmed', goalId, payload: { revision: plan.revision, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }, { type: 'PlanRevisionApplied', goalId, payload: { revision: plan.revision, tasks: plan.tasks, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }]))
-    if (executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
+    if (executionParent !== undefined) { await this.runUntilIdle(goalId, executionParent, executionSignal); this.scheduleQuotaRecovery(goalId, executionParent) }
     return this.view(goalId)
   }
   getStatus(goalId: string): GoalView | undefined {
@@ -162,7 +162,7 @@ export class LongTaskRuntime {
         try {
           const plan = await planWithValidation(this.planner, { goalId, objective: goal.objective, constraints: goal.constraints, ...(executionSignal === undefined ? {} : { signal: executionSignal }) })
           this.store.transaction(() => this.store.append([{ type: goal.planningMode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
-          if (goal.planningMode === 'auto' && executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
+          if (goal.planningMode === 'auto' && executionParent !== undefined) { await this.runUntilIdle(goalId, executionParent, executionSignal); this.scheduleQuotaRecovery(goalId, executionParent) }
         } catch (error) {
           this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]))
         }
@@ -181,7 +181,7 @@ export class LongTaskRuntime {
         this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]))
       }
     }
-    if (executionParent !== undefined) await this.runUntilIdle(goalId, executionParent, executionSignal)
+    if (executionParent !== undefined) { await this.runUntilIdle(goalId, executionParent, executionSignal); this.scheduleQuotaRecovery(goalId, executionParent) }
     return this.view(goalId)
   }
   cancelGoal(goalId: string): GoalView {

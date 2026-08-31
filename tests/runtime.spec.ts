@@ -230,6 +230,18 @@ describe('LongTaskRuntime', () => {
     expect(runtime.store.listEvents(goal.id, 0, 50).map(event => event.type)).not.toContain('TaskRetryBudgetExhausted')
   })
 
+  test('bounds untrusted quota recovery data before persisting it', async () => {
+    const now = Date.now()
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'failed' as const, summary: 'HTTP 429 rate limit', failureKind: 'quota' as const, retryAt: new Date(now + 3 * 86_400_000).toISOString(), failureDiagnostic: 'HTTP 429 api_key=secret', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const goal = await runtime.createGoal({ objective: 'sanitize quota recovery' }, {})
+    const recovery = runtime.store.getQuotaRecovery(goal.id)!
+
+    expect(Date.parse(recovery.retryAt)).toBeLessThan(now + 86_400_000)
+    expect(recovery.diagnostic).not.toContain('secret')
+  })
+
   test('automatically resumes a quota-paused task once with its live parent', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-01T10:00:00.000Z'))

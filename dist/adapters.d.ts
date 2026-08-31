@@ -8,13 +8,17 @@ import type { ContextView } from './context.js';
  * `interrupted` means the child was stopped or cancelled — an operator
  * interruption, never failure evidence.
  */
-export type FailureKind = 'output' | 'infrastructure' | 'interrupted';
+export type FailureKind = 'output' | 'infrastructure' | 'interrupted' | 'quota';
 /** Result returned by a planner or task child agent. */
 export interface ExecutionResult {
     readonly status: 'succeeded' | 'failed';
     readonly summary: string;
     /** Classifies a failed result. Absent means `output` (legacy adapters). */
     readonly failureKind?: FailureKind;
+    /** Earliest provider-supplied time at which a quota-limited attempt may retry. */
+    readonly retryAt?: string;
+    /** Bounded, secret-free provider diagnostic for operator visibility. */
+    readonly failureDiagnostic?: string;
     readonly artifacts: readonly {
         readonly type: string;
         readonly content: string;

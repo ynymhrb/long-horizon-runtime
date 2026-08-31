@@ -193,9 +193,15 @@ function integer(value: unknown, label: string): number { if (!Number.isSafeInte
 function quotaFailure(message: string, now: number): Pick<ExecutionResult, 'failureKind' | 'retryAt' | 'failureDiagnostic'> | undefined {
   if (!/\b429\b|rate[ -]?limit|quota/i.test(message)) return undefined
   const match = /(?:retry-after|retry_at|reset_at)\s*[:=]\s*(\S+)/i.exec(message)
-  const retryMs = match?.[1] === undefined ? Number.NaN : Date.parse(match[1])
+  const retryMs = retryAfterMillis(match?.[1], now)
   if (!Number.isFinite(retryMs) || retryMs <= now || retryMs - now > 86_400_000) return undefined
   return { failureKind: 'quota', retryAt: new Date(retryMs).toISOString(), failureDiagnostic: boundedDiagnostic(message) }
+}
+
+function retryAfterMillis(value: string | undefined, now: number): number {
+  if (value === undefined) return Number.NaN
+  if (/^\d+$/.test(value)) return now + Number(value) * 1000
+  return Date.parse(value)
 }
 
 function boundedDiagnostic(message: string): string {

@@ -6,6 +6,7 @@ export function createProjectionSchema(db) {
     CREATE TABLE IF NOT EXISTS task_session_links (goal_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, session_id, kind));
     CREATE TABLE IF NOT EXISTS current_task_bindings (session_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, control_revision INTEGER NOT NULL, updated_order INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS context_manifests (attempt_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, selection_reason TEXT NOT NULL, context_json TEXT NOT NULL, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS quota_recoveries (goal_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, retry_at TEXT NOT NULL, diagnostic TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
     CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, started_at TEXT, last_activity_at TEXT, lease_expires_at TEXT, max_wall_expires_at TEXT, latest_progress_json TEXT, created_order INTEGER NOT NULL);
@@ -49,6 +50,7 @@ export function projectEvent(db, event, seq) {
             break;
         case 'GoalArchived':
             db.prepare('UPDATE goals SET archived_at = ? WHERE id = ?').run(String(p.archivedAt), event.goalId);
+            db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId);
             break;
         case 'GoalRestored':
             db.prepare('UPDATE goals SET archived_at = NULL WHERE id = ?').run(event.goalId);
@@ -87,6 +89,7 @@ export function projectEvent(db, event, seq) {
             break;
         case 'PlanApplied':
         case 'PlanRevisionApplied': {
+            db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId);
             const revision = Number(p.revision);
             const tasks = Array.isArray(p.tasks) ? p.tasks : [];
             db.prepare('INSERT OR REPLACE INTO plan_revisions (goal_id, revision, state, tasks_json, metadata_json) VALUES (?, ?, ?, ?, ?)').run(event.goalId, revision, 'APPLIED', JSON.stringify(tasks), JSON.stringify({ invalidatedTaskIds: p.invalidatedTaskIds ?? [], staleTaskIds: p.staleTaskIds ?? [] }));
@@ -167,6 +170,13 @@ export function projectEvent(db, event, seq) {
             if (taskId !== undefined)
                 updateCurrentTask(db, event.goalId, taskId, 'PENDING');
             break;
+        case 'QuotaRecoveryScheduled':
+            if (taskId === undefined)
+                throw new Error('QuotaRecoveryScheduled requires taskId');
+            db.prepare(`INSERT INTO quota_recoveries (goal_id, task_id, attempt_id, retry_at, diagnostic) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(goal_id) DO UPDATE SET task_id=excluded.task_id, attempt_id=excluded.attempt_id, retry_at=excluded.retry_at, diagnostic=excluded.diagnostic`).run(event.goalId, taskId, String(p.attemptId), String(p.retryAfter), String(p.diagnostic));
+            updateCurrentTask(db, event.goalId, taskId, 'PENDING');
+            break;
         case 'TaskInterrupted':
             if (taskId === undefined)
                 throw new Error('TaskInterrupted requires taskId');
@@ -189,12 +199,16 @@ export function projectEvent(db, event, seq) {
             break;
         case 'GoalPaused':
             db.prepare('UPDATE goals SET state = ?, pause_reason = ? WHERE id = ?').run('PAUSED', String(p.reason ?? 'paused'), event.goalId);
+            if (p.quotaRecoveryAttemptId === undefined)
+                db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId);
             break;
         case 'GoalResumed':
             db.prepare('UPDATE goals SET state = ?, pause_reason = NULL WHERE id = ?').run('RUNNING', event.goalId);
+            db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId);
             break;
         case 'GoalCancelled':
             db.prepare('UPDATE goals SET state = ? WHERE id = ?').run('CANCELLED', event.goalId);
+            db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId);
             db.prepare("UPDATE task_nodes SET state = 'CANCELLED' WHERE goal_id = ? AND revision = (SELECT revision FROM goals WHERE id = ?) AND state IN ('PENDING', 'READY', 'RUNNING', 'BLOCKED')").run(event.goalId, event.goalId);
             db.prepare("UPDATE task_attempts SET state = 'CANCELLED', summary = COALESCE(summary, 'goal cancelled') WHERE goal_id = ? AND state = 'RUNNING'").run(event.goalId);
             break;

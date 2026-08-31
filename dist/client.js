@@ -4378,6 +4378,16 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				label: "未知状态"
 			};
 		}
+		function quotaRecoveryPresentation(recovery, now = /* @__PURE__ */ new Date()) {
+			if (Date.parse(recovery.retryAt) <= now.getTime()) return {
+				tone: "warning",
+				label: "额度恢复时间已到，请在已关联会话中继续"
+			};
+			return {
+				tone: "warning",
+				label: `LLM 额度耗尽，预计 ${new Date(recovery.retryAt).toLocaleString()} 后重试`
+			};
+		}
 		/**
 		* SVG node stroke rules for every DAG tone, embedded by the client bundle so
 		* the graph and its legend always agree. RUNNING must be visibly distinct
@@ -4633,6 +4643,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			ValidationRecorded: "已完成验证",
 			DecisionRecorded: "已记录决策",
 			TaskRetryBudgetExhausted: "重试预算已耗尽",
+			QuotaRecoveryScheduled: "已计划额度恢复",
 			TaskInterrupted: "节点已中断",
 			TaskAttemptSuperseded: "尝试已被新修订取代",
 			TaskReady: "节点已就绪",
@@ -4649,7 +4660,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		function formatTaskEvent(event) {
 			const payload = event.payload ?? {};
 			const revision = typeof payload.revision === "number" ? `修订 ${payload.revision}` : "";
-			const reason = typeof payload.reason === "string" ? payload.reason : typeof payload.trigger?.reason === "string" ? payload.trigger.reason : "";
+			const reason = typeof payload.reason === "string" ? payload.reason : typeof payload.retryAfter === "string" ? `预计 ${payload.retryAfter} 后重试` : typeof payload.trigger?.reason === "string" ? payload.trigger.reason : "";
 			return {
 				label: labels[event.type] ?? event.type,
 				detail: [revision, reason].filter(Boolean).join(" · ") || "已记录",
@@ -4757,6 +4768,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			};
 			const externalResolutionRequired = task.state === "PAUSED" && task.tasks?.some((node) => node.state === "BLOCKED" && node.sideEffectClass === "external_effect");
 			const waitingForDriver = task.state === "RUNNING" && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
+			const quotaRecovery = task.quotaRecovery ? quotaRecoveryPresentation(task.quotaRecovery) : void 0;
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
@@ -4839,7 +4851,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "submit",
 				className: "ltr-btn",
 				disabled: pending || !objective.trim() || !reason.trim()
-			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: "ltr-cockpit-body" }, e$3(TaskDag, {
+			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: "ltr-cockpit-body" }, e$3(TaskDag, {
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId

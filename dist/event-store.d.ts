@@ -92,6 +92,13 @@ export interface ContextManifestProjection {
     readonly selectionReason: string;
     readonly context: Record<string, unknown>;
 }
+export interface QuotaRecovery {
+    readonly goalId: string;
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly retryAt: string;
+    readonly diagnostic: string;
+}
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export declare class RuntimeEventStore {
     private readonly db;
@@ -103,6 +110,7 @@ export declare class RuntimeEventStore {
     /** Rebuild every owned projection from ordered append-only events. */
     rebuild(): void;
     getGoal(goalId: string): GoalProjection | undefined;
+    getQuotaRecovery(goalId: string): QuotaRecovery | undefined;
     /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */
     listGoals(options?: {
         readonly archived?: boolean;

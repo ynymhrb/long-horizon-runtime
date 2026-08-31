@@ -33,7 +33,7 @@ export class RuntimeEventStore {
     /** Rebuild every owned projection from ordered append-only events. */
     rebuild() {
         this.transaction(() => {
-            this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;');
+            this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;');
             const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all();
             for (const row of rows)
                 projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) }, row.seq);
@@ -42,6 +42,10 @@ export class RuntimeEventStore {
     getGoal(goalId) {
         const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, archived_at FROM goals WHERE id = ?').get(goalId);
         return row === undefined ? undefined : goalProjection(row);
+    }
+    getQuotaRecovery(goalId) {
+        const row = this.db.prepare('SELECT goal_id, task_id, attempt_id, retry_at, diagnostic FROM quota_recoveries WHERE goal_id = ?').get(goalId);
+        return row === undefined ? undefined : { goalId: String(row.goal_id), taskId: String(row.task_id), attemptId: String(row.attempt_id), retryAt: String(row.retry_at), diagnostic: String(row.diagnostic) };
     }
     /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */
     listGoals(options = {}) {
@@ -65,6 +69,7 @@ export class RuntimeEventStore {
             remove('plan_revisions').run(goalId);
             remove('task_nodes').run(goalId);
             remove('task_attempts').run(goalId);
+            remove('quota_recoveries').run(goalId);
             remove('artifacts').run(goalId);
             remove('evidence').run(goalId);
             remove('validation_results').run(goalId);

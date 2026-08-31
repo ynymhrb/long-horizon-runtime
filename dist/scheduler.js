@@ -324,6 +324,7 @@ export class Scheduler {
             const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract);
             const attemptCount = this.store.listAttempts(task.id, goalId).length;
             const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts);
+            const quotaRetryAt = failureKind === 'quota' ? validQuotaRetryAt(result.retryAt, this.now()) : undefined;
             this.store.transaction(() => {
                 const events = [];
                 // onSessionId already recorded the child session at start; the settled
@@ -347,7 +348,19 @@ export class Scheduler {
                 else {
                     const reason = contract.reason ?? result.summary;
                     events.push({ type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason, ...(failureKind === 'output' ? {} : { failureKind }) } });
-                    if (task.sideEffectClass === 'external_effect') {
+                    if (failureKind === 'quota' && task.sideEffectClass !== 'external_effect') {
+                        const fallbackAttempts = this.store.listEvents(goalId, 0, 10_000, task.id).filter(event => event.type === 'QuotaRecoveryScheduled' && event.payload.fallback === true).length;
+                        this.retryAfter.delete(this.key(goalId, task.id));
+                        if (quotaRetryAt === undefined && fallbackAttempts >= 3) {
+                            events.push({ type: 'GoalPaused', goalId, payload: { reason: 'LLM quota recovery time remained unavailable after 3 automatic retries; resume manually when the provider recovers' } });
+                        }
+                        else {
+                            const retryAt = quotaRetryAt ?? new Date(this.now() + this.backoffMs(1)).toISOString();
+                            events.push({ type: 'QuotaRecoveryScheduled', goalId, taskId: task.id, payload: { attemptId, retryAfter: retryAt, diagnostic: sanitizeQuotaDiagnostic(result.failureDiagnostic ?? 'LLM quota exhausted'), ...(quotaRetryAt === undefined ? { fallback: true } : {}) } });
+                            events.push({ type: 'GoalPaused', goalId, payload: { reason: `LLM quota exhausted; retry after ${retryAt}`, quotaRecoveryAttemptId: attemptId } });
+                        }
+                    }
+                    else if (task.sideEffectClass === 'external_effect') {
                         this.retryAfter.delete(this.key(goalId, task.id));
                         events.push({ type: 'TaskRecoveryBlocked', goalId, taskId: task.id, payload: { attemptId, reason: 'external effect failed; operator resolution is required before another attempt' } });
                         events.push({ type: 'GoalPaused', goalId, payload: { reason: `external effect for ${task.id} failed; operator resolution is required` } });
@@ -373,7 +386,7 @@ export class Scheduler {
                 }
                 this.store.append(events);
             });
-            if (!contract.ok && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
+            if (!contract.ok && failureKind !== 'quota' && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
                 if (failureKind === 'output')
                     await this.onTerminalFailure?.({ goalId, task, reason: contract.reason ?? result.summary });
                 // An exhausted infrastructure retry budget is not validation evidence:
@@ -437,6 +450,15 @@ function validateOutputContract(task, result) {
     return { ok: true };
 }
 function failureMessage(error) { return error instanceof Error ? error.message : String(error); }
+function validQuotaRetryAt(value, now) {
+    if (value === undefined)
+        return undefined;
+    const retryMs = Date.parse(value);
+    return Number.isFinite(retryMs) && retryMs > now && retryMs - now <= 86_400_000 ? new Date(retryMs).toISOString() : undefined;
+}
+function sanitizeQuotaDiagnostic(value) {
+    return value.replace(/\b(api[_-]?key|authorization|bearer|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 240);
+}
 function boundedProgress(value, limit, name) {
     const trimmed = value.trim();
     if (trimmed.length === 0 || trimmed.length > limit)

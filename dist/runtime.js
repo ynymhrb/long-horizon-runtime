@@ -13,6 +13,7 @@ export class LongTaskRuntime {
     artifactStore;
     scheduler;
     livenessCheckIntervalMs;
+    now;
     constructor(planner, execution, options = {}) {
         this.planner = planner;
         const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options;
@@ -20,6 +21,7 @@ export class LongTaskRuntime {
         this.store = normalized.store ?? new RuntimeEventStore(normalized.databasePath ?? ':memory:');
         this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536);
         this.livenessCheckIntervalMs = Math.max(10, Math.min(normalized.idleTimeoutMs ?? 300_000, 30_000));
+        this.now = normalized.now ?? Date.now;
         this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
     }
     async createGoal(request, executionParent, executionSignal) {
@@ -40,8 +42,10 @@ export class LongTaskRuntime {
             return this.view(id);
         }
         this.store.transaction(() => this.store.append([{ type: mode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId: id, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]));
-        if (mode === 'auto' && executionParent !== undefined)
+        if (mode === 'auto' && executionParent !== undefined) {
             await this.runUntilIdle(id, executionParent, executionSignal);
+            this.scheduleQuotaRecovery(id, executionParent);
+        }
         return this.view(id);
     }
     async confirmGoal(goalId, executionParent, executionSignal) {
@@ -53,8 +57,10 @@ export class LongTaskRuntime {
             throw new Error(`goal ${goalId} has no proposed plan`);
         const invalidatedTaskIds = plan.invalidatedTaskIds.length > 0 ? plan.invalidatedTaskIds : plan.tasks.filter(task => task.state === 'INVALIDATED').map(task => task.id);
         this.store.transaction(() => this.store.append([{ type: 'PlanConfirmed', goalId, payload: { revision: plan.revision, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }, { type: 'PlanRevisionApplied', goalId, payload: { revision: plan.revision, tasks: plan.tasks, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }]));
-        if (executionParent !== undefined)
+        if (executionParent !== undefined) {
             await this.runUntilIdle(goalId, executionParent, executionSignal);
+            this.scheduleQuotaRecovery(goalId, executionParent);
+        }
         return this.view(goalId);
     }
     getStatus(goalId) {
@@ -75,6 +81,7 @@ export class LongTaskRuntime {
             return this.view(goalId);
         if (['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state))
             this.scheduler.cancel(goalId);
+        this.cancelQuotaRecovery(goalId);
         this.store.transaction(() => this.store.append([{ type: 'GoalArchived', goalId, payload: { archivedAt: now.toISOString() } }]));
         return this.view(goalId);
     }
@@ -106,6 +113,7 @@ export class LongTaskRuntime {
             throw new Error(`goal ${goalId} is terminal and cannot be edited`);
         if (goal.state === 'RUNNING')
             this.scheduler.interrupt(goalId);
+        this.cancelQuotaRecovery(goalId);
         const nextVersion = this.store.listGoalVersions(goalId).length;
         const baseRevision = goal.revision;
         this.store.transaction(() => this.store.append([
@@ -175,8 +183,10 @@ export class LongTaskRuntime {
                 try {
                     const plan = await planWithValidation(this.planner, { goalId, objective: goal.objective, constraints: goal.constraints, ...(executionSignal === undefined ? {} : { signal: executionSignal }) });
                     this.store.transaction(() => this.store.append([{ type: goal.planningMode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]));
-                    if (goal.planningMode === 'auto' && executionParent !== undefined)
+                    if (goal.planningMode === 'auto' && executionParent !== undefined) {
                         await this.runUntilIdle(goalId, executionParent, executionSignal);
+                        this.scheduleQuotaRecovery(goalId, executionParent);
+                    }
                 }
                 catch (error) {
                     this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]));
@@ -199,8 +209,10 @@ export class LongTaskRuntime {
                 this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]));
             }
         }
-        if (executionParent !== undefined)
+        if (executionParent !== undefined) {
             await this.runUntilIdle(goalId, executionParent, executionSignal);
+            this.scheduleQuotaRecovery(goalId, executionParent);
+        }
         return this.view(goalId);
     }
     cancelGoal(goalId) {
@@ -208,6 +220,7 @@ export class LongTaskRuntime {
         if (!['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state))
             throw new Error(`goal ${goalId} cannot be cancelled while ${goal.state}`);
         this.scheduler.cancel(goalId);
+        this.cancelQuotaRecovery(goalId);
         return this.view(goalId);
     }
     /** Record the interruption cause before applying the caller-selected recovery policy. */
@@ -216,6 +229,7 @@ export class LongTaskRuntime {
         if (!['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state))
             throw new Error(`goal ${goalId} cannot be interrupted while ${goal.state}`);
         this.scheduler.interrupt(goalId);
+        this.cancelQuotaRecovery(goalId);
         this.store.transaction(() => this.store.append([{ type: 'ExecutionInterrupted', goalId, payload: { cause, recoveryOutcome } }]));
         if (recoveryOutcome === 'terminate')
             this.scheduler.cancel(goalId);
@@ -283,6 +297,7 @@ export class LongTaskRuntime {
         }
     }
     background = new Map();
+    quotaRecoveryTimers = new Map();
     /**
      * Begin background execution of a RUNNING goal with a live parent and return
      * immediately. The model tool call no longer blocks for the whole DAG; the
@@ -304,6 +319,7 @@ export class LongTaskRuntime {
             if (watchdog !== undefined)
                 clearInterval(watchdog);
             this.background.delete(goalId);
+            this.scheduleQuotaRecovery(goalId, executionParent);
         });
         this.background.set(goalId, promise);
         watchdog = setInterval(() => {
@@ -332,8 +348,29 @@ export class LongTaskRuntime {
                     await this.resumeGoal(goal, executionParent);
             }
     }
-    close() { this.background.clear(); if (this.ownsStore)
+    close() { this.background.clear(); for (const timer of this.quotaRecoveryTimers.values())
+        clearTimeout(timer); this.quotaRecoveryTimers.clear(); if (this.ownsStore)
         this.store.close(); }
+    scheduleQuotaRecovery(goalId, executionParent) {
+        const recovery = this.store.getQuotaRecovery(goalId);
+        if (recovery === undefined || executionParent === undefined || this.quotaRecoveryTimers.has(goalId))
+            return;
+        const delay = Math.max(0, Date.parse(recovery.retryAt) - this.now());
+        this.quotaRecoveryTimers.set(goalId, setTimeout(() => {
+            this.quotaRecoveryTimers.delete(goalId);
+            if (this.store.getQuotaRecovery(goalId)?.attemptId !== recovery.attemptId || this.store.getGoal(goalId)?.state !== 'PAUSED')
+                return;
+            void withDshParent(executionParent, async () => {
+                await this.resumeGoal(goalId, executionParent);
+            }).catch(() => undefined);
+        }, delay));
+    }
+    cancelQuotaRecovery(goalId) {
+        const timer = this.quotaRecoveryTimers.get(goalId);
+        if (timer !== undefined)
+            clearTimeout(timer);
+        this.quotaRecoveryTimers.delete(goalId);
+    }
     requireGoal(goalId) { const goal = this.store.getGoal(goalId); if (goal === undefined)
         throw new Error(`unknown goal ${goalId}`); return goal; }
     view(goalId) {
@@ -342,7 +379,8 @@ export class LongTaskRuntime {
         const actions = goal.state === 'AWAITING_CONFIRMATION' ? ['confirm', 'cancel'] : goal.state === 'PAUSED' ? ['resume', 'cancel', 'invalidate'] : goal.state === 'RUNNING' ? ['pause', 'cancel', 'invalidate'] : [];
         const attempts = tasks.flatMap(task => this.store.listAttempts(task.id, goalId));
         const plan = this.store.getPlan(goalId);
-        return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId) }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) };
+        const quotaRecovery = this.store.getQuotaRecovery(goalId);
+        return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId) }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) };
     }
 }
 function automaticReplanIsSafe(previous, candidate) {

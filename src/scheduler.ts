@@ -315,9 +315,7 @@ export class Scheduler {
       const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
       const attemptCount = this.store!.listAttempts(task.id, goalId).length
       const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
-      const quotaRetryAt = failureKind === 'quota' && result.retryAt !== undefined && Number.isFinite(Date.parse(result.retryAt)) && Date.parse(result.retryAt) > this.now()
-        ? result.retryAt
-        : undefined
+      const quotaRetryAt = failureKind === 'quota' ? validQuotaRetryAt(result.retryAt, this.now()) : undefined
       this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
       // onSessionId already recorded the child session at start; the settled
@@ -340,10 +338,15 @@ export class Scheduler {
         const reason = contract.reason ?? result.summary
         events.push({ type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason, ...(failureKind === 'output' ? {} : { failureKind }) } })
         if (failureKind === 'quota' && task.sideEffectClass !== 'external_effect') {
-          const retryAt = quotaRetryAt ?? new Date(this.now() + this.backoffMs(1)).toISOString()
+          const fallbackAttempts = this.store!.listEvents(goalId, 0, 10_000, task.id).filter(event => event.type === 'QuotaRecoveryScheduled' && event.payload.fallback === true).length
           this.retryAfter.delete(this.key(goalId, task.id))
-          events.push({ type: 'QuotaRecoveryScheduled', goalId, taskId: task.id, payload: { attemptId, retryAfter: retryAt, diagnostic: result.failureDiagnostic ?? 'LLM quota exhausted' } })
-          events.push({ type: 'GoalPaused', goalId, payload: { reason: `LLM quota exhausted; retry after ${retryAt}`, quotaRecoveryAttemptId: attemptId } })
+          if (quotaRetryAt === undefined && fallbackAttempts >= 3) {
+            events.push({ type: 'GoalPaused', goalId, payload: { reason: 'LLM quota recovery time remained unavailable after 3 automatic retries; resume manually when the provider recovers' } })
+          } else {
+            const retryAt = quotaRetryAt ?? new Date(this.now() + this.backoffMs(1)).toISOString()
+            events.push({ type: 'QuotaRecoveryScheduled', goalId, taskId: task.id, payload: { attemptId, retryAfter: retryAt, diagnostic: sanitizeQuotaDiagnostic(result.failureDiagnostic ?? 'LLM quota exhausted'), ...(quotaRetryAt === undefined ? { fallback: true } : {}) } })
+            events.push({ type: 'GoalPaused', goalId, payload: { reason: `LLM quota exhausted; retry after ${retryAt}`, quotaRecoveryAttemptId: attemptId } })
+          }
         }
         else if (task.sideEffectClass === 'external_effect') {
           this.retryAfter.delete(this.key(goalId, task.id))
@@ -422,6 +425,16 @@ function validateOutputContract(task: TaskNode, result: import('./adapters.js').
 }
 
 function failureMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+function validQuotaRetryAt(value: string | undefined, now: number): string | undefined {
+  if (value === undefined) return undefined
+  const retryMs = Date.parse(value)
+  return Number.isFinite(retryMs) && retryMs > now && retryMs - now <= 86_400_000 ? new Date(retryMs).toISOString() : undefined
+}
+
+function sanitizeQuotaDiagnostic(value: string): string {
+  return value.replace(/\b(api[_-]?key|authorization|bearer|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 240)
+}
 
 function boundedProgress(value: string, limit: number, name: string): string {
   const trimmed = value.trim()

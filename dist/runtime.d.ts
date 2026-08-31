@@ -30,6 +30,7 @@ export interface GoalView {
         readonly trigger?: Record<string, unknown>;
     };
     readonly pauseReason?: string;
+    readonly quotaRecovery?: import('./event-store.js').QuotaRecovery;
     readonly tasks: readonly import('./domain.js').TaskNode[];
     readonly attempts: readonly import('./event-store.js').AttemptProjection[];
     readonly artifacts: readonly import('./event-store.js').ArtifactProjection[];
@@ -74,6 +75,7 @@ export declare class LongTaskRuntime {
     private readonly artifactStore;
     private readonly scheduler;
     private readonly livenessCheckIntervalMs;
+    private readonly now;
     constructor(planner: PlannerAdapter, execution: ExecutionAdapter, options?: number | RuntimeOptions);
     createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
     confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
@@ -109,6 +111,7 @@ export declare class LongTaskRuntime {
     /** Advance at most one round repeatedly, used by non-DSH callers and tests with a live parent. */
     runUntilIdle(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<void>;
     private readonly background;
+    private readonly quotaRecoveryTimers;
     /**
      * Begin background execution of a RUNNING goal with a live parent and return
      * immediately. The model tool call no longer blocks for the whole DAG; the
@@ -120,6 +123,8 @@ export declare class LongTaskRuntime {
     awaitBackground(goalId: string): Promise<void> | undefined;
     recover(executionParent?: unknown): Promise<void>;
     close(): void;
+    private scheduleQuotaRecovery;
+    private cancelQuotaRecovery;
     private requireGoal;
     private view;
 }
