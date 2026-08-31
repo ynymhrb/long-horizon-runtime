@@ -11,7 +11,7 @@ export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
 export interface OriginalGoalEdit { readonly objective: string; readonly reason: string; readonly source?: 'user' | 'model' }
 
 export interface CreateGoalRequest { readonly objective: string; readonly constraints?: readonly string[]; readonly planningMode?: 'auto' | 'require_confirmation'; readonly workspaceScope?: string }
-export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[] }
+export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly quotaRecovery?: import('./event-store.js').QuotaRecovery; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[] }
 export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly retryBackoffMs?: number; readonly maxRetryBackoffMs?: number; readonly idleTimeoutMs?: number; readonly maxWallTimeMs?: number; readonly now?: () => number; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators']; readonly autoReplan?: boolean }
 
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
@@ -21,12 +21,14 @@ export class LongTaskRuntime {
   private readonly artifactStore: ArtifactStore | undefined
   private readonly scheduler: Scheduler
   private readonly livenessCheckIntervalMs: number
+  private readonly now: () => number
   constructor(private readonly planner: PlannerAdapter, execution: ExecutionAdapter, options: number | RuntimeOptions = {}) {
     const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options
     this.ownsStore = normalized.store === undefined
     this.store = normalized.store ?? new RuntimeEventStore(normalized.databasePath ?? ':memory:')
     this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536)
     this.livenessCheckIntervalMs = Math.max(10, Math.min(normalized.idleTimeoutMs ?? 300_000, 30_000))
+    this.now = normalized.now ?? Date.now
     this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
   }
   async createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
@@ -72,6 +74,7 @@ export class LongTaskRuntime {
     const goal = this.requireGoal(goalId)
     if (goal.archivedAt !== undefined) return this.view(goalId)
     if (['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state)) this.scheduler.cancel(goalId)
+    this.cancelQuotaRecovery(goalId)
     this.store.transaction(() => this.store.append([{ type: 'GoalArchived', goalId, payload: { archivedAt: now.toISOString() } }]))
     return this.view(goalId)
   }
@@ -96,6 +99,7 @@ export class LongTaskRuntime {
     if (input.objective.trim().length === 0 || input.reason.trim().length === 0) throw new Error('goal objective and revision reason must not be empty')
     if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(goal.state)) throw new Error(`goal ${goalId} is terminal and cannot be edited`)
     if (goal.state === 'RUNNING') this.scheduler.interrupt(goalId)
+    this.cancelQuotaRecovery(goalId)
     const nextVersion = this.store.listGoalVersions(goalId).length
     const baseRevision = goal.revision
     this.store.transaction(() => this.store.append([
@@ -184,6 +188,7 @@ export class LongTaskRuntime {
     const goal = this.requireGoal(goalId)
     if (!['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state)) throw new Error(`goal ${goalId} cannot be cancelled while ${goal.state}`)
     this.scheduler.cancel(goalId)
+    this.cancelQuotaRecovery(goalId)
     return this.view(goalId)
   }
   /** Record the interruption cause before applying the caller-selected recovery policy. */
@@ -191,6 +196,7 @@ export class LongTaskRuntime {
     const goal = this.requireGoal(goalId)
     if (!['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state)) throw new Error(`goal ${goalId} cannot be interrupted while ${goal.state}`)
     this.scheduler.interrupt(goalId)
+    this.cancelQuotaRecovery(goalId)
     this.store.transaction(() => this.store.append([{ type: 'ExecutionInterrupted', goalId, payload: { cause, recoveryOutcome } }]))
     if (recoveryOutcome === 'terminate') this.scheduler.cancel(goalId)
     return this.view(goalId)
@@ -251,6 +257,7 @@ export class LongTaskRuntime {
   }
 
   private readonly background = new Map<string, Promise<void>>()
+  private readonly quotaRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   /**
    * Begin background execution of a RUNNING goal with a live parent and return
@@ -270,6 +277,7 @@ export class LongTaskRuntime {
       .finally(() => {
         if (watchdog !== undefined) clearInterval(watchdog)
         this.background.delete(goalId)
+        this.scheduleQuotaRecovery(goalId, executionParent)
       })
     this.background.set(goalId, promise)
     watchdog = setInterval(() => {
@@ -294,7 +302,24 @@ export class LongTaskRuntime {
       if (this.store.getGoal(goal)?.state === 'PAUSED' && !requiresResolution) await this.resumeGoal(goal, executionParent)
     }
   }
-  close(): void { this.background.clear(); if (this.ownsStore) this.store.close() }
+  close(): void { this.background.clear(); for (const timer of this.quotaRecoveryTimers.values()) clearTimeout(timer); this.quotaRecoveryTimers.clear(); if (this.ownsStore) this.store.close() }
+  private scheduleQuotaRecovery(goalId: string, executionParent: unknown): void {
+    const recovery = this.store.getQuotaRecovery(goalId)
+    if (recovery === undefined || executionParent === undefined || this.quotaRecoveryTimers.has(goalId)) return
+    const delay = Math.max(0, Date.parse(recovery.retryAt) - this.now())
+    this.quotaRecoveryTimers.set(goalId, setTimeout(() => {
+      this.quotaRecoveryTimers.delete(goalId)
+      if (this.store.getQuotaRecovery(goalId)?.attemptId !== recovery.attemptId || this.store.getGoal(goalId)?.state !== 'PAUSED') return
+      void withDshParent(executionParent as import('@deepseek-ai/dsh-agent').Agent, async () => {
+        await this.resumeGoal(goalId, executionParent)
+      }).catch(() => undefined)
+    }, delay))
+  }
+  private cancelQuotaRecovery(goalId: string): void {
+    const timer = this.quotaRecoveryTimers.get(goalId)
+    if (timer !== undefined) clearTimeout(timer)
+    this.quotaRecoveryTimers.delete(goalId)
+  }
   private requireGoal(goalId: string) { const goal = this.store.getGoal(goalId); if (goal === undefined) throw new Error(`unknown goal ${goalId}`); return goal }
   private view(goalId: string): GoalView {
     const goal = this.requireGoal(goalId)
@@ -302,7 +327,8 @@ export class LongTaskRuntime {
     const actions = goal.state === 'AWAITING_CONFIRMATION' ? ['confirm', 'cancel'] : goal.state === 'PAUSED' ? ['resume', 'cancel', 'invalidate'] : goal.state === 'RUNNING' ? ['pause', 'cancel', 'invalidate'] : []
     const attempts = tasks.flatMap(task => this.store.listAttempts(task.id, goalId))
     const plan = this.store.getPlan(goalId)
-    return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId)! }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) }
+    const quotaRecovery = this.store.getQuotaRecovery(goalId)
+    return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId)! }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) }
   }
 }
 

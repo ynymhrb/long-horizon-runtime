@@ -315,6 +315,9 @@ export class Scheduler {
       const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
       const attemptCount = this.store!.listAttempts(task.id, goalId).length
       const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
+      const quotaRetryAt = failureKind === 'quota' && result.retryAt !== undefined && Number.isFinite(Date.parse(result.retryAt)) && Date.parse(result.retryAt) > this.now()
+        ? result.retryAt
+        : undefined
       this.store!.transaction(() => {
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
       // onSessionId already recorded the child session at start; the settled
@@ -336,7 +339,13 @@ export class Scheduler {
       else {
         const reason = contract.reason ?? result.summary
         events.push({ type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason, ...(failureKind === 'output' ? {} : { failureKind }) } })
-        if (task.sideEffectClass === 'external_effect') {
+        if (failureKind === 'quota' && task.sideEffectClass !== 'external_effect') {
+          const retryAt = quotaRetryAt ?? new Date(this.now() + this.backoffMs(1)).toISOString()
+          this.retryAfter.delete(this.key(goalId, task.id))
+          events.push({ type: 'QuotaRecoveryScheduled', goalId, taskId: task.id, payload: { attemptId, retryAfter: retryAt, diagnostic: result.failureDiagnostic ?? 'LLM quota exhausted' } })
+          events.push({ type: 'GoalPaused', goalId, payload: { reason: `LLM quota exhausted; retry after ${retryAt}`, quotaRecoveryAttemptId: attemptId } })
+        }
+        else if (task.sideEffectClass === 'external_effect') {
           this.retryAfter.delete(this.key(goalId, task.id))
           events.push({ type: 'TaskRecoveryBlocked', goalId, taskId: task.id, payload: { attemptId, reason: 'external effect failed; operator resolution is required before another attempt' } })
           events.push({ type: 'GoalPaused', goalId, payload: { reason: `external effect for ${task.id} failed; operator resolution is required` } })
@@ -362,7 +371,7 @@ export class Scheduler {
       }
       this.store!.append(events)
       })
-      if (!contract.ok && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
+      if (!contract.ok && failureKind !== 'quota' && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
         if (failureKind === 'output') await this.onTerminalFailure?.({ goalId, task, reason: contract.reason ?? result.summary })
         // An exhausted infrastructure retry budget is not validation evidence:
         // pause the goal for an operator to resume once the environment

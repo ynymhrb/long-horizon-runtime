@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { LongTaskRuntime } from '../src/runtime.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
 
@@ -212,6 +212,74 @@ describe('LongTaskRuntime', () => {
     // validation outcome, so a later resume can re-run it.
     expect(goal.tasks[0]?.state).toBe('PENDING')
     expect(goal.decisions.some(decision => decision.type === 'automatic_replan')).toBe(false)
+  })
+
+  test('pauses for a provider quota reset without consuming the task retry budget', async () => {
+    const retryAt = new Date(Date.now() + 60_000).toISOString()
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute() { return { status: 'failed' as const, summary: 'HTTP 429 rate limit', failureKind: 'quota' as const, retryAt, failureDiagnostic: 'HTTP 429 rate limit', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
+    const goal = await runtime.createGoal({ objective: 'wait for quota reset' }, {})
+
+    expect(goal.state).toBe('PAUSED')
+    expect(goal.pauseReason).toContain(retryAt)
+    expect(goal.tasks[0]?.state).toBe('PENDING')
+    expect(goal.attempts).toHaveLength(1)
+    expect(runtime.store.getQuotaRecovery(goal.id)).toMatchObject({ taskId: 'a', retryAt, diagnostic: 'HTTP 429 rate limit' })
+    expect(runtime.store.listEvents(goal.id, 0, 50).map(event => event.type)).toContain('QuotaRecoveryScheduled')
+    expect(runtime.store.listEvents(goal.id, 0, 50).map(event => event.type)).not.toContain('TaskRetryBudgetExhausted')
+  })
+
+  test('automatically resumes a quota-paused task once with its live parent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-01T10:00:00.000Z'))
+    try {
+      let executions = 0
+      const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+      const execution: ExecutionAdapter = { async execute() {
+        executions += 1
+        return executions === 1
+          ? { status: 'failed' as const, summary: 'HTTP 429 rate limit', failureKind: 'quota' as const, retryAt: '2026-09-01T10:01:00.000Z', failureDiagnostic: 'HTTP 429 rate limit', artifacts: [], evidence: [] }
+          : { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] }
+      } }
+      const runtime = new LongTaskRuntime(planner, execution)
+      const created = await runtime.createGoal({ objective: 'recover automatically', planningMode: 'require_confirmation' })
+      await runtime.confirmGoal(created.id)
+      runtime.startBackground(created.id, { id: 'live-parent' })
+      await runtime.awaitBackground(created.id)
+      expect(runtime.getStatus(created.id)?.state).toBe('PAUSED')
+
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(executions).toBe(2)
+      expect(runtime.getStatus(created.id)?.state).toBe('SUCCEEDED')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('cancelling a quota-paused goal prevents its scheduled retry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-01T10:00:00.000Z'))
+    try {
+      let executions = 0
+      const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+      const execution: ExecutionAdapter = { async execute() { executions += 1; return { status: 'failed' as const, summary: 'HTTP 429 rate limit', failureKind: 'quota' as const, retryAt: '2026-09-01T10:01:00.000Z', artifacts: [], evidence: [] } } }
+      const runtime = new LongTaskRuntime(planner, execution)
+      const created = await runtime.createGoal({ objective: 'cancel quota wait', planningMode: 'require_confirmation' })
+      await runtime.confirmGoal(created.id)
+      runtime.startBackground(created.id, { id: 'live-parent' })
+      await runtime.awaitBackground(created.id)
+      runtime.cancelGoal(created.id)
+
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(executions).toBe(1)
+      expect(runtime.getStatus(created.id)?.state).toBe('CANCELLED')
+      expect(runtime.getStatus(created.id)?.quotaRecovery).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test('retries an infrastructure failure after a backoff delay and succeeds', async () => {

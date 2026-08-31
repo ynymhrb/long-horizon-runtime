@@ -74,6 +74,17 @@ describe('RuntimeEventStore', () => {
     })
   })
 
+  test('projects and clears the latest quota recovery through lifecycle events', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'QuotaRecoveryScheduled', goalId: 'g', taskId: 't', payload: { attemptId: 'a', retryAfter: '2026-09-01T10:05:00.000Z', diagnostic: 'HTTP 429 rate limit' } },
+    ])
+
+    expect(runtime.getQuotaRecovery('g')).toEqual({ goalId: 'g', taskId: 't', attemptId: 'a', retryAt: '2026-09-01T10:05:00.000Z', diagnostic: 'HTTP 429 rate limit' })
+    runtime.append([{ type: 'GoalResumed', goalId: 'g', payload: {} }])
+    expect(runtime.getQuotaRecovery('g')).toBeUndefined()
+  })
+
   test('replays one current task per session without deleting historic links', () => {
     const runtime = store()
     runtime.append([

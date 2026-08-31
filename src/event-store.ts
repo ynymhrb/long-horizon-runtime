@@ -16,6 +16,7 @@ export interface DecisionProjection { readonly type: string; readonly payload: R
 export interface EvidenceProjection { readonly taskId?: string; readonly attemptId?: string; readonly value: unknown }
 export interface CheckpointProjection { readonly eventSeq?: number; readonly revision: number; readonly payload: Record<string, unknown> }
 export interface ContextManifestProjection { readonly attemptId: string; readonly taskId: string; readonly revision: number; readonly selectionReason: string; readonly context: Record<string, unknown> }
+export interface QuotaRecovery { readonly goalId: string; readonly taskId: string; readonly attemptId: string; readonly retryAt: string; readonly diagnostic: string }
 
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export class RuntimeEventStore {
@@ -36,7 +37,7 @@ export class RuntimeEventStore {
   /** Rebuild every owned projection from ordered append-only events. */
   rebuild(): void {
     this.transaction(() => {
-      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
+      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
       const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all() as Array<{ seq: number; type: string; goal_id: string; task_id: string | null; payload_json: string }>
       for (const row of rows) projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }, row.seq)
     })
@@ -44,6 +45,10 @@ export class RuntimeEventStore {
   getGoal(goalId: string): GoalProjection | undefined {
     const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, archived_at FROM goals WHERE id = ?').get(goalId) as Record<string, unknown> | undefined
     return row === undefined ? undefined : goalProjection(row)
+  }
+  getQuotaRecovery(goalId: string): QuotaRecovery | undefined {
+    const row = this.db.prepare('SELECT goal_id, task_id, attempt_id, retry_at, diagnostic FROM quota_recoveries WHERE goal_id = ?').get(goalId) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : { goalId: String(row.goal_id), taskId: String(row.task_id), attemptId: String(row.attempt_id), retryAt: String(row.retry_at), diagnostic: String(row.diagnostic) }
   }
   /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */
   listGoals(options: { readonly archived?: boolean } = {}): GoalProjection[] {
@@ -61,7 +66,7 @@ export class RuntimeEventStore {
     for (const goalId of goalIds) {
       remove('current_task_bindings').run(goalId)
       remove('task_session_links').run(goalId); remove('context_manifests').run(goalId); remove('goal_versions').run(goalId)
-      remove('plan_revisions').run(goalId); remove('task_nodes').run(goalId); remove('task_attempts').run(goalId); remove('artifacts').run(goalId)
+      remove('plan_revisions').run(goalId); remove('task_nodes').run(goalId); remove('task_attempts').run(goalId); remove('quota_recoveries').run(goalId); remove('artifacts').run(goalId)
       remove('evidence').run(goalId); remove('validation_results').run(goalId); remove('decisions').run(goalId); remove('memories').run(goalId); remove('checkpoints').run(goalId)
       remove('runtime_events').run(goalId)
       this.db.prepare('DELETE FROM goals WHERE id = ?').run(goalId)
