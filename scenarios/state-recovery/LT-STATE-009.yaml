@@ -1,0 +1,102 @@
+version: 1
+id: LT-STATE-009
+title: External-effect replan proposal is never auto-applied
+risk: critical
+kind: deterministic
+tags: [state, replan, external_effect, safety, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture planner returns a read_only plan first and an external_effect task
+    on replan, so the runtime safety classifier is exercised
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto_replan
+    do: Create one read_only goal in planningMode auto with automatic replanning
+      enabled; the fixture planner proposes a read_only task (revision 1).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner external-on-replan --executor fail-always --mode auto --auto-replan
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_failure_and_replan
+    do: Drive the goal; the read_only task fails (output), the safe read_only
+      replan applies, a second failure triggers a replan whose candidate carries
+      an external_effect task.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner external-on-replan --executor fail-always --auto-replan
+      must_succeed: true
+    observe: snapshot.json goal.state AWAITING_CONFIRMATION with a PlanProposed
+      carrying sideEffectClass external_effect
+hard_assertions:
+  - id: HA-1
+    oracle: awaits_confirmation
+    check: The goal durably awaits confirmation — the external-effect proposal
+      was never auto-applied.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: AWAITING_CONFIRMATION
+  - id: HA-2
+    oracle: external_effect_proposal
+    check: A PlanProposed event carries a task with sideEffectClass
+      external_effect (the proposal the classifier held for confirmation).
+    evaluate:
+      oracle: event_present
+      type: PlanProposed
+      field: payload.tasks.0.sideEffectClass
+      expected: external_effect
+  - id: HA-3
+    oracle: await_confirmation_decision
+    check: The decision record classifies this replan as await_confirmation, not
+      auto_applied.
+    evaluate:
+      oracle: event_present
+      type: DecisionRecorded
+      field: payload.outcome
+      expected: await_confirmation
+  - id: HA-4
+    oracle: external_effect_not_applied
+    check: No plan revision carrying the external-effect task was ever applied
+      (no PlanRevisionApplied at revision 3).
+    evaluate:
+      oracle: event_absent
+      type: PlanRevisionApplied
+      field: payload.revision
+      expected: 3
+  - id: HA-5
+    oracle: no_external_effect_executed
+    check: The external-effect task was never dispatched: no TaskAttemptStarted
+      exists at the proposed revision 3.
+    evaluate:
+      oracle: event_absent
+      type: TaskAttemptStarted
+      field: payload.revision
+      expected: 3
+  - id: HA-6
+    oracle: safe_auto_apply_happened
+    check: The safe read_only replan (revision 2) WAS auto-applied, proving the
+      classifier applies safe candidates and only holds external effects.
+    evaluate:
+      oracle: event_present
+      type: PlanRevisionApplied
+      field: payload.revision
+      expected: 2
+  - id: HA-7
+    oracle: no_external_effect_signal
+    check: The scenario performed no external action: the external-effect task
+      was proposed but never produced work or a completion. (The plan itself may
+      declare the probe task; nothing external ran.)
+    evaluate:
+      oracle: event_absent
+      type: TaskCompleted
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A replan that would introduce an external effect is never
+  applied automatically; the task waits for explicit confirmation, while safe
+  read_only replans still apply.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

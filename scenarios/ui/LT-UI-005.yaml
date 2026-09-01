@@ -1,0 +1,98 @@
+version: 1
+id: LT-UI-005
+title: Archive and restore a disposable task
+risk: high
+kind: exploratory_ui
+tags: [ui, task_area, archive, restore, lifecycle, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - local DSH Web host is running with the long-task-runtime plugin installed into a
+    disposable profile (never the operator profile and never a user-layer patch)
+  - browser automation is pointed at the local host with an empty session
+  - the task being archived/restored is a disposable test task created only for
+    this scenario, never a real user task
+setup:
+  - Build the plugin once and add it to a disposable DSH Web profile via
+    `dsh plugin --profile <disposable> add <path-to-build>`; do not touch
+    C:\Users\19632\.dsh profile/patch or agent presets.
+  - Start the local DSH Web host on a free port that is NOT 3003, 3004, or 3080
+    (Clowder reserves 3003/3004 and 3080 is the operator GUI); record the chosen
+    URL in environment.json.
+  - Seed one disposable read_only goal in a terminal SUCCEEDED state so archiving
+    does not need to cancel active work.
+  - Open the Task Area from the host sidebar in the browser and open the goal's
+    Cockpit.
+actions:
+  - step: 1
+    name: open_disposable_task_cockpit
+    do: Open the Task Area and open the disposable task's Cockpit.
+    observe: The header shows the "删除" button and the task is present in the
+      default list; capture screenshot task-cockpit-before-archive.png and record
+      the getTask DTO and default listTasks page.
+  - step: 2
+    name: archive_task
+    do: Click "删除" and confirm the archive dialog.
+    observe: A confirmation dialog appears with the exact text
+      "删除任务会先取消正在进行的工作，并归档 30 天。是否继续？"; after
+      confirming, the task's getTask DTO reports archivedAt set and the default
+      listTasks no longer returns the task; capture screenshot
+      task-cockpit-archived.png and record the DTO responses.
+  - step: 3
+    name: view_archived_inventory
+    do: Enable the "已归档" filter in the Task Area list.
+    observe: The task appears in the archived inventory with its archivedAt DTO
+      field set; capture screenshot task-area-archived-list.png and record the
+      listTasks page with filter.archived = true.
+  - step: 4
+    name: restore_task
+    do: Open the archived task's Cockpit and click "恢复归档任务".
+    observe: The button label "恢复归档任务" is visible while archived; after
+      clicking, the getTask DTO shows archivedAt cleared and the task reappears
+      in the default list; capture screenshot task-cockpit-restored.png and record
+      the DTO responses.
+hard_assertions:
+  - id: HA-1
+    oracle: archive_confirmation_visible
+    check: Clicking "删除" shows a confirmation dialog containing the exact
+      visible text "删除任务会先取消正在进行的工作，并归档 30 天。是否继续？".
+  - id: HA-2
+    oracle: archived_dto_and_default_filter
+    check: After archive, the getTask DTO reports a defined archivedAt timestamp,
+      and the default listTasks (filter.archived absent) does NOT include the task
+      id while listTasks with filter.archived = true DOES include it.
+  - id: HA-3
+    oracle: archived_restore_button_visible
+    check: In the archived view the Cockpit shows the exact visible button label
+      "恢复归档任务" (the archive button is replaced by restore while
+      archivedAt is set).
+  - id: HA-4
+    oracle: restore_feedback_visible
+    check: After clicking "恢复归档任务", the getTask DTO reports archivedAt
+      cleared (undefined) and the task reappears in the default (non-archived)
+      listTasks page.
+  - id: HA-5
+    oracle: restore_does_not_restart_execution
+    check: The restored task's state remains its terminal SUCCEEDED state (no
+      attempt is restarted) and no new TaskAttemptStarted event appears after the
+      GoalRestored event.
+  - id: HA-6
+    oracle: no_external_effect
+    check: No action in this scenario triggered an external_effect; the only
+      writable targets were the disposable workspace, the disposable profile, and
+      the fresh durable database.
+evidence_required: [events, runtime_snapshot, command_log, screenshots, task, assertions, environment]
+llm_review: always
+expected_user_outcome: The user receives explicit confirmation before archiving,
+  can find the task in the archived inventory, and gets clear feedback when it is
+  restored, without the restore silently re-running finished work.
+cleanup: delete_disposable_workspace
+ui:
+  execution_mode: manual_browser
+  host: local_dsh_web
+  port_constraint: free port excluding 3003, 3004 and 3080
+  planned_side_effect_class: read_only
+  review_focus:
+    - destructive action has an explicit confirmation
+    - archived filtering and restore feedback are visible
+    - restore does not restart completed work

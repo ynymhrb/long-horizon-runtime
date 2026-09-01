@@ -1,0 +1,101 @@
+version: 1
+id: LT-FAULT-006
+title: A validator that rejects output records failure evidence before the permitted replan
+risk: high
+kind: fault_injection
+tags: [fault_injection, validator, replan, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture executor fails the first attempt (output), so the result-contract
+    validator rejects it, then succeeds
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto with automatic replanning
+      enabled; the fixture planner returns a single read_only task (revision 1).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor fail-once --mode auto --auto-replan
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_replanned_success
+    do: Drive the goal. The first attempt fails validation; the runtime must
+      durably record the failure evidence BEFORE the permitted automatic replan
+      trigger, apply a safe read_only revision 2, re-dispatch, and succeed.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor fail-once --auto-replan
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED; 2 attempts; PlanRevisionApplied
+      at revision 2
+hard_assertions:
+  - id: HA-1
+    oracle: failure_evidence_before_replan
+    check: ValidationRecorded, TaskAttemptFailed and TaskFailed appear in the
+      durable event log BEFORE the automatic-replan DecisionRecorded and the
+      applied PlanRevisionApplied — failure evidence always precedes the
+      permitted replan trigger.
+    evaluate:
+      oracle: event_order
+      sequence: [ValidationRecorded, TaskAttemptFailed, TaskFailed, DecisionRecorded, PlanRevisionApplied]
+  - id: HA-2
+    oracle: replan_applied
+    check: The safe read_only replan was applied exactly at revision 2.
+    evaluate:
+      oracle: event_present
+      type: PlanRevisionApplied
+      field: payload.revision
+      expected: 2
+  - id: HA-3
+    oracle: replan_decision
+    check: The decision record classifies the replan as automatic_replan
+      (auto-applied, not held for confirmation).
+    evaluate:
+      oracle: event_field_equals
+      type: DecisionRecorded
+      field: payload.type
+      expected: automatic_replan
+  - id: HA-4
+    oracle: goal_succeeded
+    check: The re-dispatched attempt succeeds and the goal reaches SUCCEEDED.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-5
+    oracle: two_attempts
+    check: Exactly two attempts exist — the failed attempt and the replanned
+      attempt.
+    evaluate:
+      oracle: attempt_count_equals
+      task_id: a
+      expected: 2
+  - id: HA-6
+    oracle: auto_applied_not_proposed
+    check: The safe replan was auto-applied, so no PlanProposed event exists.
+    evaluate:
+      oracle: event_absent
+      type: PlanProposed
+  - id: HA-7
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A validator rejection is recorded as durable failure
+  evidence before any replan trigger; the permitted safe replan then applies and
+  the task completes, with the full failure-then-replan audit trail inspectable.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local executor fixture double
+    inside the disposable workspace and the fresh durable database. Tracked
+    source, configuration and tests of long-horizon-runtime are never modified.
+  injected_fault: the first child attempt returns a failed (output-class)
+    result, so the result-contract validator rejects it
+  planned_side_effect_class: read_only

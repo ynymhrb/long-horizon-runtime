@@ -1,0 +1,106 @@
+version: 1
+id: LT-FAULT-004
+title: A child session that cannot start fails with evidence and honors the retry policy
+risk: high
+kind: fault_injection
+tags: [fault_injection, infrastructure, retry, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture executor returns failureKind infrastructure ("child session could
+    not start") on every attempt
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal whose single task carries retryPolicy
+      maxAttempts 2 (planner static-retry).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-retry --executor cannot-start --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_retry_budget_exhausted
+    do: Drive the goal; every attempt fails as an infrastructure session-start
+      fault. The runtime must honor the retry policy (exactly 2 attempts), record
+      each failure, and then pause the goal with durable budget-exhaustion
+      evidence rather than a validation failure.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-retry --executor cannot-start
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED; exactly 2 attempts for task a
+hard_assertions:
+  - id: HA-1
+    oracle: retry_policy_honored
+    check: The task was attempted exactly twice — the maxAttempts 2 retry policy
+      was honored with a durable retry between attempts.
+    evaluate:
+      oracle: attempt_count_equals
+      task_id: a
+      expected: 2
+  - id: HA-2
+    oracle: attempt_failed_event
+    check: Every failed session start is durably recorded as a TaskAttemptFailed
+      infrastructure failure.
+    evaluate:
+      oracle: event_present
+      type: TaskAttemptFailed
+  - id: HA-3
+    oracle: retry_scheduled
+    check: The first infrastructure failure scheduled a retry
+      (TaskRetryScheduled present).
+    evaluate:
+      oracle: event_present
+      type: TaskRetryScheduled
+  - id: HA-4
+    oracle: budget_exhausted
+    check: The second failure exhausted the retry budget with durable evidence
+      (TaskRetryBudgetExhausted present).
+    evaluate:
+      oracle: event_present
+      type: TaskRetryBudgetExhausted
+  - id: HA-5
+    oracle: goal_paused
+    check: The goal is durably PAUSED after the retry budget is exhausted.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: PAUSED
+  - id: HA-6
+    oracle: failure_order
+    check: Attempt start precedes retry scheduling, which precedes budget
+      exhaustion and the pause.
+    evaluate:
+      oracle: event_order
+      sequence: [TaskAttemptStarted, TaskRetryScheduled, TaskRetryBudgetExhausted, GoalPaused]
+  - id: HA-7
+    oracle: no_output_terminal_failure
+    check: An infrastructure fault is never mis-recorded as an output-class
+      terminal TaskFailed event.
+    evaluate:
+      oracle: event_absent
+      type: TaskFailed
+  - id: HA-8
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A child session that cannot start produces a durable,
+  inspectable failure trail (retry policy honored, budget exhaustion recorded)
+  and the goal pauses for an operator instead of fabricating a validation
+  failure or dispatching fabricated work.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local executor fixture double
+    inside the disposable workspace and the fresh durable database. Tracked
+    source, configuration and tests of long-task-runtime are never modified.
+  injected_fault: the child session cannot start; the executor returns
+    failureKind infrastructure with summary "child session could not start" on
+    every attempt
+  planned_side_effect_class: read_only

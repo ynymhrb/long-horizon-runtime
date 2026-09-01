@@ -1,0 +1,69 @@
+version: 1
+id: LT-STATE-012
+title: Archive a terminal goal and hide it from the default inventory
+risk: medium
+kind: deterministic
+tags: [state, archive, inventory, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_success
+    do: Drive the goal to a terminal success.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+  - step: 3
+    name: archive_terminal_goal
+    do: Archive the terminal goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" archive-goal
+      must_succeed: true
+    observe: snapshot.json goal.archivedAt is set
+hard_assertions:
+  - id: HA-1
+    oracle: archived_marker
+    check: The terminal goal carries a durable archivedAt timestamp after
+      archiving.
+    evaluate:
+      oracle: json_field_matches
+      file: snapshot.json
+      field: goal.archivedAt
+      pattern: \d{4}-\d{2}-\d{2}T
+  - id: HA-2
+    oracle: archived_event
+    check: The event log records the GoalArchived event.
+    evaluate:
+      oracle: event_present
+      type: GoalArchived
+  - id: HA-3
+    oracle: state_preserved
+    check: Archiving never changes the terminal state — the goal stays
+      SUCCEEDED.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-4
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user archives a finished read-only task; it keeps its
+  terminal state and audit history but disappears from the default active list.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

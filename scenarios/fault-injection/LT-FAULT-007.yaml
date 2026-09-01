@@ -1,0 +1,103 @@
+version: 1
+id: LT-FAULT-007
+title: A required artifact that is missing never hands the dependency fabricated context
+risk: high
+kind: fault_injection
+tags: [fault_injection, artifacts, dependency, context, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture planner marks task b as requiring a 'note' artifact from a, and the
+    fixture executor completes a declaring no artifact at all
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal with two tasks: a (read-only) and b which
+      depends on a and requires a 'note' artifact from it
+      (inputContract.requiredArtifactTypes). The executor declares no artifact.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-chain-required --executor no-artifact --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_undispatchable
+    do: Drive the goal. Task a completes declaring no artifact, so the required
+      'note' artifact is missing; task b must never be dispatched with fabricated
+      context. The goal stays RUNNING with no further work ready.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-chain-required --executor no-artifact
+      must_succeed: true
+    observe: snapshot.json exactly 1 attempt for task a, 0 attempts for task b
+hard_assertions:
+  - id: HA-1
+    oracle: producer_completed
+    check: Task a ran exactly once and completed without producing artifacts.
+    evaluate:
+      oracle: attempt_count_equals
+      task_id: a
+      expected: 1
+  - id: HA-2
+    oracle: dependent_never_dispatched
+    check: Task b was never attempted — the missing required artifact keeps the
+      dependent undispatchable.
+    evaluate:
+      oracle: attempt_count_equals
+      task_id: b
+      expected: 0
+  - id: HA-3
+    oracle: no_start_for_dependent
+    check: No TaskAttemptStarted event exists for task b (its context was never
+      assembled, so no fabricated context was ever handed to it).
+    evaluate:
+      oracle: event_absent
+      type: TaskAttemptStarted
+      field: taskId
+      expected: b
+  - id: HA-4
+    oracle: producer_started
+    check: Task a did start, proving the dispatch gate is per-dependency rather
+      than a global stall.
+    evaluate:
+      oracle: event_present
+      type: TaskAttemptStarted
+      field: taskId
+      expected: a
+  - id: HA-5
+    oracle: no_artifact_produced
+    check: No ArtifactProduced event exists — the dependency received neither a
+      real nor a fabricated artifact.
+    evaluate:
+      oracle: event_absent
+      type: ArtifactProduced
+  - id: HA-6
+    oracle: goal_waiting
+    check: The goal remains RUNNING and idle (nothing fabricated was dispatched
+      to force a terminal state).
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: RUNNING
+  - id: HA-7
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: When a required artifact is missing, the dependent task is
+  never dispatched with fabricated context; the goal waits durably for the
+  missing input instead of proceeding on invented evidence.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through local planner/executor fixture
+    doubles inside the disposable workspace and the fresh durable database.
+    Tracked source, configuration and tests of long-horizon-runtime are never
+    modified.
+  injected_fault: the producer completes without the 'note' artifact that the
+    dependent task's inputContract requires
+  planned_side_effect_class: read_only

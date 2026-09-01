@@ -1,0 +1,96 @@
+version: 1
+id: LT-UI-003
+title: Inspect a replan proposal in the Cockpit
+risk: high
+kind: exploratory_ui
+tags: [ui, task_area, replan, proposal, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - local DSH Web host is running with the long-task-runtime plugin installed into a
+    disposable profile (never the operator profile and never a user-layer patch)
+  - browser automation is pointed at the local host with an empty session
+setup:
+  - Build the plugin once and add it to a disposable DSH Web profile via
+    `dsh plugin --profile <disposable> add <path-to-build>`; do not touch
+    C:\Users\19632\.dsh profile/patch or agent presets.
+  - Start the local DSH Web host on a free port that is NOT 3003, 3004, or 3080
+    (Clowder reserves 3003/3004 and 3080 is the operator GUI); record the chosen
+    URL in environment.json.
+  - Seed one read_only goal with planningMode require_confirmation and confirm it
+    so it has an applied plan revision; then trigger a user goal edit through the
+    editTaskGoal control so the runtime appends GoalObjectiveRevised and a
+    confirmation-fenced PlanProposed (goal state becomes AWAITING_CONFIRMATION
+    with a pendingProposal carrying revision and baseRevision).
+  - Open the Task Area from the host sidebar in the browser.
+actions:
+  - step: 1
+    name: open_proposal_task
+    do: Open the Task Area and open the task that holds the pending replan
+      proposal.
+    observe: The Cockpit state badge shows "等待确认"; capture screenshot
+      task-cockpit-proposal.png and record the getTask DTO (including
+      pendingProposal) and getTaskGraph DTO.
+  - step: 2
+    name: view_proposal_controls
+    do: Read the proposal controls in the Cockpit header.
+    observe: The buttons "接受重规划" and "拒绝改计划" are visible; capture
+      screenshot task-cockpit-proposal-controls.png.
+  - step: 3
+    name: view_proposal_event
+    do: Read the recent-events timeline entry for the proposal.
+    observe: The event row shows the human-readable label "等待确认的重规划" and
+      a detail line containing "修订 <n>" and the trigger reason; capture
+      screenshot task-cockpit-proposal-event.png.
+  - step: 4
+    name: view_goal_edit_event
+    do: Read the recent-events timeline entry for the original-goal edit.
+    observe: The event row shows "已修改原始目标" with the edit reason in its
+      detail line; capture screenshot task-cockpit-proposal-goal-edit.png.
+hard_assertions:
+  - id: HA-1
+    oracle: proposal_state_visible
+    check: The Cockpit state badge shows the exact visible label "等待确认" and
+      the getTask DTO reports state AWAITING_CONFIRMATION.
+  - id: HA-2
+    oracle: proposal_revision_visible
+    check: The getTask DTO exposes pendingProposal with numeric revision and
+      baseRevision fields, and the header shows "修订 <baseRevision>"; the
+      recent-events timeline includes a row with the exact label
+      "等待确认的重规划" whose detail contains "修订 <revision>".
+  - id: HA-3
+    oracle: proposal_impact_visible
+    check: The proposal event detail line includes the trigger reason (from the
+      goal edit), and the goal-edit event row shows the exact label
+      "已修改原始目标" with the recorded reason, so the impact is comprehensible
+      without raw event names.
+  - id: HA-4
+    oracle: proposal_controls_visible
+    check: Both "接受重规划" and "拒绝改计划" buttons are visible and enabled
+      while pendingProposal is present; the getTask DTO availableActions and
+      available controls reflect the awaiting-confirmation state.
+  - id: HA-5
+    oracle: proposal_fence_consistent
+    check: The current applied plan revision remains baseRevision and the
+      pendingProposal.revision equals baseRevision + 1, so the proposal is
+      revision-fenced and never silently overwrote the current plan.
+  - id: HA-6
+    oracle: no_external_effect
+    check: No action in this scenario triggered an external_effect; the only
+      writable targets were the disposable workspace, the disposable profile, and
+      the fresh durable database.
+evidence_required: [events, runtime_snapshot, command_log, screenshots, task, assertions, environment]
+llm_review: always
+expected_user_outcome: The user can see that a replan was proposed, understand its
+  revision and impact, and act on explicit accept/reject controls without guessing
+  at internal event semantics.
+cleanup: delete_disposable_workspace
+ui:
+  execution_mode: manual_browser
+  host: local_dsh_web
+  port_constraint: free port excluding 3003, 3004 and 3080
+  planned_side_effect_class: read_only
+  review_focus:
+    - revision and base revision are visible
+    - impact/reason is visible and readable
+    - accept and reject controls are present and unambiguous

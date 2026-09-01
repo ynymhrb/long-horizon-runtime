@@ -1,0 +1,96 @@
+version: 1
+id: LT-STATE-001
+title: Create a read-only goal and run it to a durable success
+risk: critical
+kind: deterministic
+tags: [state, create, run, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto through the runtime
+      harness against the fresh durable database; the fixture planner returns a
+      single read_only task and the goal is planned immediately (revision 1,
+      RUNNING).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING at revision 1; create_goal exit code 0
+  - step: 2
+    name: run_until_idle
+    do: Drive the goal until idle with a live parent so the read_only task
+      executes once and terminalizes; the durable state is exported afterwards.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED; the single attempt SUCCEEDED
+hard_assertions:
+  - id: HA-1
+    oracle: goal_state_equals
+    check: The goal reaches the exact durable state SUCCEEDED after the
+      read_only run (snapshot.json goal.state == SUCCEEDED).
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-2
+    oracle: stable_task_id
+    check: Exactly one goal exists in the run's database and its id is stable
+      (task.json count == 1 and the goal id starts with lt_).
+    evaluate:
+      oracle: json_field_equals
+      file: task.json
+      field: count
+      expected: 1
+  - id: HA-3
+    oracle: event_order
+    check: The durable event log shows creation, plan application and attempt
+      start in order (GoalCreated before PlanRevisionApplied before
+      TaskAttemptStarted).
+    evaluate:
+      oracle: event_order
+      sequence: [GoalCreated, PlanRevisionApplied, TaskAttemptStarted]
+  - id: HA-4
+    oracle: goal_succeeded_event
+    check: The durable event log records the goal's terminal success.
+    evaluate:
+      oracle: event_present
+      type: GoalSucceeded
+  - id: HA-5
+    oracle: attempt_state_equals
+    check: The single read_only attempt terminalizes as SUCCEEDED.
+    evaluate:
+      oracle: attempt_state_equals
+      expected: SUCCEEDED
+  - id: HA-6
+    oracle: attempt_count_equals
+    check: Exactly one attempt exists for the read_only task (no duplicate or
+      retried attempt).
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 1
+  - id: HA-7
+    oracle: no_external_effect
+    check: No event or snapshot entry carries sideEffectClass external_effect;
+      the only writable targets were the disposable workspace and the fresh
+      durable database.
+    evaluate:
+      oracle: no_external_effect
+  - id: HA-8
+    oracle: command_exit_code_equals
+    check: Both the create_goal and run_until_idle harness commands exited 0.
+    evaluate:
+      oracle: command_exit_code_equals
+      command: run_until_idle
+      expected: 0
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user creates a read-only long task and watches it run
+  to a durable success with a stable task id and a complete audit trail.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

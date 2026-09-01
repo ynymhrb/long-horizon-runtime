@@ -1,0 +1,92 @@
+version: 1
+id: LT-UI-001
+title: Create and locate an active task in the Task Area
+risk: high
+kind: exploratory_ui
+tags: [ui, task_area, navigation, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - local DSH Web host is running with the long-task-runtime plugin installed into a
+    disposable profile (never the operator profile and never a user-layer patch)
+  - browser automation is pointed at the local host with an empty session
+setup:
+  - Build the plugin once and add it to a disposable DSH Web profile via
+    `dsh plugin --profile <disposable> add <path-to-build>`; do not touch
+    C:\Users\19632\.dsh profile/patch or agent presets.
+  - Start the local DSH Web host on a free port that is NOT 3003, 3004, or 3080
+    (Clowder reserves 3003/3004 and 3080 is the operator GUI); record the chosen
+    URL in environment.json.
+  - Seed one read_only goal with planningMode require_confirmation through the
+    model tools so the task is created and waits in AWAITING_CONFIRMATION with a
+    proposed plan revision (revision 0, pendingProposal absent until confirm).
+  - Open the Task Area from the host sidebar in the browser.
+actions:
+  - step: 1
+    name: open_task_area_overview
+    do: Navigate to the local host URL and open the Task Area overlay.
+    observe: The overview header text "任务区" and the filter controls are visible;
+      capture screenshot task-area-overview.png and record the listTasks DTO page.
+  - step: 2
+    name: locate_active_task_in_list
+    do: Read the default (non-archived) task list.
+    observe: The created task row shows its goal id, its objective text, and a
+      state badge with the visible label "等待确认"; capture screenshot
+      task-area-list-active.png and record the listTasks DTO item for the goal.
+  - step: 3
+    name: open_task_cockpit
+    do: Click the task row to open its Cockpit.
+    observe: The Cockpit header shows the goal id and "修订 0", the state badge
+      shows "等待确认", and the control buttons "确认执行", "修改原始目标",
+      "当前会话", and "删除" are visible; capture screenshot task-cockpit.png
+      and record the getTask / getTaskGraph DTO responses.
+  - step: 4
+    name: read_next_action_hint
+    do: Read the plan hint line under the controls.
+    observe: The visible hint text explains that editing the original goal creates
+      a confirmable plan revision ("修改原始目标会生成可确认的计划修订"); capture
+      screenshot task-cockpit-hint.png.
+hard_assertions:
+  - id: HA-1
+    oracle: overview_visible
+    check: The Task Area overview renders the exact visible header text "任务区"
+      and the archived-filter checkbox label "已归档".
+  - id: HA-2
+    oracle: list_row_visible
+    check: The default (non-archived) listTasks DTO contains the created goal id
+      with state AWAITING_CONFIRMATION, and its rendered row shows the visible
+      state label "等待确认", the goal objective text, and the goal id string.
+  - id: HA-3
+    oracle: cockpit_identity_visible
+    check: The Cockpit header shows the goal id and the exact text "修订 0", the
+      state badge shows "等待确认", and the control buttons "确认执行",
+      "修改原始目标", "当前会话", and "删除" are all visible and enabled.
+  - id: HA-4
+    oracle: next_action_hint_visible
+    check: The Cockpit renders the visible plan-hint text
+      "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。".
+  - id: HA-5
+    oracle: dto_state_consistent
+    check: The getTask DTO for the goal reports state AWAITING_CONFIRMATION,
+      revision 0, and a defined controlRevision; the visible state label matches
+      the DTO state via the taskStatePresentation mapping.
+  - id: HA-6
+    oracle: no_external_effect
+    check: No action in this scenario triggered an external_effect; the only
+      writable targets were the disposable workspace, the disposable profile, and
+      the fresh durable database.
+evidence_required: [events, runtime_snapshot, command_log, screenshots, task, assertions, environment]
+llm_review: always
+expected_user_outcome: The user can find their active task in the Task Area, see a
+  clear status label and its goal, and understand the next safe action without
+  reading internal event names.
+cleanup: delete_disposable_workspace
+ui:
+  execution_mode: manual_browser
+  host: local_dsh_web
+  port_constraint: free port excluding 3003, 3004 and 3080
+  planned_side_effect_class: read_only
+  review_focus:
+    - status text present on the list row and cockpit
+    - next action is actionable and visible
+    - no conflicting state across list and cockpit

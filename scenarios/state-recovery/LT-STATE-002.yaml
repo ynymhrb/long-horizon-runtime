@@ -1,0 +1,77 @@
+version: 1
+id: LT-STATE-002
+title: Confirmation-required plan does not dispatch work before confirmation
+risk: critical
+kind: deterministic
+tags: [state, confirmation, plan_proposal, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_require_confirmation
+    do: Create one read_only goal in planningMode require_confirmation through
+      the runtime harness; the fixture planner proposes a single read_only task
+      but no work may start before confirmation.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode require_confirmation
+      must_succeed: true
+    observe: task.json goal state AWAITING_CONFIRMATION at revision 0; the
+      proposal is a PlanProposed event; no attempt exists
+hard_assertions:
+  - id: HA-1
+    oracle: awaiting_confirmation_state
+    check: The goal is durably AWAITING_CONFIRMATION with revision 0 (no applied
+      plan revision yet).
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: AWAITING_CONFIRMATION
+  - id: HA-2
+    oracle: proposal_recorded
+    check: The durable event log records the PlanProposed proposal event.
+    evaluate:
+      oracle: event_present
+      type: PlanProposed
+  - id: HA-3
+    oracle: no_plan_applied
+    check: No plan revision was applied before confirmation (no
+      PlanRevisionApplied event exists).
+    evaluate:
+      oracle: event_absent
+      type: PlanRevisionApplied
+  - id: HA-4
+    oracle: no_attempt_started
+    check: No TaskAttemptStarted event exists, proving no work dispatched before
+      confirmation.
+    evaluate:
+      oracle: event_absent
+      type: TaskAttemptStarted
+  - id: HA-5
+    oracle: zero_attempts
+    check: The snapshot records zero attempts for the read_only task.
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 0
+  - id: HA-6
+    oracle: no_external_effect
+    check: No event or snapshot entry carries sideEffectClass external_effect.
+    evaluate:
+      oracle: no_external_effect
+  - id: HA-7
+    oracle: create_command_ok
+    check: The create_goal harness command exited 0.
+    evaluate:
+      oracle: command_exit_code_equals
+      command: create_goal_require_confirmation
+      expected: 0
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user creates a read-only task that requires
+  confirmation; the plan is proposed and clearly visible, and no work starts
+  until the user confirms.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

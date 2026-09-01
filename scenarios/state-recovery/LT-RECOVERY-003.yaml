@@ -1,0 +1,77 @@
+version: 1
+id: LT-RECOVERY-003
+title: Resume an interrupted read-only task with a distinct attempt
+risk: high
+kind: deterministic
+tags: [recovery, resume, attempt_identity, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto with a retry-capable
+      task.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-retry --executor interrupt --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_interrupted
+    do: Drive the goal until the running attempt is interrupted and the goal
+      pauses.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-retry --executor interrupt
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED; TaskInterrupted event
+  - step: 3
+    name: resume_and_complete
+    do: Resume the paused goal with a healthy executor and run it to completion;
+      the safe retry must get a fresh attempt id.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" resume-goal --run --planner static-retry --executor succeed
+      must_succeed: true
+    observe: GoalResumed event; new TaskAttemptStarted with a distinct attempt id
+  - step: 4
+    name: run_until_idle
+    do: Drive until idle so the resumed attempt completes.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-retry --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+hard_assertions:
+  - id: HA-1
+    oracle: resumed_succeeded
+    check: After resume the goal reaches SUCCEEDED durably.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-2
+    oracle: two_distinct_attempts
+    check: Exactly two attempts exist — the interrupted one and the resumed
+      one — each with its own id (a safe retry never reuses an attempt id).
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 2
+  - id: HA-3
+    oracle: resumed_event_recorded
+    check: The event log records GoalResumed after the interruption.
+    evaluate:
+      oracle: event_order
+      sequence: [TaskInterrupted, GoalResumed]
+  - id: HA-4
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: Resuming an interrupted read-only task starts a fresh,
+  distinctly identified attempt and completes it; the interrupted attempt's
+  record is preserved.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

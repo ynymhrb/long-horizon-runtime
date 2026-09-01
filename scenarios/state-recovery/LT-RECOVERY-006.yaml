@@ -1,0 +1,101 @@
+version: 1
+id: LT-RECOVERY-006
+title: A DSH conversation-stop signal interrupts rather than failing or replanning
+risk: critical
+kind: deterministic
+tags: [recovery, interruption, conversation_stop, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture executor reports an operator interruption (failureKind interrupted)
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto; the fixture executor is
+      configured to report a conversation-stop interruption.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor interrupt --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_interrupted
+    do: Drive the goal; the single attempt reports failureKind interrupted. The
+      runtime must record TaskInterrupted and GoalPaused and must never schedule
+      a retry, record a failed attempt, or trigger an automatic replan.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor interrupt
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED; the attempt is INTERRUPTED
+hard_assertions:
+  - id: HA-1
+    oracle: interrupted_attempt
+    check: The latest attempt terminalizes as INTERRUPTED — an operator
+      interruption, never a failed unit of work.
+    evaluate:
+      oracle: attempt_state_equals
+      expected: INTERRUPTED
+  - id: HA-2
+    oracle: goal_paused
+    check: The goal is durably PAUSED after the conversation stop.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: PAUSED
+  - id: HA-3
+    oracle: interrupted_event
+    check: The durable event log records TaskInterrupted for the attempt.
+    evaluate:
+      oracle: event_present
+      type: TaskInterrupted
+  - id: HA-4
+    oracle: not_a_failure
+    check: The interruption is not recorded as failure evidence (no
+      TaskAttemptFailed event).
+    evaluate:
+      oracle: event_absent
+      type: TaskAttemptFailed
+  - id: HA-5
+    oracle: no_retry_scheduled
+    check: A conversation stop never schedules a retry (no TaskRetryScheduled).
+    evaluate:
+      oracle: event_absent
+      type: TaskRetryScheduled
+  - id: HA-6
+    oracle: no_replan_decision
+    check: No automatic-replan decision is recorded (no DecisionRecorded with
+      payload.type automatic_replan).
+    evaluate:
+      oracle: event_absent
+      type: DecisionRecorded
+      field: payload.type
+      expected: automatic_replan
+  - id: HA-7
+    oracle: no_replan_proposal
+    check: No plan revision is proposed after the interruption (no PlanProposed).
+    evaluate:
+      oracle: event_absent
+      type: PlanProposed
+  - id: HA-8
+    oracle: single_attempt
+    check: Exactly one attempt was started — the stop halted the work instead of
+      re-dispatching it.
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 1
+  - id: HA-9
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A conversation-stop signal pauses the task as an operator
+  interruption with no retry, no failure record and no automatic replan; the user
+  can later resume or cancel from a durable, inspectable state.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

@@ -1,0 +1,111 @@
+version: 1
+id: LT-FAULT-008
+title: An artifact over the inline limit persists in the manifest without an oversized inline payload
+risk: high
+kind: fault_injection
+tags: [fault_injection, artifacts, storage, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture executor produces a note artifact larger than the run's inline limit,
+    and the harness enables the runtime ArtifactStore under the disposable
+    workspace (--artifact-dir)
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal; the executor produces an oversized note
+      artifact and the runtime ArtifactStore is enabled with a 1024-byte inline
+      limit inside the disposable workspace.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor oversized --mode auto --artifact-dir "%LT_WORKSPACE%\artifacts" --artifact-inline-limit-bytes 1024
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_oversized_artifact
+    do: Drive the goal; the oversized artifact must be stored as a content
+      addressed file whose manifest entry records storage 'file', contentHash and
+      path — never the large body inline.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor oversized --artifact-dir "%LT_WORKSPACE%\artifacts" --artifact-inline-limit-bytes 1024
+      must_succeed: true
+    observe: artifacts.json artifacts[0].storage == file; snapshot.json
+      goal.state SUCCEEDED
+hard_assertions:
+  - id: HA-1
+    oracle: manifest_storage_file
+    check: The artifact manifest records the oversized artifact with storage
+      'file' (artifacts.json artifacts[0].storage == file).
+    evaluate:
+      oracle: json_field_equals
+      file: artifacts.json
+      field: artifacts.0.storage
+      expected: file
+  - id: HA-2
+    oracle: produced_event_file_storage
+    check: The ArtifactProduced event records the same file storage for the
+      oversized artifact (no inline payload in the durable event).
+    evaluate:
+      oracle: event_field_equals
+      type: ArtifactProduced
+      field: payload.storage
+      expected: file
+  - id: HA-3
+    oracle: content_hash_present
+    check: The manifest entry carries a SHA-256 content hash for the oversized
+      artifact.
+    evaluate:
+      oracle: json_field_matches
+      file: artifacts.json
+      field: artifacts.0.contentHash
+      pattern: ^[0-9a-f]{64}$
+  - id: HA-4
+    oracle: file_path_recorded
+    check: The manifest entry points at the content-addressed file under the
+      run's artifact directory (path contains 'artifacts').
+    evaluate:
+      oracle: json_field_matches
+      file: artifacts.json
+      field: artifacts.0.path
+      pattern: artifacts
+  - id: HA-5
+    oracle: goal_succeeded
+    check: The goal still reaches SUCCEEDED — file-backed persistence does not
+      break the run.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-6
+    oracle: manifest_single_artifact
+    check: The manifest holds exactly the one oversized artifact, and its entry
+      is the file-stored record asserted above (never an inline body — the
+      storage/contentHash/path fields together prove the body was persisted
+      out-of-band).
+    evaluate:
+      oracle: json_field_equals
+      file: artifacts.json
+      field: count
+      expected: 1
+  - id: HA-7
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: An artifact larger than the inline limit is persisted as a
+  content-addressed file and survives in the manifest with its hash and path; the
+  evidence bundle never carries the oversized inline body.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local executor fixture double
+    inside the disposable workspace and the fresh durable database. Tracked
+    source, configuration and tests of long-horizon-runtime are never modified.
+  injected_fault: the child returns an artifact (70,000 bytes) larger than the
+    run's 1024-byte inline limit while the runtime ArtifactStore is enabled
+  planned_side_effect_class: read_only

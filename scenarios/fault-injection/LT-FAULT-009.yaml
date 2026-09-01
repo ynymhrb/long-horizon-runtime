@@ -1,0 +1,98 @@
+version: 1
+id: LT-FAULT-009
+title: Replaying a goal's event log keeps the projection idempotent and ordered
+risk: high
+kind: fault_injection
+tags: [fault_injection, events, replay, projection, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto and run it to a durable
+      success so the event log contains a full lifecycle (creation, plan,
+      attempt, completion).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_succeeded
+    do: Drive the goal to SUCCEEDED; the durable event export is staged.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+  - step: 3
+    name: verify_replay
+    do: Append every recorded event into a fresh replay store inside the
+      disposable workspace and compare the replayed projection (state and
+      revision) with the source. The harness exits 0 only when the replay is
+      consistent, proving the projection replays idempotently and stays ordered.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" verify-replay
+      must_succeed: true
+    observe: verify_replay prints {replayed, consistent: true} and exits 0
+hard_assertions:
+  - id: HA-1
+    oracle: replay_consistent
+    check: The event-append replay into a fresh store produced a projection
+      identical to the source (verify_replay exited 0), so the projection is
+      idempotent.
+    evaluate:
+      oracle: command_exit_code_equals
+      command: verify_replay
+      expected: 0
+  - id: HA-2
+    oracle: created_event_replayed
+    check: The replayed event log still contains GoalCreated (no event is lost
+      or fabricated by the append).
+    evaluate:
+      oracle: event_present
+      type: GoalCreated
+  - id: HA-3
+    oracle: plan_event_replayed
+    check: PlanRevisionApplied remains in the ordered log.
+    evaluate:
+      oracle: event_present
+      type: PlanRevisionApplied
+  - id: HA-4
+    oracle: ordered_projection
+    check: The durable log preserves lifecycle ordering: GoalCreated before
+      PlanRevisionApplied before TaskAttemptStarted before TaskCompleted before
+      GoalSucceeded.
+    evaluate:
+      oracle: event_order
+      sequence: [GoalCreated, PlanRevisionApplied, TaskAttemptStarted, TaskCompleted, GoalSucceeded]
+  - id: HA-5
+    oracle: source_projection_unchanged
+    check: The source goal projection remains SUCCEEDED after the replay (the
+      replay never mutated the source).
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-6
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A goal's recorded events can be appended to a fresh store
+  and reproduce the identical durable projection — the projection is idempotent
+  and the event order is preserved.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The replay is performed only inside the disposable workspace against
+    a fresh replay store; the source database and all tracked files stay
+    untouched.
+  injected_fault: none — the scenario verifies that a full event append into a
+    fresh store reproduces the projection (append/replay integrity)
+  planned_side_effect_class: read_only

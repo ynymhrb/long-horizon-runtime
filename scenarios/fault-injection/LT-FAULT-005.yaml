@@ -1,0 +1,105 @@
+version: 1
+id: LT-FAULT-005
+title: A child that exceeds its execution timeout reaches a durable terminal state once
+risk: high
+kind: fault_injection
+tags: [fault_injection, infrastructure, timeout, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture executor simulates the adapter's timeout abort by returning
+    failureKind infrastructure ("child exceeded its execution timeout") after a
+    short delay
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal whose single task carries retryPolicy
+      maxAttempts 1 (planner static-success), so a timeout leaves no retry
+      budget.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor timeout --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_timeout_terminal
+    do: Drive the goal; the fixture simulates the execution-timeout abort. The
+      runtime must terminalize the attempt exactly once with durable
+      infrastructure-failure evidence and pause the goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor timeout
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED; exactly 1 attempt for task a
+hard_assertions:
+  - id: HA-1
+    oracle: one_terminal_attempt
+    check: Exactly one attempt was made — the timed-out attempt reached its
+      durable terminal state once (never re-dispatched).
+    evaluate:
+      oracle: attempt_count_equals
+      task_id: a
+      expected: 1
+  - id: HA-2
+    oracle: attempt_failed_event
+    check: The timeout is durably recorded as a TaskAttemptFailed infrastructure
+      failure.
+    evaluate:
+      oracle: event_present
+      type: TaskAttemptFailed
+  - id: HA-3
+    oracle: budget_exhausted
+    check: With maxAttempts 1 the exhausted budget is recorded
+      (TaskRetryBudgetExhausted present).
+    evaluate:
+      oracle: event_present
+      type: TaskRetryBudgetExhausted
+  - id: HA-4
+    oracle: no_retry_scheduled
+    check: No retry is scheduled for a maxAttempts 1 timeout (no
+      TaskRetryScheduled).
+    evaluate:
+      oracle: event_absent
+      type: TaskRetryScheduled
+  - id: HA-5
+    oracle: goal_paused
+    check: The goal is durably PAUSED after the timeout terminalizes.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: PAUSED
+  - id: HA-6
+    oracle: paused_event
+    check: GoalPaused is durably recorded with the timeout outcome.
+    evaluate:
+      oracle: event_present
+      type: GoalPaused
+  - id: HA-7
+    oracle: no_output_terminal_failure
+    check: A timeout is never mis-recorded as an output-class terminal
+      TaskFailed event.
+    evaluate:
+      oracle: event_absent
+      type: TaskFailed
+  - id: HA-8
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A child that exceeds its execution timeout is terminalized
+  exactly once with durable evidence; the goal pauses for an operator instead of
+  retrying forever or fabricating a validation failure.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local executor fixture double
+    inside the disposable workspace and the fresh durable database. Tracked
+    source, configuration and tests of long-horizon-runtime are never modified.
+  injected_fault: the child exceeds its execution timeout; the executor returns
+    failureKind infrastructure with summary "child exceeded its execution
+    timeout" after a short delay
+  planned_side_effect_class: read_only

@@ -1,0 +1,109 @@
+version: 1
+id: LT-FAULT-010
+title: An automatic-replan planner failure leaves the current revision inspectable and pauses the goal
+risk: high
+kind: fault_injection
+tags: [fault_injection, planner, replan, safety, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture planner plans revision 1 read_only and throws on any replan call
+    (a call carrying a trigger), and the executor always fails (output)
+setup: []
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto with automatic replanning
+      enabled; the fixture planner returns a read_only revision 1.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner fail-on-replan --executor fail-always --mode auto --auto-replan
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_replan_failure
+    do: Drive the goal. The read_only task fails (output); the runtime requests
+      an automatic replan, the fixture planner throws, and the runtime must
+      record DecisionRecorded(automatic_replan_failed) and pause the goal while
+      the existing applied revision remains inspectable.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner fail-on-replan --executor fail-always --auto-replan
+      must_succeed: true
+    observe: snapshot.json goal.revision == 1, goal.state PAUSED
+hard_assertions:
+  - id: HA-1
+    oracle: revision_still_inspectable
+    check: The existing applied revision remains inspectable — the goal revision
+      is still 1 after the failed replan (nothing was overwritten).
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.revision
+      expected: 1
+  - id: HA-2
+    oracle: goal_paused
+    check: The goal is durably PAUSED after the automatic replan planner failure.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: PAUSED
+  - id: HA-3
+    oracle: replan_failure_recorded
+    check: The failure is durably recorded as a DecisionRecorded with
+      payload.type automatic_replan_failed.
+    evaluate:
+      oracle: event_present
+      type: DecisionRecorded
+      field: payload.type
+      expected: automatic_replan_failed
+  - id: HA-4
+    oracle: no_proposal
+    check: No PlanProposed event exists — the failed planner produced no
+      proposal.
+    evaluate:
+      oracle: event_absent
+      type: PlanProposed
+  - id: HA-5
+    oracle: no_second_revision
+    check: No revision 2 was ever applied — the current revision stays 1.
+    evaluate:
+      oracle: event_absent
+      type: PlanRevisionApplied
+      field: payload.revision
+      expected: 2
+  - id: HA-6
+    oracle: failure_then_pause_order
+    check: The durable log records the terminal failure before the failed-replan
+      decision and the pause.
+    evaluate:
+      oracle: event_order
+      sequence: [TaskFailed, DecisionRecorded, GoalPaused]
+  - id: HA-7
+    oracle: single_attempt
+    check: Exactly one attempt ran — the planner failure prevented any
+      re-dispatch.
+    evaluate:
+      oracle: attempt_count_equals
+      task_id: a
+      expected: 1
+  - id: HA-8
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence; the only
+      writable targets were the disposable workspace and the fresh durable
+      database.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: If the automatic replan planner fails, the current applied
+  revision stays inspectable, the failure is durably recorded, and the goal pauses
+  safely for an operator — never overwriting history or dispatching more work.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local planner fixture double
+    inside the disposable workspace and the fresh durable database. Tracked
+    source, configuration and tests of long-horizon-runtime are never modified.
+  injected_fault: the planner throws when asked to produce an automatic replan
+    (a plan call carrying a trigger)
+  planned_side_effect_class: read_only

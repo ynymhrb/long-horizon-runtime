@@ -1,0 +1,80 @@
+version: 1
+id: LT-STATE-013
+title: Restore an archived goal without restarting execution
+risk: medium
+kind: deterministic
+tags: [state, restore, archive, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_success
+    do: Drive the goal to a terminal success (one attempt).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+  - step: 3
+    name: archive_goal
+    do: Archive the terminal goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" archive-goal
+      must_succeed: true
+    observe: snapshot.json goal.archivedAt set
+  - step: 4
+    name: restore_goal
+    do: Restore the archived goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" restore-goal
+      must_succeed: true
+    observe: snapshot.json goal.archivedAt cleared; no new execution
+hard_assertions:
+  - id: HA-1
+    oracle: marker_cleared
+    check: The archive marker is removed after restore: the GoalArchived event is
+      followed by GoalRestored in the durable log.
+    evaluate:
+      oracle: event_order
+      sequence: [GoalArchived, GoalRestored]
+  - id: HA-2
+    oracle: restored_event
+    check: The event log records the GoalRestored event.
+    evaluate:
+      oracle: event_present
+      type: GoalRestored
+  - id: HA-3
+    oracle: no_execution_restart
+    check: Restore never restarts work — exactly one attempt exists (the original
+      run) and no new TaskAttemptStarted follows GoalRestored.
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 1
+  - id: HA-4
+    oracle: state_preserved
+    check: The goal keeps its terminal SUCCEEDED state after restore.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-5
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user restores an archived read-only task; it becomes
+  visible again with its history intact and never re-runs cancelled work.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

@@ -1,0 +1,101 @@
+version: 1
+id: LT-FAULT-001
+title: Planner returns invalid JSON
+risk: high
+kind: fault_injection
+tags: [fault_injection, planner, plan_validation, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner adapter replaced by a local test double inside the disposable workspace
+setup:
+  - The runtime harness fixture planner kind invalid-json throws a non-parseable
+    planner error the first time planWithValidation is invoked (a local read_only
+    test double; no LLM, no network, nothing tracked is touched).
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto against the fresh durable
+      database through the runtime harness with the invalid-json planner
+      fixture, so the runtime invokes the planner exactly once and records the
+      planning failure durably.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner invalid-json --executor succeed --mode auto
+      must_succeed: true
+    observe: events.json GoalCreated then GoalFailed(phase planning); snapshot.json goal.state FAILED at revision 0
+  - step: 2
+    name: export_state
+    do: Export the durable goal projection, plan revision list, event log and
+      artifact manifest into the staging directory so the runner imports them
+      into the immutable evidence bundle.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" export-state
+      must_succeed: true
+    observe: task.json, events.json, snapshot.json, artifacts.json staged
+hard_assertions:
+  - id: HA-1
+    oracle: plan_rejection_atomic
+    check: No plan revision is applied for the malformed planner output: no
+      PlanRevisionApplied event exists in the goal's durable event log.
+    evaluate:
+      oracle: event_absent
+      type: PlanRevisionApplied
+  - id: HA-2
+    oracle: plan_rejection_no_proposal
+    check: The invalid plan is never proposed either (no PlanProposed event).
+    evaluate:
+      oracle: event_absent
+      type: PlanProposed
+  - id: HA-3
+    oracle: durable_failure_evidence
+    check: The planning failure is durably recorded: a GoalFailed event with
+      phase planning exists in events.json.
+    evaluate:
+      oracle: event_present
+      type: GoalFailed
+      field: payload.phase
+      expected: planning
+  - id: HA-4
+    oracle: goal_failed_state
+    check: The goal projection is the durable FAILED state, not RUNNING with a
+      phantom plan.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: FAILED
+  - id: HA-5
+    oracle: revision_stays_zero
+    check: No plan revision was applied; the goal revision remains 0.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.revision
+      expected: 0
+  - id: HA-6
+    oracle: no_external_effect
+    check: No event or snapshot entry carries sideEffectClass external_effect;
+      the only writable targets were the disposable workspace and the fresh
+      durable database.
+    evaluate:
+      oracle: no_external_effect
+  - id: HA-7
+    oracle: command_exit_code_equals
+    check: The harness create-goal command exited 0 (the runtime recorded the
+      planning failure durably instead of crashing the caller).
+    evaluate:
+      oracle: command_exit_code_equals
+      command: create_goal
+      expected: 0
+evidence_required: [events, runtime_snapshot, command_log, task, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The task cannot be planned from invalid planner output; the
+  user sees a durable, inspectable failure rather than a half-applied plan, and no
+  work is dispatched.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local PlannerAdapter fixture
+    double inside the disposable workspace and the fresh durable database.
+    Tracked source, configuration and tests of long-task-runtime are never modified.
+  injected_fault: planner returns non-parseable / non-PlanDraft output
+  planned_side_effect_class: read_only

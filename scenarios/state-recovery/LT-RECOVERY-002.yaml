@@ -1,0 +1,72 @@
+version: 1
+id: LT-RECOVERY-002
+title: Restart during a read-only attempt makes the interruption durable
+risk: high
+kind: deterministic
+tags: [recovery, restart, interruption, durability, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture executor reports an interrupted failure (operator stop)
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto with a retry-capable
+      task.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-retry --executor interrupt --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_interrupted
+    do: Drive the goal; the running read-only attempt is interrupted (operator
+      stop), terminalizing the attempt and pausing the goal durably.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-retry --executor interrupt
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED with reason task execution
+      interrupted
+hard_assertions:
+  - id: HA-1
+    oracle: interrupted_event
+    check: The durable event log records the TaskInterrupted event for the
+      attempt.
+    evaluate:
+      oracle: event_present
+      type: TaskInterrupted
+  - id: HA-2
+    oracle: goal_paused_durably
+    check: The goal is durably PAUSED with a pause reason.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: PAUSED
+  - id: HA-3
+    oracle: interruption_not_failure
+    check: An interruption is never recorded as a validation failure — no
+      TaskAttemptFailed event exists for the interrupted attempt.
+    evaluate:
+      oracle: event_absent
+      type: TaskAttemptFailed
+  - id: HA-4
+    oracle: interruption_not_replan
+    check: An interruption never feeds the replan loop — no automatic-replan
+      decision was recorded.
+    evaluate:
+      oracle: event_absent
+      type: DecisionRecorded
+  - id: HA-5
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: Restarting during a read-only attempt leaves a durable
+  interruption record and a paused goal; the stop is not mistaken for a failed
+  unit of work or a replan trigger.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

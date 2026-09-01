@@ -1,0 +1,80 @@
+version: 1
+id: LT-STATE-003
+title: Confirm a proposed plan and run it to success
+risk: critical
+kind: deterministic
+tags: [state, confirm, run, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_require_confirmation
+    do: Create one read_only goal in planningMode require_confirmation; the
+      fixture planner proposes a single read_only task.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode require_confirmation
+      must_succeed: true
+    observe: task.json goal state AWAITING_CONFIRMATION, revision 0
+  - step: 2
+    name: confirm_goal
+    do: Confirm the proposed plan.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" confirm-goal --run
+      must_succeed: true
+    observe: PlanConfirmed + PlanRevisionApplied events; goal moves to RUNNING
+  - step: 3
+    name: run_until_idle
+    do: Drive the goal until idle with a live parent so the read_only task
+      executes and terminalizes.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+hard_assertions:
+  - id: HA-1
+    oracle: confirmed_then_succeeded
+    check: After confirmation the goal reaches SUCCEEDED durably.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-2
+    oracle: confirm_event_order
+    check: The durable events appear in order: proposal before confirmation
+      before applied revision before attempt start.
+    evaluate:
+      oracle: event_order
+      sequence: [PlanProposed, PlanConfirmed, PlanRevisionApplied, TaskAttemptStarted]
+  - id: HA-3
+    oracle: goal_succeeded_event
+    check: The event log records the terminal GoalSucceeded event.
+    evaluate:
+      oracle: event_present
+      type: GoalSucceeded
+  - id: HA-4
+    oracle: attempt_succeeded
+    check: The single read_only attempt terminalizes as SUCCEEDED.
+    evaluate:
+      oracle: attempt_state_equals
+      expected: SUCCEEDED
+  - id: HA-5
+    oracle: one_attempt
+    check: Exactly one attempt exists (no duplicate dispatch after confirmation).
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 1
+  - id: HA-6
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user confirms a proposed read-only plan and the task
+  runs to a durable success with a complete event trail.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

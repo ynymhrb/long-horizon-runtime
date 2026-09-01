@@ -1,0 +1,78 @@
+version: 1
+id: LT-STATE-014
+title: Purge an expired archive with its projections
+risk: medium
+kind: deterministic
+tags: [state, purge, archive, retention, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_until_success
+    do: Drive the goal to a terminal success.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+  - step: 3
+    name: archive_goal
+    do: Archive the terminal goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" archive-goal
+      must_succeed: true
+    observe: snapshot.json goal.archivedAt set
+  - step: 4
+    name: purge_archives
+    do: Purge archives older than the retention window (0 days in this scenario
+      so the just-archived goal is eligible).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" purge-archived --retention-days 0
+      must_succeed: true
+    observe: purge-archived reports the removed goal id
+hard_assertions:
+  - id: HA-1
+    oracle: goal_purged
+    check: The archived goal was physically removed from the inventory — the
+      task export contains zero goals after purge.
+    evaluate:
+      oracle: json_field_equals
+      file: task.json
+      field: count
+      expected: 0
+  - id: HA-2
+    oracle: events_purged
+    check: The durable event export for the purged goal is empty (its
+      projections and events were removed together).
+    evaluate:
+      oracle: json_field_equals
+      file: events.json
+      field: count
+      expected: 0
+  - id: HA-3
+    oracle: purge_command_ok
+    check: The purge-archived harness command exited 0 and reported a removal.
+    evaluate:
+      oracle: command_exit_code_equals
+      command: purge_archives
+      expected: 0
+  - id: HA-4
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: An archive past its retention window is purged with all
+  its projections and events; the active inventory is unaffected.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

@@ -1,0 +1,103 @@
+version: 1
+id: LT-STATE-010
+title: A stale control revision is refused with a conflict
+risk: high
+kind: deterministic
+tags: [state, control_revision, conflict, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto so revision 1 is applied
+      and the goal is RUNNING.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: edit_goal_creates_proposal
+    do: Edit the original goal to create a pending proposal and advance the
+      control revision.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" edit-goal --objective "revised read-only objective" --reason "user correction"
+      must_succeed: true
+    observe: goal AWAITING_CONFIRMATION at revision 1; controlRevision advanced
+  - step: 3
+    name: stale_accept_conflict
+    do: Accept with a stale expected control revision; the API must return a
+      conflict and change nothing.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" accept-replan --expected-revision 99
+      must_succeed: true
+    observe: accept-replan reports kind conflict
+  - step: 4
+    name: stale_reject_conflict
+    do: Reject with a stale expected control revision; the API must return a
+      conflict and keep the proposal intact.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" reject-goal --expected-revision 99
+      must_succeed: true
+    observe: reject-goal reports kind conflict
+  - step: 5
+    name: verify_proposal_intact
+    do: Re-export the durable state and confirm the pending proposal is still
+      present and unapplied.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" export-state
+      must_succeed: true
+    observe: snapshot.json goal.state AWAITING_CONFIRMATION, revision 1
+hard_assertions:
+  - id: HA-1
+    oracle: conflict_not_applied
+    check: A stale expected control revision (99) never applies: the goal is
+      still AWAITING_CONFIRMATION at revision 1.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: AWAITING_CONFIRMATION
+  - id: HA-2
+    oracle: revision_unchanged
+    check: The applied revision is still 1 after both stale operations.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.revision
+      expected: 1
+  - id: HA-3
+    oracle: proposal_still_pending
+    check: The PlanProposed event (revision 2, baseRevision 1) is still pending
+      — never confirmed by the stale calls.
+    evaluate:
+      oracle: event_present
+      type: PlanProposed
+  - id: HA-4
+    oracle: no_confirm_from_stale
+    check: No PlanConfirmed event exists, so neither stale call applied.
+    evaluate:
+      oracle: event_absent
+      type: PlanConfirmed
+  - id: HA-5
+    oracle: stale_commands_exit_ok
+    check: Both stale-control harness commands exited 0 (a conflict is the
+      expected, handled outcome — not a command failure).
+    evaluate:
+      oracle: command_exit_code_equals
+      command: stale_accept_conflict
+      expected: 0
+  - id: HA-6
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A control action sent with an outdated revision is refused
+  with a clear conflict and the task's plan stays unchanged, so a stale client
+  can never overwrite newer state.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

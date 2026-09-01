@@ -1,0 +1,85 @@
+version: 1
+id: LT-STATE-011
+title: Editing the original goal is append-only and fenced
+risk: critical
+kind: deterministic
+tags: [state, goal_edit, append_only, revision_fence, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto (RUNNING, revision 1).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: edit_original_goal
+    do: Edit the original goal with a new objective and a required reason; the
+      scheduler pauses and an append-only goal version plus a fenced proposal
+      are recorded.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" edit-goal --objective "revised read-only objective" --reason "user correction"
+      must_succeed: true
+    observe: snapshot.json goal.state AWAITING_CONFIRMATION; goalVersions has the
+      revised version
+hard_assertions:
+  - id: HA-1
+    oracle: objective_revised
+    check: The durable goal-version record contains the revised objective
+      (snapshot goalVersions last entry version 1).
+    evaluate:
+      oracle: event_present
+      type: GoalObjectiveRevised
+      field: payload.objective
+      expected: revised read-only objective
+  - id: HA-2
+    oracle: append_only_version
+    check: The goal version list grew by exactly one entry (version 0 original +
+      version 1 revision) without changing the task id.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goalVersions.1.version
+      expected: 1
+  - id: HA-3
+    oracle: scheduler_paused
+    check: The scheduler paused for the edit (GoalPaused with reason
+      original_goal_edit).
+    evaluate:
+      oracle: event_present
+      type: GoalPaused
+      field: payload.reason
+      expected: original_goal_edit
+  - id: HA-4
+    oracle: fenced_proposal
+    check: A fenced replacement revision 2 (baseRevision 1) was proposed.
+    evaluate:
+      oracle: event_present
+      type: PlanProposed
+      field: payload.baseRevision
+      expected: 1
+  - id: HA-5
+    oracle: awaits_confirmation
+    check: The goal awaits confirmation of the fenced proposal.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: AWAITING_CONFIRMATION
+  - id: HA-6
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user corrects the original goal; the change is
+  recorded as an append-only version, the scheduler pauses, and a confirmable
+  fenced plan revision is proposed.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

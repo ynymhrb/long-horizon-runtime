@@ -1,0 +1,78 @@
+version: 1
+id: LT-RECOVERY-004
+title: Interrupted external effect pauses the goal for explicit resolution
+risk: critical
+kind: deterministic
+tags: [recovery, external_effect, pause, safety, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles; the
+    fixture planner returns a task with sideEffectClass external_effect only as
+    a safety probe — the scenario itself performs no external action
+setup: []
+actions:
+  - step: 1
+    name: create_goal_external_probe
+    do: Create one goal whose fixture plan carries an external_effect task
+      (safety probe; nothing external executes).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner external-effect --executor fail-always --mode auto
+      must_succeed: true
+    observe: task.json goal state RUNNING, revision 1
+  - step: 2
+    name: run_external_probe
+    do: Drive the goal; the external-effect task fails and the goal must pause
+      pending explicit operator resolution.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner external-effect --executor fail-always
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED; TaskRecoveryBlocked event
+hard_assertions:
+  - id: HA-1
+    oracle: recovery_blocked_event
+    check: The durable event log records TaskRecoveryBlocked for the failed
+      external-effect attempt.
+    evaluate:
+      oracle: event_present
+      type: TaskRecoveryBlocked
+  - id: HA-2
+    oracle: paused_for_resolution
+    check: The goal is durably PAUSED pending operator resolution.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: PAUSED
+  - id: HA-3
+    oracle: resolution_reason
+    check: The pause reason explicitly requires operator resolution (matches
+      "operator resolution is required").
+    evaluate:
+      oracle: json_field_matches
+      file: snapshot.json
+      field: goal.pauseReason
+      pattern: operator resolution is required
+  - id: HA-4
+    oracle: no_automatic_retry
+    check: The external-effect failure is never auto-retried — no
+      TaskRetryScheduled event exists.
+    evaluate:
+      oracle: event_absent
+      type: TaskRetryScheduled
+  - id: HA-5
+    oracle: no_external_effect_executed
+    check: The external-effect probe task never executed — it was blocked before
+      producing any work (no ArtifactProduced event from the probe attempt and
+      the goal paused). The plan may declare the probe task; the evidence must
+      show it was held, not run.
+    evaluate:
+      oracle: event_absent
+      type: TaskCompleted
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: A failed external-effect step is never retried or
+  replanned automatically; the goal pauses with an explicit request for operator
+  resolution.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only

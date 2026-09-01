@@ -1,0 +1,102 @@
+version: 1
+id: LT-FAULT-002
+title: Planner returns cyclic DAG
+risk: high
+kind: fault_injection
+tags: [fault_injection, planner, dag, plan_validation, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner adapter replaced by a local test double inside the disposable workspace
+setup:
+  - The runtime harness fixture planner kind cyclic-dag returns a well-formed
+    PlanDraft whose dependency edges form a cycle (task a depends on b and b
+    depends on a), with every task read_only and every other contract field
+    present. Plan validation must reject the draft atomically.
+actions:
+  - step: 1
+    name: create_goal
+    do: Create one read_only goal in planningMode auto against the fresh durable
+      database through the runtime harness with the cyclic-dag planner fixture,
+      so planWithValidation runs validatePlan on the cyclic PlanDraft exactly
+      once and the rejection is recorded durably.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner cyclic-dag --executor succeed --mode auto
+      must_succeed: true
+    observe: events.json GoalCreated then GoalFailed(phase planning, reason mentions dependency cycle)
+  - step: 2
+    name: export_state
+    do: Export the durable goal projection, plan revision list, event log and
+      artifact manifest into the staging directory so the runner imports them
+      into the immutable evidence bundle.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" export-state
+      must_succeed: true
+    observe: task.json, events.json, snapshot.json, artifacts.json staged
+hard_assertions:
+  - id: HA-1
+    oracle: plan_rejection_atomic
+    check: validatePlan rejects the cyclic draft atomically: no PlanRevisionApplied
+      event exists and the durable GoalFailed reason names the dependency cycle.
+    evaluate:
+      oracle: event_absent
+      type: PlanRevisionApplied
+  - id: HA-2
+    oracle: cycle_reason_recorded
+    check: The durable failure reason for the cyclic plan names the dependency
+      cycle.
+    evaluate:
+      oracle: json_field_matches
+      file: events.json
+      field: events.1.payload.reason
+      pattern: dependency cycle
+  - id: HA-3
+    oracle: no_partial_projection
+    check: The rejected cyclic plan leaves zero plan projection behind: no
+      PlanProposed event and snapshot.json plan is null (no task nodes were
+      persisted).
+    evaluate:
+      oracle: event_absent
+      type: PlanProposed
+  - id: HA-4
+    oracle: no_plan_persisted
+    check: getPlan(goalId) is undefined; snapshot.json plan is null.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: plan
+      expected: null
+  - id: HA-5
+    oracle: revision_stays_zero
+    check: The goal revision remains 0 (no revision was ever applied).
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.revision
+      expected: 0
+  - id: HA-6
+    oracle: no_external_effect
+    check: No event or snapshot entry carries sideEffectClass external_effect;
+      the only writable targets were the disposable workspace and the fresh
+      durable database.
+    evaluate:
+      oracle: no_external_effect
+  - id: HA-7
+    oracle: command_exit_code_equals
+    check: The harness create-goal command exited 0 (the runtime recorded the
+      rejection durably instead of crashing the caller).
+    evaluate:
+      oracle: command_exit_code_equals
+      command: create_goal
+      expected: 0
+evidence_required: [events, runtime_snapshot, command_log, task, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The cyclic plan is rejected atomically and atomically only;
+  the user is not shown a runnable plan and no task is dispatched.
+cleanup: delete_disposable_workspace
+fault_injection:
+  boundary: The fault is injected only through a local PlannerAdapter fixture
+    double inside the disposable workspace and the fresh durable database.
+    Tracked source, configuration and tests of long-task-runtime are never modified.
+  injected_fault: planner returns a PlanDraft whose dependency edges form a cycle
+  planned_side_effect_class: read_only

@@ -1,0 +1,82 @@
+version: 1
+id: LT-STATE-005
+title: Resume a paused read-only goal without changing its identity
+risk: high
+kind: deterministic
+tags: [state, resume, identity, read_only]
+preconditions:
+  - fresh durable database (a new SQLite file unique to this run)
+  - unique disposable workspace created by the runner
+  - planner and executor replaced by local read_only fixture doubles
+setup: []
+actions:
+  - step: 1
+    name: create_goal_auto
+    do: Create one read_only goal in planningMode auto (RUNNING, revision 1).
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" create-goal --planner static-success --executor succeed --mode auto
+      must_succeed: true
+    observe: the created goal id (stable lt_ identifier)
+  - step: 2
+    name: pause_goal
+    do: Pause the running goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" pause-goal
+      must_succeed: true
+    observe: snapshot.json goal.state PAUSED
+  - step: 3
+    name: resume_goal
+    do: Resume the paused goal.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" resume-goal
+      must_succeed: true
+    observe: GoalResumed event; goal back to RUNNING
+  - step: 4
+    name: run_until_idle
+    do: Drive the resumed goal until idle so the read_only task completes.
+    run:
+      command: node "%LT_RUNNER_DIR%\harness.mjs" run-goal --planner static-success --executor succeed
+      must_succeed: true
+    observe: snapshot.json goal.state SUCCEEDED
+hard_assertions:
+  - id: HA-1
+    oracle: resumed_to_success
+    check: After resume the goal reaches SUCCEEDED durably.
+    evaluate:
+      oracle: json_field_equals
+      file: snapshot.json
+      field: goal.state
+      expected: SUCCEEDED
+  - id: HA-2
+    oracle: stable_goal_id
+    check: Exactly one goal exists and its id is stable and unchanged across
+      pause/resume (task.json count == 1).
+    evaluate:
+      oracle: json_field_equals
+      file: task.json
+      field: count
+      expected: 1
+  - id: HA-3
+    oracle: resumed_event
+    check: The event log records the GoalResumed event.
+    evaluate:
+      oracle: event_present
+      type: GoalResumed
+  - id: HA-4
+    oracle: one_attempt_after_resume
+    check: Exactly one attempt exists after resume (the paused goal never ran
+      before; resume dispatched it once).
+    evaluate:
+      oracle: attempt_count_equals
+      expected: 1
+  - id: HA-5
+    oracle: no_external_effect
+    check: No external-effect signal appears anywhere in the evidence.
+    evaluate:
+      oracle: no_external_effect
+evidence_required: [run, command_log, task, events, runtime_snapshot, artifacts, assertions, environment]
+llm_review: on_failure
+expected_user_outcome: The user resumes a paused read-only task; it continues
+  with the same task id and runs to success.
+cleanup: delete_disposable_workspace
+side_effect_class: read_only
