@@ -53,6 +53,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "aris:pilot": "node validation/aris-pilot/cli.mjs",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json && pnpm run build:client",
     "build:client": "tsdown --config tsdown.client.config.ts"

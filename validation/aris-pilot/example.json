@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "id": "ARIS-PILOT-001",
+  "shared": {
+    "dshVersion": "record-installed-version-here",
+    "arisCommit": "d08400b4ee2b44831faa2a1187be0fc331f63464",
+    "arisSkillCount": 187,
+    "model": "record-exact-model-here",
+    "modelParameters": { "temperature": 0 },
+    "promptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "initialInputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "toolsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "mcpSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "networkCondition": "same isolated network policy",
+    "computeEnvironment": "same machine and resource limit",
+    "tokenBudget": 100000,
+    "wallTimeBudgetMs": 3600000,
+    "seed": 1
+  },
+  "groups": [
+    {
+      "id": "aris_only",
+      "longTaskPlugin": { "enabled": false },
+      "command": { "executable": "node", "args": ["--version"] }
+    },
+    {
+      "id": "aris_plus_long_task",
+      "longTaskPlugin": { "enabled": true },
+      "command": { "executable": "node", "args": ["--version"] }
+    }
+  ]
+}
