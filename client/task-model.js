@@ -37,3 +37,11 @@ export function resumeDriverMode(navigation, currentSessionId) {
   if (bound === currentSessionId) return 'inject'
   return 'open'
 }
+
+/** A durable RUNNING state still needs a live session parent before it can dispatch child work. */
+export function waitingForSessionDriver(task) {
+  return task?.state === 'RUNNING' && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some(node => node.state === 'RUNNING')
+}
+
+/** Both the current and a bound background session can accept a driver prompt. */
+export function shouldDriveBoundSession(mode) { return mode === 'inject' || mode === 'open' }

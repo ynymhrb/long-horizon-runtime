@@ -123,6 +123,32 @@ describe('DSH adapters', () => {
     expect(result.summary).toContain('child-session-error')
   })
 
+  test('extracts a quota reset time from a local child turn error', async () => {
+    const resetAt = new Date(Date.now() + 60_000)
+    const providerResetAt = resetAt.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' +0000 UTC')
+    const failure = { code: 'QUOTA', message: `429 {"error":{"code":"AccountQuotaExceeded","message":"quota exhausted; reset at ${providerResetAt}"}}` }
+    const localAgent = { session: { events: [{ type: 'turn/end', data: { reason: { kind: 'error', error: failure } } }] } }
+    const adapter = createDshExecutionAdapter({
+      async start() {
+        return {
+          id: 'quota-child',
+          localAgent: localAgent as never,
+          result: Promise.resolve({ stopReason: 'error', output: [] }),
+          async dispose() {},
+        }
+      },
+    } as never, { providerName: 'worker' })
+
+    const result = await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'quota-attempt', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+    }))
+
+    expect(result.failureKind).toBe('quota')
+    expect(Date.parse(result.retryAt!)).toBeGreaterThan(Date.now())
+    expect(result.failureDiagnostic).toContain('AccountQuotaExceeded')
+  })
+
   test('preserves an explicit future retry-after quota diagnostic from a rejected child run', async () => {
     const retryAt = new Date(Date.now() + 60_000).toISOString()
     const adapter = createDshExecutionAdapter({

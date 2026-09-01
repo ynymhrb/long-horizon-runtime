@@ -4617,6 +4617,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (bound === currentSessionId) return "inject";
 			return "open";
 		}
+		/** A durable RUNNING state still needs a live session parent before it can dispatch child work. */
+		function waitingForSessionDriver(task) {
+			return task?.state === "RUNNING" && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
+		}
+		/** Both the current and a bound background session can accept a driver prompt. */
+		function shouldDriveBoundSession(mode) {
+			return mode === "inject" || mode === "open";
+		}
 		//#endregion
 		//#region client/remote-value.js
 		function remoteValue(result) {
@@ -4692,7 +4700,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
 			const selected = graph.nodes.find((node) => node.id === selectedId);
 			const activeAttempt = selected ? task.attempts?.find((attempt) => attempt.taskId === selected.id && attempt.state === "RUNNING") : void 0;
-			const state = taskStatePresentation(task.state);
+			const waitingForDriver = waitingForSessionDriver(task);
+			const state = waitingForDriver ? {
+				label: "等待会话继续",
+				tone: "warning"
+			} : taskStatePresentation(task.state);
 			const attached = sessionId && task.sessionLinks?.some((link) => link.sessionId === sessionId);
 			const invoke = (method, input) => {
 				setPending(true);
@@ -4707,23 +4719,20 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
 				const navigation = remoteValue(result);
 				const mode = resumeDriverMode(navigation, sessionId);
-				if (mode === "inject") {
+				if (shouldDriveBoundSession(mode)) {
 					if (typeof driveInSession !== "function") {
-						setError("任务已标记为运行：本会话无法自动注入驱动消息，请让模型调用 long_task_resume 继续执行。");
+						setError("任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。");
 						return;
 					}
 					setError(null);
-					Promise.resolve(driveInSession(sessionId, task.id, task.objective)).then((driven) => setError(driven ? "任务已标记为运行，已向本会话发送继续执行指令。" : "任务已标记为运行：本会话未能注入驱动消息，请直接让模型继续执行。")).catch(() => setError("任务已标记为运行：注入驱动消息失败，请直接让模型继续执行。"));
+					const targetSessionId = mode === "inject" ? sessionId : navigation.currentSessionId;
+					Promise.resolve(driveInSession(targetSessionId, task.id, task.objective)).then((driven) => {
+						if (mode === "open" && typeof openSession === "function") openSession(targetSessionId);
+						setError(driven ? "已向绑定会话发送继续执行指令。" : "绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。");
+					}).catch(() => setError("向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。"));
 					return;
 				}
-				if (mode === "open") {
-					if (typeof openSession === "function") {
-						setError(null);
-						openSession(navigation.currentSessionId);
-					} else setError("任务已标记为运行，但绑定会话不在当前窗口，且当前 DSH 槽未提供会话跳转能力。");
-					return;
-				}
-				setError("任务已标记为运行，但尚未绑定可跳转的会话：先点击“附加到当前会话”绑定本会话，再让模型继续执行。");
+				setError("任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。");
 			}).catch((value) => setError(String(value)));
 			const action = (label, recoveryResolution) => invoke("updateTask", {
 				taskId: task.id,
@@ -4767,7 +4776,6 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				cancel: "取消任务"
 			};
 			const externalResolutionRequired = task.state === "PAUSED" && task.tasks?.some((node) => node.state === "BLOCKED" && node.sideEffectClass === "external_effect");
-			const waitingForDriver = task.state === "RUNNING" && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
 			const quotaRecovery = task.quotaRecovery ? quotaRecoveryPresentation(task.quotaRecovery) : void 0;
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",

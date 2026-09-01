@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode } from '../client/task-model.js'
+import { cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
 import { quotaRecoveryPresentation } from '../client/task-presentation.js'
 
 test('prefers a running node then pending work for the Cockpit inspector', () => {
@@ -26,6 +26,17 @@ test('decides how to hand a web resume to a live parent session', () => {
   expect(resumeDriverMode({ currentSessionId: 'session-2' }, 'session-1')).toBe('open')
   expect(resumeDriverMode({}, 'session-1')).toBe('attach')
   expect(resumeDriverMode({ currentSessionId: 'session-2' }, undefined)).toBe('open')
+})
+
+test('marks a running task with no running node as waiting for its bound session', () => {
+  expect(waitingForSessionDriver({ state: 'RUNNING', tasks: [{ state: 'PENDING' }] })).toBe(true)
+  expect(waitingForSessionDriver({ state: 'RUNNING', tasks: [{ state: 'RUNNING' }] })).toBe(false)
+})
+
+test('drives both current and opened bound sessions after a web resume', () => {
+  expect(shouldDriveBoundSession('inject')).toBe(true)
+  expect(shouldDriveBoundSession('open')).toBe(true)
+  expect(shouldDriveBoundSession('attach')).toBe(false)
 })
 
 test('renders a due quota recovery as an actionable continuation message', () => {

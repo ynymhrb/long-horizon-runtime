@@ -1,6 +1,6 @@
 import React from 'react'
 import { TaskDag } from './TaskDag.js'
-import { cockpitDataState, initialSelectedNode, resumeDriverMode } from './task-model.js'
+import { cockpitDataState, initialSelectedNode, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from './task-model.js'
 import { quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 import { formatTaskEvent } from './task-events.js'
@@ -24,7 +24,8 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   )
   const selected = graph.nodes.find(node => node.id === selectedId)
   const activeAttempt = selected ? task.attempts?.find(attempt => attempt.taskId === selected.id && attempt.state === 'RUNNING') : undefined
-  const state = taskStatePresentation(task.state)
+  const waitingForDriver = waitingForSessionDriver(task)
+  const state = waitingForDriver ? { label: '等待会话继续', tone: 'warning' } : taskStatePresentation(task.state)
   const attached = sessionId && task.sessionLinks?.some(link => link.sessionId === sessionId)
   const invoke = (method, input) => {
     setPending(true); setError(null)
@@ -44,20 +45,19 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => {
     const navigation = remoteValue(result)
     const mode = resumeDriverMode(navigation, sessionId)
-    if (mode === 'inject') {
-      if (typeof driveInSession !== 'function') { setError('任务已标记为运行：本会话无法自动注入驱动消息，请让模型调用 long_task_resume 继续执行。'); return }
+    if (shouldDriveBoundSession(mode)) {
+      if (typeof driveInSession !== 'function') { setError('任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。'); return }
       setError(null)
-      Promise.resolve(driveInSession(sessionId, task.id, task.objective))
-        .then(driven => setError(driven ? '任务已标记为运行，已向本会话发送继续执行指令。' : '任务已标记为运行：本会话未能注入驱动消息，请直接让模型继续执行。'))
-        .catch(() => setError('任务已标记为运行：注入驱动消息失败，请直接让模型继续执行。'))
+      const targetSessionId = mode === 'inject' ? sessionId : navigation.currentSessionId
+      Promise.resolve(driveInSession(targetSessionId, task.id, task.objective))
+        .then(driven => {
+          if (mode === 'open' && typeof openSession === 'function') openSession(targetSessionId)
+          setError(driven ? '已向绑定会话发送继续执行指令。' : '绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。')
+        })
+        .catch(() => setError('向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。'))
       return
     }
-    if (mode === 'open') {
-      if (typeof openSession === 'function') { setError(null); openSession(navigation.currentSessionId) }
-      else setError('任务已标记为运行，但绑定会话不在当前窗口，且当前 DSH 槽未提供会话跳转能力。')
-      return
-    }
-    setError('任务已标记为运行，但尚未绑定可跳转的会话：先点击“附加到当前会话”绑定本会话，再让模型继续执行。')
+    setError('任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。')
   }).catch(value => setError(String(value)))
   const action = (label, recoveryResolution) => invoke('updateTask', { taskId: task.id, expectedRevision: task.controlRevision, action: label, ...(sessionId ? { sessionId } : {}), ...(recoveryResolution ? { recoveryResolution } : {}) })
   const attach = () => invoke(attached ? 'setCurrentSession' : 'attachCurrentSession', { taskId: task.id, sessionId })
@@ -67,9 +67,6 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const jump = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => { const target = remoteValue(result)?.currentSessionId; if (target && target === sessionId) setError('该任务绑定的会话就是当前会话，无需跳转。'); else if (target && typeof openSession === 'function') openSession(target); else setError(target ? '当前 DSH 槽未提供会话跳转能力。' : '此任务尚未关联可跳转的会话：先点击“附加到当前会话”绑定本会话，或从创建它的会话继续运行。') }).catch(value => setError(String(value)))
   const labels = { confirm: '确认执行', pause: '暂停任务', resume: '继续任务', cancel: '取消任务' }
   const externalResolutionRequired = task.state === 'PAUSED' && task.tasks?.some(node => node.state === 'BLOCKED' && node.sideEffectClass === 'external_effect')
-  // A web-side resume only marks the goal RUNNING; an agent session must drive
-  // the rounds. Surface that instead of implying the task is executing alone.
-  const waitingForDriver = task.state === 'RUNNING' && task.tasks.length > 0 && !task.tasks.some(node => node.state === 'RUNNING')
   const quotaRecovery = task.quotaRecovery ? quotaRecoveryPresentation(task.quotaRecovery) : undefined
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },

@@ -81,7 +81,7 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       const timeoutMs = input.timeoutMs ?? options.timeoutMs
       const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs)
       const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout])
-      let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }
+      let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }
       let dshSessionId: string | undefined
       try {
         try { settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId) }, timeoutMs) }
@@ -99,7 +99,8 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
         // Preserve the child session id in the summary so the operator can
         // jump into the child's own log when the detail is unavailable.
         const reason = timeout?.aborted === true ? `timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : settled.stopReason
-        return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId }
+        const quota = settled.stopReason === 'error' ? quotaFailure(settled.failureDiagnostic ?? '', Date.now()) : undefined
+        return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: quota?.failureKind ?? failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId, ...(quota === undefined ? {} : quota) }
       }
       try {
         const value = objectValue(settled.value, 'execution result')
@@ -128,7 +129,7 @@ async function runStructured(
   signal: AbortSignal = new AbortController().signal,
   onStarted?: (dshSessionId: string) => void,
   hardTimeoutMs?: number,
-): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }> {
+): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }> {
   const run = await subagents.start(options.providerName, {
     label,
     prompt: [{ type: 'text', text: prompt }],
@@ -161,10 +162,11 @@ async function runStructured(
   }
 }
 
-async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string }> {
+async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }> {
   try {
     const result = await run.result
-    return { stopReason: result.stopReason, value: result.structured ?? (result.stopReason === 'completed' ? parseJsonOutput(result.output) : undefined), dshSessionId: String(run.id) }
+    const failureDiagnostic = result.stopReason === 'error' ? childFailureDiagnostic(run) : undefined
+    return { stopReason: result.stopReason, value: result.structured ?? (result.stopReason === 'completed' ? parseJsonOutput(result.output) : undefined), dshSessionId: String(run.id), ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }) }
   } catch (error) {
     const failure = error instanceof Error ? error : new Error(String(error))
     Object.assign(failure, { dshSessionId: String(run.id) })
@@ -172,6 +174,17 @@ async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason
   } finally {
     await run.dispose()
   }
+}
+
+/** Recover the structured LLM failure that the one-shot seam flattens to `error`. */
+function childFailureDiagnostic(run: SubagentRun): string | undefined {
+  const events = run.localAgent?.session.events ?? []
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as unknown as { readonly type?: string; readonly data?: { readonly reason?: { readonly kind?: string; readonly error?: { readonly message?: unknown } } } }
+    const message = event.type === 'turn/end' && event.data?.reason?.kind === 'error' ? event.data.reason.error?.message : undefined
+    if (typeof message === 'string' && message.trim().length > 0) return message
+  }
+  return undefined
 }
 
 function parseJsonOutput(output: readonly ContentBlock[]): unknown {
@@ -196,10 +209,15 @@ function integer(value: unknown, label: string): number { if (!Number.isSafeInte
 
 function quotaFailure(message: string, now: number): Pick<ExecutionResult, 'failureKind' | 'retryAt' | 'failureDiagnostic'> | undefined {
   if (!/\b429\b|rate[ -]?limit|quota/i.test(message)) return undefined
-  const match = /(?:retry-after|retry_at|reset_at)\s*[:=]\s*(\S+)/i.exec(message)
-  const retryMs = retryAfterMillis(match?.[1], now)
+  const retryMs = retryAfterMillis(retryAfterValue(message), now)
   if (!Number.isFinite(retryMs) || retryMs <= now || retryMs - now > 86_400_000) return undefined
   return { failureKind: 'quota', retryAt: new Date(retryMs).toISOString(), failureDiagnostic: boundedDiagnostic(message) }
+}
+
+function retryAfterValue(message: string): string | undefined {
+  const named = /(?:retry-after|retry_at|reset_at)\s*[:=]\s*(\S+)/i.exec(message)?.[1]
+  if (named !== undefined) return named
+  return /\breset\s+at\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*(?:Z|[+-]\d{4})(?:\s+[A-Z]{2,5})?)/i.exec(message)?.[1]
 }
 
 function retryAfterMillis(value: string | undefined, now: number): number {

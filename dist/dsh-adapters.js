@@ -86,7 +86,8 @@ export function createDshExecutionAdapter(subagents, options) {
                     // Preserve the child session id in the summary so the operator can
                     // jump into the child's own log when the detail is unavailable.
                     const reason = timeout?.aborted === true ? `timeout after ${timeoutMs}ms; consider raising executionTimeoutMs or splitting the task` : settled.stopReason;
-                    return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId };
+                    const quota = settled.stopReason === 'error' ? quotaFailure(settled.failureDiagnostic ?? '', Date.now()) : undefined;
+                    return { status: 'failed', summary: `DSH child stopped: ${stopReasonSummary(reason, settled.dshSessionId)}`, failureKind: quota?.failureKind ?? failureKindOf(reason), artifacts: [], evidence: [], dshSessionId: settled.dshSessionId, ...(quota === undefined ? {} : quota) };
                 }
                 try {
                     const value = objectValue(settled.value, 'execution result');
@@ -149,7 +150,8 @@ async function runStructured(subagents, options, label, prompt, outputSchema, si
 async function settleAndDispose(run) {
     try {
         const result = await run.result;
-        return { stopReason: result.stopReason, value: result.structured ?? (result.stopReason === 'completed' ? parseJsonOutput(result.output) : undefined), dshSessionId: String(run.id) };
+        const failureDiagnostic = result.stopReason === 'error' ? childFailureDiagnostic(run) : undefined;
+        return { stopReason: result.stopReason, value: result.structured ?? (result.stopReason === 'completed' ? parseJsonOutput(result.output) : undefined), dshSessionId: String(run.id), ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }) };
     }
     catch (error) {
         const failure = error instanceof Error ? error : new Error(String(error));
@@ -159,6 +161,17 @@ async function settleAndDispose(run) {
     finally {
         await run.dispose();
     }
+}
+/** Recover the structured LLM failure that the one-shot seam flattens to `error`. */
+function childFailureDiagnostic(run) {
+    const events = run.localAgent?.session.events ?? [];
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        const message = event.type === 'turn/end' && event.data?.reason?.kind === 'error' ? event.data.reason.error?.message : undefined;
+        if (typeof message === 'string' && message.trim().length > 0)
+            return message;
+    }
+    return undefined;
 }
 function parseJsonOutput(output) {
     const text = output.filter((block) => block.type === 'text').map(block => block.text).join('\n').trim();
@@ -190,11 +203,16 @@ function integer(value, label) { if (!Number.isSafeInteger(value))
 function quotaFailure(message, now) {
     if (!/\b429\b|rate[ -]?limit|quota/i.test(message))
         return undefined;
-    const match = /(?:retry-after|retry_at|reset_at)\s*[:=]\s*(\S+)/i.exec(message);
-    const retryMs = retryAfterMillis(match?.[1], now);
+    const retryMs = retryAfterMillis(retryAfterValue(message), now);
     if (!Number.isFinite(retryMs) || retryMs <= now || retryMs - now > 86_400_000)
         return undefined;
     return { failureKind: 'quota', retryAt: new Date(retryMs).toISOString(), failureDiagnostic: boundedDiagnostic(message) };
+}
+function retryAfterValue(message) {
+    const named = /(?:retry-after|retry_at|reset_at)\s*[:=]\s*(\S+)/i.exec(message)?.[1];
+    if (named !== undefined)
+        return named;
+    return /\breset\s+at\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*(?:Z|[+-]\d{4})(?:\s+[A-Z]{2,5})?)/i.exec(message)?.[1];
 }
 function retryAfterMillis(value, now) {
     if (value === undefined)
