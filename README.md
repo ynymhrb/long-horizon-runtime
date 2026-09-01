@@ -126,4 +126,12 @@ pnpm build
 pnpm pack --dry-run
 ```
 
+### ARIS one-task pilot
+
+The repository includes a configuration-driven, one-seed evidence runner for
+comparing ARIS only against ARIS with this plugin. It does not install either
+plugin or make a research-quality claim; it records exactly what the two
+operator-supplied commands did. See
+[validation/aris-pilot/README.md](validation/aris-pilot/README.md).
+
 The implementation roadmap, including V5 heterogeneous multi-agent routing, is in [docs/roadmaps/long-task-runtime-roadmap.md](docs/roadmaps/long-task-runtime-roadmap.md).
