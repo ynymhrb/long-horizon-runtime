@@ -16,6 +16,7 @@ export function validatePlan(draft: PlanDraft): ValidatedPlan {
     if (task.id.trim().length === 0) throw new PlanValidationError('task id must not be empty')
     if (tasks.has(task.id)) throw new PlanValidationError(`duplicate task id: ${task.id}`)
     if (task.objective.trim().length === 0) throw new PlanValidationError(`task ${task.id} has an empty objective`)
+    if (task.summary !== undefined && (typeof task.summary !== 'string' || task.summary.trim().length === 0)) throw new PlanValidationError(`task ${task.id} has an invalid summary`)
     if (task.dependsOn.includes(task.id)) throw new PlanValidationError(`task ${task.id} depends on itself`)
     if (task.priority !== undefined && (!Number.isSafeInteger(task.priority))) throw new PlanValidationError(`task ${task.id} priority must be a safe integer`)
     if (task.sideEffectClass !== undefined && !['read_only', 'idempotent', 'external_effect'].includes(task.sideEffectClass)) throw new PlanValidationError(`task ${task.id} has invalid sideEffectClass`)

@@ -18,6 +18,8 @@ export type ArtifactType = typeof V1_ARTIFACT_TYPES[number];
 export interface TaskDraft {
     readonly id: string;
     readonly objective: string;
+    /** Concise planner-generated label for task lists and DAG nodes. */
+    readonly summary?: string;
     readonly dependsOn: readonly string[];
     readonly priority?: number;
     readonly sideEffectClass?: SideEffectClass;

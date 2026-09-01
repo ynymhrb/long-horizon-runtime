@@ -8,6 +8,12 @@ export function truncateGraphText(value, maxCharacters) {
   return value.length <= maxCharacters ? value : `${value.slice(0, Math.max(0, maxCharacters - 1))}…`
 }
 
+/** Present a concise planner summary while keeping historical plans readable. */
+export function taskNodeLabelPresentation(node) {
+  const title = typeof node.summary === 'string' && node.summary.trim() ? node.summary : node.objective
+  return { label: truncateGraphText(title, 100), title }
+}
+
 /** Prevent a folded two-node graph from being auto-enlarged to fill the SVG. */
 export function stableCanvasSize({ width, height }) {
   void width; void height
