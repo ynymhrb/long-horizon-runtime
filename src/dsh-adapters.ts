@@ -130,12 +130,14 @@ async function runStructured(
   onStarted?: (dshSessionId: string) => void,
   hardTimeoutMs?: number,
 ): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }> {
+  const parent = currentParent()
+  const agentOptions = mergeChildAgentOptions(parent, options.agentOptions)
   const run = await subagents.start(options.providerName, {
     label,
     prompt: [{ type: 'text', text: prompt }],
-    parent: currentParent(),
+    parent,
     signal,
-    ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions as never }),
+    ...(agentOptions === undefined ? {} : { agentOptions }),
     toolFilter: { deny: [...CHILD_TASK_TOOL_DENY] },
     outputSchema: outputSchema as never,
   })
@@ -160,6 +162,28 @@ async function runStructured(
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
+}
+
+/**
+ * Resolve the child's `agentOptions` for one planner/execution start. Children
+ * inherit the provider/model of the parent's ACTIVE request route — the durable
+ * `request/header` config — rather than the parent agent's creation options,
+ * which can carry a stale or fallback route that never served a request. An
+ * explicit deployment `defaultAgentProfile` remains a higher-priority override.
+ * @returns a merged route object, or undefined when there is nothing to pass.
+ */
+function mergeChildAgentOptions(parent: Agent, deploymentOverride: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const config = parent.session?.requestHeader?.()?.config as { readonly provider?: unknown; readonly model?: unknown } | undefined
+  const inheritedRoute = config === undefined ? {} : pickRoute(config)
+  const merged = { ...inheritedRoute, ...(deploymentOverride ?? {}) }
+  return Object.keys(merged).length === 0 ? undefined : merged
+}
+
+/** The parent request route as child agentOptions, only when both names are nonblank. */
+function pickRoute(config: { readonly provider?: unknown; readonly model?: unknown }): Record<string, string> {
+  const provider = typeof config.provider === 'string' ? config.provider.trim() : ''
+  const model = typeof config.model === 'string' ? config.model.trim() : ''
+  return provider.length === 0 || model.length === 0 ? {} : { provider, model }
 }
 
 async function settleAndDispose(run: SubagentRun): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }> {

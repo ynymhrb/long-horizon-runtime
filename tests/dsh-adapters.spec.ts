@@ -37,6 +37,66 @@ describe('DSH adapters', () => {
     expect(disposed).toBe(true)
   })
 
+  test('carries the active parent request route into a planner child start', async () => {
+    let request: Record<string, unknown> | undefined
+    const subagents = {
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child-session-route', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { revision: 1, tasks: [{ id: 'research', objective: 'research', dependsOn: [] }] } }), async dispose() {} }
+      },
+    }
+    const planner = createDshPlannerAdapter(subagents as never, { providerName: 'planner' })
+    const parent = { id: 'parent-route', session: { requestHeader: () => ({ config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } }) } } as never
+
+    await withDshParent(parent, () => planner.plan({ goalId: 'goal-1', objective: 'research topic', constraints: [] }))
+
+    expect(request?.agentOptions).toMatchObject({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  })
+
+  test('carries the active parent request route into an execution child start', async () => {
+    let request: Record<string, unknown> | undefined
+    const adapter = createDshExecutionAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child-route', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { summary: 'done', artifacts: [], evidence: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'worker' })
+    const parent = { id: 'parent-route-exec', session: { requestHeader: () => ({ config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } }) } } as never
+
+    await withDshParent(parent, () => adapter.execute({ attemptId: 'a', taskId: 't', signal: new AbortController().signal, context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] } }))
+
+    expect(request?.agentOptions).toMatchObject({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  })
+
+  test('lets an explicit deployment defaultAgentProfile override the inherited parent route', async () => {
+    let request: Record<string, unknown> | undefined
+    const planner = createDshPlannerAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child-override', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { revision: 1, tasks: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'planner', agentOptions: { provider: 'override-p', model: 'override-m' } })
+    const parent = { id: 'parent-override', session: { requestHeader: () => ({ config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } }) } } as never
+
+    await withDshParent(parent, () => planner.plan({ goalId: 'g', objective: 'o', constraints: [] }))
+
+    expect(request?.agentOptions).toMatchObject({ provider: 'override-p', model: 'override-m' })
+  })
+
+  test('omits agentOptions when the parent has no active request route', async () => {
+    let request: Record<string, unknown> | undefined
+    const planner = createDshPlannerAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child-no-route', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { revision: 1, tasks: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'planner' })
+
+    await withDshParent({ id: 'parent-no-session' } as never, () => planner.plan({ goalId: 'g', objective: 'o', constraints: [] }))
+
+    expect(request?.agentOptions).toBeUndefined()
+  })
+
   test('requires the planner to generate a concise summary for every task', async () => {
     let request: Record<string, unknown> | undefined
     const planner = createDshPlannerAdapter({

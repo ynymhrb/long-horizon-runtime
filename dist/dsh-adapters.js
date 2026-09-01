@@ -113,12 +113,14 @@ export function createDshExecutionAdapter(subagents, options) {
     };
 }
 async function runStructured(subagents, options, label, prompt, outputSchema, signal = new AbortController().signal, onStarted, hardTimeoutMs) {
+    const parent = currentParent();
+    const agentOptions = mergeChildAgentOptions(parent, options.agentOptions);
     const run = await subagents.start(options.providerName, {
         label,
         prompt: [{ type: 'text', text: prompt }],
-        parent: currentParent(),
+        parent,
         signal,
-        ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions }),
+        ...(agentOptions === undefined ? {} : { agentOptions }),
         toolFilter: { deny: [...CHILD_TASK_TOOL_DENY] },
         outputSchema: outputSchema,
     });
@@ -146,6 +148,26 @@ async function runStructured(subagents, options, label, prompt, outputSchema, si
         if (timer !== undefined)
             clearTimeout(timer);
     }
+}
+/**
+ * Resolve the child's `agentOptions` for one planner/execution start. Children
+ * inherit the provider/model of the parent's ACTIVE request route — the durable
+ * `request/header` config — rather than the parent agent's creation options,
+ * which can carry a stale or fallback route that never served a request. An
+ * explicit deployment `defaultAgentProfile` remains a higher-priority override.
+ * @returns a merged route object, or undefined when there is nothing to pass.
+ */
+function mergeChildAgentOptions(parent, deploymentOverride) {
+    const config = parent.session?.requestHeader?.()?.config;
+    const inheritedRoute = config === undefined ? {} : pickRoute(config);
+    const merged = { ...inheritedRoute, ...(deploymentOverride ?? {}) };
+    return Object.keys(merged).length === 0 ? undefined : merged;
+}
+/** The parent request route as child agentOptions, only when both names are nonblank. */
+function pickRoute(config) {
+    const provider = typeof config.provider === 'string' ? config.provider.trim() : '';
+    const model = typeof config.model === 'string' ? config.model.trim() : '';
+    return provider.length === 0 || model.length === 0 ? {} : { provider, model };
 }
 async function settleAndDispose(run) {
     try {
