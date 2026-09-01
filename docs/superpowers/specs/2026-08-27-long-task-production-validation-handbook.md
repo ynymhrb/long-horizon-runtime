@@ -246,3 +246,49 @@ either resolved, accepted as a product decision, or retained with an owner.
 4. Reproduce candidate bugs with the triager's oracle.
 5. Convert confirmed bugs into a minimal deterministic regression scenario.
 6. Track false positives as prompt counterexamples; retain original evidence.
+
+## Suite status
+
+Status entries are append-only and revision-fenced: each entry records one
+suite run and never rewrites an earlier entry.
+
+### 2026-09-02 -- First validation suite: implemented and executed
+
+The first validation suite (35 scenarios: 20 state/safety/recovery, 10 fault
+injection, 5 UI) is implemented under `scenarios/` and executed against the
+built runtime (`dist/`) through the deterministic runner
+(`validation/runner/cli.mjs`). Every scenario satisfies the contract in
+"Scenario contract" (required fields, unambiguous `read_only` enforcement,
+executable hard assertions with oracle bindings, `evidence_required`,
+`llm_review`, `cleanup`). The runner, triager and metrics tooling live under
+`validation/` and are covered by the self-tests in `tests/`.
+
+Results:
+
+- Deterministic runs: 30/30 pass (LT-STATE-001..014, LT-RECOVERY-001..006,
+  LT-FAULT-001..010); 0 fail; 0 inconclusive.
+- UI runs: LT-UI-001..005 recorded as `not_run` per handbook policy -- no
+  disposable DSH Web host and browser automation was available, so the
+  live-browser flows were not executed; each not-run bundle was routed through
+  the deterministic no-LLM triager and reviewed (outcome `product_decision`).
+- Evidence: one immutable 8-file bundle per scenario under
+  `validation/evidence/<scenario>/<run-id>/` (run.json, commands.ndjson,
+  task.json, events.json, snapshot.json, artifacts.json, assertions.json,
+  environment.json), captured before workspace/database cleanup. Each run used
+  a unique disposable workspace and a fresh durable database.
+- Metrics (ten): total_executions 35; hard_pass_rate 30/35 = 0.857;
+  failure_rate_by_risk 0 (critical 0/8, high 0/23, medium 0/4);
+  failure_rate_by_tag 0; timeout_rate 0/35; evidence_completeness_rate
+  35/35 = 1.0; llm_candidate_count 0; candidate_confirmation_rate 0/0;
+  median_reproduction_time_ms null; permanent_scenarios_added 0.
+- Release gates: all four PASS (verdict pass): critical_high_deterministic_pass
+  (27/27 critical/high deterministic executions passed),
+  no_unreviewed_hard_failures, no_external_effect_violation (zero hard stops),
+  ui_findings_dispositioned (0 findings; 5 UI runs reviewed).
+- Reports: `validation/reports/` (suite-report.json, execution-summary.md,
+  evidence-inventory.json, reviews-ledger.json, metrics-gates-triage.md);
+  triage reports under `validation/triage/output/`. All generated run
+  artifacts are gitignored and never committed.
+- Recorded by commits: `ec8f136` (.gitignore), `557897d` (35 scenarios),
+  `87b8523` (runner/triage/metrics tooling), `7bc0469` (self-tests), and the
+  docs commit that added this status entry.
