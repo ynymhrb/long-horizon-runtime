@@ -21,7 +21,7 @@ const PLAN_SCHEMA = {
         tasks: {
             type: 'array', items: {
                 type: 'object', properties: {
-                    id: { type: 'string' }, objective: { type: 'string' },
+                    id: { type: 'string' }, objective: { type: 'string' }, summary: { type: 'string' },
                     dependsOn: { type: 'array', items: { type: 'string' } },
                     priority: { type: 'number' },
                     inputContract: { type: 'object' }, outputContract: { type: 'object' },
@@ -29,7 +29,7 @@ const PLAN_SCHEMA = {
                     retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer' } }, required: ['maxAttempts'], additionalProperties: false },
                     sideEffectClass: { type: 'string', enum: ['read_only', 'idempotent', 'external_effect'] }, validator: { type: 'string' },
                     timeoutMs: { type: 'integer' },
-                }, required: ['id', 'objective', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
+                }, required: ['id', 'objective', 'summary', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
             },
         },
     }, required: ['revision', 'tasks'], additionalProperties: false,
@@ -46,7 +46,7 @@ export function createDshPlannerAdapter(subagents, options) {
     requireProviderName(options.providerName);
     return {
         async plan(input) {
-            const result = await runStructured(subagents, options, 'Long-task planner', plannerPrompt(input), PLAN_SCHEMA, input.signal);
+            const result = await runStructured(subagents, options, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal);
             if (result.stopReason !== 'completed')
                 throw new Error(`DSH planner stopped: ${result.stopReason}`);
             const value = objectValue(result.value, 'planner');

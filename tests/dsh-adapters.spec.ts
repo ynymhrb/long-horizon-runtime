@@ -37,6 +37,23 @@ describe('DSH adapters', () => {
     expect(disposed).toBe(true)
   })
 
+  test('requires the planner to generate a concise summary for every task', async () => {
+    let request: Record<string, unknown> | undefined
+    const planner = createDshPlannerAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { revision: 1, tasks: [{ id: 'research', objective: '完整任务说明', summary: '检索资料', dependsOn: [] }] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'planner' })
+
+    await withDshParent({ id: 'parent' } as never, () => planner.plan({ goalId: 'goal-1', objective: 'research topic', constraints: [] }))
+
+    const taskSchema = (request!.outputSchema as { properties: { tasks: { items: { properties: Record<string, unknown>; required: string[] } } } }).properties.tasks.items
+    expect(taskSchema.properties.summary).toEqual({ type: 'string' })
+    expect(taskSchema.required).toContain('summary')
+    expect((request!.prompt as Array<{ text: string }>)[0]!.text).toContain('summary')
+  })
+
   test('enumerates the V1 artifact types in the execution result schema so children learn them up front', async () => {
     let request: Record<string, unknown> | undefined
     const adapter = createDshExecutionAdapter({

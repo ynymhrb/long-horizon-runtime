@@ -4025,6 +4025,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		function truncateGraphText(value, maxCharacters) {
 			return value.length <= maxCharacters ? value : `${value.slice(0, Math.max(0, maxCharacters - 1))}…`;
 		}
+		/** Present a concise planner summary while keeping historical plans readable. */
+		function taskNodeLabelPresentation(node) {
+			const title = typeof node.summary === "string" && node.summary.trim() ? node.summary : node.objective;
+			return {
+				label: truncateGraphText(title, 100),
+				title
+			};
+		}
 		/** Prevent a folded two-node graph from being auto-enlarged to fill the SVG. */
 		function stableCanvasSize({ width, height }) {
 			return {
@@ -4516,6 +4524,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				});
 			}), ...graph.nodes.map((node) => {
 				const state = taskStatePresentation(node.state);
+				const title = taskNodeLabelPresentation(node);
 				const selected = node.id === selectedId;
 				const collapsed = collapsedIds.has(node.id);
 				const hiddenCount = visible.hiddenBy.get(node.id)?.length ?? 0;
@@ -4525,7 +4534,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					transform: `translate(${node.x} ${node.y})`,
 					role: "button",
 					tabIndex: 0,
-					"aria-label": `${node.id} ${node.objective}`,
+					"aria-label": `${node.id} ${title.title}`,
 					onClick: () => onSelect(node.id),
 					onKeyDown: (event) => {
 						if (event.key === "Enter" || event.key === " ") onSelect(node.id);
@@ -4542,7 +4551,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					x: 12,
 					y: 47,
 					className: "ltr-node-objective"
-				}, truncateGraphText(node.objective, 14)), e$4("text", {
+				}, e$4("title", null, title.title), truncateGraphText(title.label, 14)), e$4("text", {
 					x: 12,
 					y: 64,
 					className: "ltr-node-state"

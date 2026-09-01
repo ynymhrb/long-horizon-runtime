@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { LANE_GAP, layoutTaskGraph, NODE_HEIGHT, NODE_WIDTH, stableCanvasSize, truncateGraphText, visibleTaskGraph } from '../client/task-graph.js'
+import { LANE_GAP, layoutTaskGraph, NODE_HEIGHT, NODE_WIDTH, stableCanvasSize, taskNodeLabelPresentation, truncateGraphText, visibleTaskGraph } from '../client/task-graph.js'
 import { dagToneCss, formatTaskProgress, taskStatePresentation, taskStripPresentation } from '../client/task-presentation.js'
 
 describe('long task DAG layout', () => {
@@ -148,6 +148,19 @@ test('collapsing a branch hides only exclusive downstream work and retains share
 test('truncates SVG node labels before they can exceed the fixed node width', () => {
   expect(truncateGraphText('这是一个很长很长很长的中文任务目标', 8)).toBe('这是一个很长很…')
   expect(truncateGraphText('short', 8)).toBe('short')
+})
+
+test('uses a task summary for DAG labels, bounds it to 100 characters, and preserves the full summary for hover', () => {
+  const summary = 'a'.repeat(101)
+
+  expect(taskNodeLabelPresentation({ objective: '详细任务说明', summary })).toEqual({
+    label: `${'a'.repeat(99)}…`,
+    title: summary,
+  })
+})
+
+test('falls back to the task objective for historical nodes without a summary', () => {
+  expect(taskNodeLabelPresentation({ objective: '旧计划任务说明' })).toEqual({ label: '旧计划任务说明', title: '旧计划任务说明' })
 })
 
 test('keeps a minimum SVG canvas after a branch is folded', () => {
