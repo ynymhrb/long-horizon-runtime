@@ -9,7 +9,7 @@ Long Horizon Runtime keeps multi-step work reviewable when plans change, executi
 | What you get | What happens in a long task | Evidence boundary |
 | --- | --- | --- |
 | Safe replanning | Goal changes and validator failures leave revisioned decisions and durable evidence. A replan may be applied automatically only when the policy permits it. | Bounded unfinished `read_only` work only; external effects and completed work require confirmation. |
-| Inspectable progress | The Task Cockpit presents task state, dependency DAG, status legend, and audit timeline so the current plan and its progress can be examined. | The current product capture below shows a completed DAG and legend; the formal UI scenarios are linked, not reported as passed. |
+| Inspectable progress | The Task Cockpit shows a dependency DAG and persistent status legend for the completed work pictured below. | The current product capture below shows a completed DAG and legend; the formal UI scenarios are linked, not reported as passed. |
 | Durable recovery | An interruption is recorded as a durable attempt. A permitted `read_only` retry or resume can continue with a distinct attempt record. | Interrupted work is recorded; retry/resume follows the task safety policy. |
 
 ![Completed Task Cockpit DAG with seven of seven tasks, dependency edges, and a persistent status legend](docs/assets/readme/task-dag-completed.png)
