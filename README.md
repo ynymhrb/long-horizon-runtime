@@ -4,7 +4,7 @@
 
 > 让 DeepSeek Harness 中跨回合、可中断的多步骤工作，拥有可审计的持久状态。
 
-[是什么](#是什么) · [核心能力](#核心能力) · [快速开始](#快速开始) · [在普通对话中使用](#在普通对话中使用) · [安全与证据](#安全与证据) · [开发](#开发)
+[是什么](#是什么) · [核心能力](#核心能力) · [快速开始](#快速开始) · [在普通对话中使用](#在普通对话中使用)
 
 `@deepseek-ai/dsh-long-task-runtime` 为 [DeepSeek Harness](https://github.com/deepseek-harness/deepseek-harness) 提供可持久化、可检查的长任务能力，无需修改 DSH 源码。任务状态写入本机 SQLite 事件日志；DSH 对话和子代理只是执行界面，而非状态真相来源。
 
@@ -59,19 +59,9 @@ dsh plugin --profile web add .
 dsh web
 ```
 
-### 安装已构建 tarball
-
-```bash
-pnpm pack
-dsh plugin --profile web add ./deepseek-ai-dsh-long-task-runtime-<version>.tgz
-dsh web
-```
-
-插件包自带 `cordis.patch.yml`，默认配置会随安装写入。安装或使用时不应修改 DSH 源码。
-
 ## 在普通对话中使用
 
-默认路由模式是 `advisory`：当工作需要计划、多个依赖阶段、子代理、任务产物、暂停/恢复、审计记录或跨会话继续时，模型可选择创建持久任务。简短的单会话进度跟踪仍可使用 DSH 原生目标；一次性问答不会创建任务。
+正常聊天即可：当工作需要计划、多个依赖步骤、暂停/恢复、审计记录或跨会话继续时，模型会创建可持久化的长任务；简短的一次性问答不会创建任务。
 
 ### 创建待确认的长任务
 
@@ -98,48 +88,3 @@ dsh web
 ```
 
 新对话可以绑定同一任务，并在任务条和 Task Area 中聚焦这份持久记录。
-
-### 路由配置
-
-```yaml
-routingMode: advisory
-```
-
-仅在刻意进行机器本地定制时，才在 Web profile 的 `cordis.patch.yml` 中为 `long-task-runtime` 添加：
-
-```yaml
-- id: long-task-runtime
-  config:
-    routingMode: strict
-```
-
-`strict` 会从顶层模型回合移除 DSH 原生的 `create_goal`、`get_goal` 与 `update_goal` schema。它不会为每个请求创建任务；它表示模型一旦创建持久目标，就必须使用 Long Horizon Runtime。由于原生轻量目标不再对该 profile 中的模型可用，这是高级部署选项。
-
-## 安全与证据
-
-- 新任务拥有稳定的 `lt_` ID；任务状态、计划、尝试、证据与产物均为追加式或修订式记录。
-- 自动重规划绝不会自动应用会扩大范围、触及外部副作用、使已完成工作失效，或停用已验证产物的变更。
-- 删除任务会先取消活跃工作，再归档；归档可在 30 天内恢复，之后才会清理。
-- 被中断的外部副作用节点会保持受阻状态，直到操作员明确处理其结果。
-- 由提供方报告的 LLM 配额重置会暂停受影响任务，而不消耗普通重试次数；主机重启后，Task Area 保留恢复时间，并要求从关联对话继续，而不会自行启动子代理。
-
-[验证手册](docs/superpowers/specs/2026-08-27-long-task-production-validation-handbook.md) 记录了 `30/30 deterministic state/recovery and fault-injection scenarios`。这是确定性场景证据，不是已完成的人工 UI 验收，也不宣称真实 LLM 验证。可复现的修订栅栏安全重规划、中断 `read_only` 恢复、以及验证失败后再进行允许重规划的契约分别为 [LT-STATE-008](scenarios/state-recovery/LT-STATE-008.yaml)、[LT-RECOVERY-003](scenarios/state-recovery/LT-RECOVERY-003.yaml) 和 [LT-FAULT-006](scenarios/fault-injection/LT-FAULT-006.yaml)。这些场景使用本地 fixture doubles 与一次性资源。
-
-## 存储与集成边界
-
-默认 bundle 将数据库存于 DSH Home 的 `long-task-runtime/long-task-runtime.sqlite`，文件产物存于 `long-task-runtime/artifacts`。浏览器端只调用插件 Typert remote API；包以附加方式注入 Task Area 和对话任务条。不修改任何 DSH 应用文件。
-
-导出的插件入口是 `apply(ctx, config)`。它提供 `ctx.longTaskRuntime`，并注册 `long_task_*` 工具；它不会替换 DSH 的 agent loop。
-
-## 开发
-
-```bash
-pnpm test
-pnpm typecheck
-pnpm build
-pnpm pack --dry-run
-```
-
-仓库含有一个配置驱动的单种子 ARIS 证据运行器，用来比较 ARIS 与“ARIS + 本插件”。它不安装任一插件，也不做研究级结论；只记录操作员提供的两条命令实际做了什么。详见 [validation/aris-pilot/README.md](validation/aris-pilot/README.md)。
-
-V5 异构多代理路由等实施路线见 [docs/roadmaps/long-task-runtime-roadmap.md](docs/roadmaps/long-task-runtime-roadmap.md)。

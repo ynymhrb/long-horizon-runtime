@@ -4,7 +4,7 @@
 
 > Durable, inspectable multi-step work for DeepSeek Harness chats.
 
-[Overview](#overview) · [Capabilities](#capabilities) · [Quick start](#quick-start) · [Use it from a normal chat](#use-it-from-a-normal-chat) · [Safety and evidence](#safety-and-evidence) · [Development](#development)
+[Overview](#overview) · [Capabilities](#capabilities) · [Quick start](#quick-start) · [Use it from a normal chat](#use-it-from-a-normal-chat)
 
 `@deepseek-ai/dsh-long-task-runtime` adds durable, inspectable long-running work to [DeepSeek Harness](https://github.com/deepseek-harness/deepseek-harness) without modifying DSH source. Task state lives in a local SQLite event log; DSH conversations and child agents are execution surfaces, never the source of truth.
 
@@ -59,19 +59,9 @@ dsh plugin --profile web add .
 dsh web
 ```
 
-### Install a built tarball
-
-```bash
-pnpm pack
-dsh plugin --profile web add ./deepseek-ai-dsh-long-task-runtime-<version>.tgz
-dsh web
-```
-
-The bundle contributes its own `cordis.patch.yml`; package defaults install with it. Do not modify DSH source to install or use the plugin.
-
 ## Use it from a normal chat
 
-The default routing mode is `advisory`: when work needs a plan, dependent stages, child agents, task artifacts, pause/recovery, audit history, or cross-session continuation, the model may choose a durable task. Short, single-session progress tracking can still use DSH's native goal feature. One-shot questions create no goal.
+Just chat normally: when work needs a plan, dependent stages, pause/recovery, audit history, or cross-session continuation, the model creates a durable long task. Short one-shot questions create no task.
 
 ### Create a draft long task
 
@@ -98,48 +88,3 @@ Continue lt_abc123. First show its current state and unfinished nodes.
 ```
 
 The new conversation can attach the task as its current task, so its task strip and Task Area focus on the same durable record.
-
-### Routing configuration
-
-```yaml
-routingMode: advisory
-```
-
-For an intentional machine-local customization only, add this to the `long-task-runtime` row in your Web profile's `cordis.patch.yml`:
-
-```yaml
-- id: long-task-runtime
-  config:
-    routingMode: strict
-```
-
-`strict` removes DSH-native `create_goal`, `get_goal`, and `update_goal` schemas from top-level model turns. It does not create a task for every request; it means that if the model creates a persistent goal, it must use Long Horizon Runtime. It is an advanced deployment option because native lightweight goals are no longer available to the model in that profile.
-
-## Safety and evidence
-
-- New tasks receive stable `lt_` IDs; task state, plans, attempts, evidence, and artifacts are append-only or revisioned.
-- Automatic replanning never applies a change that expands scope, touches external effects, invalidates completed work, or deactivates verified artifacts.
-- Deleting a task first cancels active work, then archives it. Archives are restorable for 30 days before purge.
-- An interrupted external-effect node remains blocked until an operator explicitly resolves its outcome.
-- A provider-reported LLM quota reset pauses the affected task without consuming its ordinary retry budget. After a host restart, Task Area preserves that recovery time and asks the user to continue from the linked conversation instead of autonomously starting a child.
-
-The [validation handbook](docs/superpowers/specs/2026-08-27-long-task-production-validation-handbook.md) records `30/30 deterministic state/recovery and fault-injection scenarios`. This is deterministic scenario evidence, not completed manual UI acceptance or a live-LLM validation claim. The reproducible contracts for a revision-fenced safe replan, interrupted `read_only` recovery, and validator-failure evidence before a permitted replan are [LT-STATE-008](scenarios/state-recovery/LT-STATE-008.yaml), [LT-RECOVERY-003](scenarios/state-recovery/LT-RECOVERY-003.yaml), and [LT-FAULT-006](scenarios/fault-injection/LT-FAULT-006.yaml). These cases use local fixture doubles and disposable resources.
-
-## Storage and integration boundary
-
-The default bundle stores its database under DSH Home at `long-task-runtime/long-task-runtime.sqlite` and file artifacts under `long-task-runtime/artifacts`. Browser code uses only the plugin's Typert remote API; the package injects additive Task Area and conversation task-strip slots. No DSH application file is patched.
-
-The exported plugin entry is `apply(ctx, config)`. It provides `ctx.longTaskRuntime` and registers `long_task_*` tools. It does **not** replace DSH's agent loop.
-
-## Development
-
-```bash
-pnpm test
-pnpm typecheck
-pnpm build
-pnpm pack --dry-run
-```
-
-The repository includes a configuration-driven, one-seed ARIS evidence runner that compares ARIS only against ARIS with this plugin. It installs neither plugin and makes no research-quality claim; it records exactly what the two operator-supplied commands did. See [validation/aris-pilot/README.md](validation/aris-pilot/README.md).
-
-The implementation roadmap, including V5 heterogeneous multi-agent routing, is in [docs/roadmaps/long-task-runtime-roadmap.md](docs/roadmaps/long-task-runtime-roadmap.md).
