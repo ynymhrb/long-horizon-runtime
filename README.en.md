@@ -52,6 +52,8 @@ The repository includes its compiled `dist/` bundle, so Git installation does no
 
 ### Install a local checkout
 
+From the repository root:
+
 ```bash
 dsh plugin --profile web add .
 dsh web
