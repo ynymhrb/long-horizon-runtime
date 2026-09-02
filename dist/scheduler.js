@@ -202,6 +202,20 @@ export class Scheduler {
                 this.adapter.cancel?.(attemptId);
             }
     }
+    /** Stop active child work and durably return its logical nodes to PENDING. */
+    pause(goalId) {
+        this.clearRetryAfter(goalId);
+        const events = [];
+        for (const [attemptId, active] of this.aborters) {
+            if (active.goalId !== goalId)
+                continue;
+            active.controller.abort();
+            this.adapter.cancel?.(attemptId);
+            events.push({ type: 'TaskInterrupted', goalId, taskId: active.taskId, payload: { attemptId, reason: 'user_requested_pause' } });
+        }
+        if (events.length > 0)
+            this.store?.transaction(() => this.store.append(events));
+    }
     /** Milliseconds until the earliest pending retry for this goal, or undefined when none is waiting. */
     nextRetryDelayMs(goalId) {
         let earliest;
@@ -262,7 +276,7 @@ export class Scheduler {
             executionSignal?.addEventListener('abort', relayAbort, { once: true });
         const attemptRevision = this.store.getGoal(goalId)?.revision ?? 1;
         const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`;
-        this.aborters.set(attemptId, { goalId, controller });
+        this.aborters.set(attemptId, { goalId, taskId: task.id, controller });
         let context;
         try {
             context = this.context(goalId, task);

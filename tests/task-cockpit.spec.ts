@@ -43,3 +43,8 @@ test('renders a due quota recovery as an actionable continuation message', () =>
   expect(quotaRecoveryPresentation({ retryAt: '2026-09-01T10:05:00.000Z', diagnostic: 'HTTP 429 rate limit' }, new Date('2026-09-01T10:06:00.000Z')))
     .toMatchObject({ tone: 'warning', label: '额度恢复时间已到，请在已关联会话中继续' })
 })
+
+test('renders an automatic quota recovery notice while work resumes', () => {
+  expect(quotaRecoveryPresentation(undefined, new Date(), { type: 'QuotaRecoveryResumed' }))
+    .toMatchObject({ tone: 'ongoing', label: '额度已恢复，正在自动继续执行' })
+})

@@ -6,6 +6,7 @@ import { RuntimeEventStore, type TaskSessionLink } from './event-store.js'
 import { Scheduler, type RecoveryResult } from './scheduler.js'
 import { ArtifactStore } from './artifacts.js'
 import { withDshParent } from './dsh-adapters.js'
+import { classifyAutomaticReplan } from './replan-policy.js'
 
 export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
 export interface OriginalGoalEdit { readonly objective: string; readonly reason: string; readonly source?: 'user' | 'model' }
@@ -125,14 +126,15 @@ export class LongTaskRuntime {
     try {
       const planned = await planWithValidation(this.planner, { goalId, objective: goal.objective, constraints: goal.constraints, baseRevision: goal.revision, trigger: { kind: 'validation_failed', taskId: trigger.task.id, reason: trigger.reason }, priorTasks: currentTasks })
       const candidate = [...planned.tasks.values()]
-      const safe = automaticReplanIsSafe(currentTasks, candidate)
+      const classification = classifyAutomaticReplan({ previous: currentTasks, candidate, failedTaskId: trigger.task.id, activeArtifacts: this.store.listActiveValidatedArtifacts(goalId) })
+      const safe = classification.outcome === 'auto_apply'
       const revision = goal.revision + 1
       const tasks = preserveCompletedTasks(currentTasks, candidate)
       this.store.transaction(() => this.store.append([
-        { type: 'DecisionRecorded', goalId, payload: { type: 'automatic_replan', outcome: safe ? 'auto_applied' : 'await_confirmation', trigger: { taskId: trigger.task.id, reason: trigger.reason } } },
+        { type: 'DecisionRecorded', goalId, payload: { type: 'automatic_replan', outcome: safe ? 'auto_applied' : 'await_confirmation', reasons: classification.reasons, trigger: { taskId: trigger.task.id, reason: trigger.reason } } },
         safe
           ? { type: 'PlanRevisionApplied', goalId, payload: { revision, tasks, trigger: { kind: 'validation_failed', taskId: trigger.task.id, reason: trigger.reason } } }
-          : { type: 'PlanProposed', goalId, payload: { revision, baseRevision: goal.revision, tasks, trigger: { kind: 'validation_failed', taskId: trigger.task.id, reason: trigger.reason } } },
+          : { type: 'PlanProposed', goalId, payload: { revision, baseRevision: goal.revision, tasks, trigger: { kind: 'validation_failed', taskId: trigger.task.id, reason: trigger.reason, reasons: classification.reasons } } },
       ]))
     } catch (error) {
       this.store.transaction(() => this.store.append([{ type: 'DecisionRecorded', goalId, payload: { type: 'automatic_replan_failed', taskId: trigger.task.id, reason: error instanceof Error ? error.message : String(error) } }, { type: 'GoalPaused', goalId, payload: { reason: `automatic replan failed for ${trigger.task.id}` } }]))
@@ -189,6 +191,15 @@ export class LongTaskRuntime {
     if (!['AWAITING_CONFIRMATION', 'RUNNING', 'PAUSED'].includes(goal.state)) throw new Error(`goal ${goalId} cannot be cancelled while ${goal.state}`)
     this.scheduler.cancel(goalId)
     this.cancelQuotaRecovery(goalId)
+    return this.view(goalId)
+  }
+  /** Pause scheduling and terminate all currently running child attempts. */
+  pauseGoal(goalId: string): GoalView {
+    const goal = this.requireGoal(goalId)
+    if (goal.state !== 'RUNNING') throw new Error(`goal ${goalId} is not running`)
+    this.scheduler.pause(goalId)
+    this.cancelQuotaRecovery(goalId)
+    this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: 'user_requested' } }]))
     return this.view(goalId)
   }
   /** Record the interruption cause before applying the caller-selected recovery policy. */
@@ -311,6 +322,7 @@ export class LongTaskRuntime {
       this.quotaRecoveryTimers.delete(goalId)
       if (this.store.getQuotaRecovery(goalId)?.attemptId !== recovery.attemptId || this.store.getGoal(goalId)?.state !== 'PAUSED') return
       void withDshParent(executionParent as import('@deepseek-ai/dsh-agent').Agent, async () => {
+        this.store.transaction(() => this.store.append([{ type: 'QuotaRecoveryResumed', goalId, taskId: recovery.taskId, payload: { attemptId: recovery.attemptId, retryAt: recovery.retryAt } }]))
         await this.resumeGoal(goalId, executionParent)
       }).catch(() => undefined)
     }, delay))
@@ -330,21 +342,6 @@ export class LongTaskRuntime {
     const quotaRecovery = this.store.getQuotaRecovery(goalId)
     return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId)! }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) }
   }
-}
-
-function automaticReplanIsSafe(previous: readonly import('./domain.js').TaskNode[], candidate: readonly import('./domain.js').TaskNode[]): boolean {
-  const next = new Map(candidate.map(task => [task.id, task]))
-  for (const task of previous) {
-    if (task.state !== 'SUCCEEDED') continue
-    // A completed task's identity is structural: id, dependencies, and side
-    // effect class. Planner text edits to a completed task's objective are not
-    // plan changes and must not force a safe replan into confirmation.
-    const replacement = next.get(task.id)
-    if (replacement === undefined) return false
-    if (replacement.sideEffectClass !== task.sideEffectClass) return false
-    if (JSON.stringify(replacement.dependsOn) !== JSON.stringify(task.dependsOn)) return false
-  }
-  return candidate.every(task => task.sideEffectClass !== 'external_effect')
 }
 
 function preserveCompletedTasks(previous: readonly import('./domain.js').TaskNode[], candidate: readonly import('./domain.js').TaskNode[]): import('./domain.js').TaskNode[] {

@@ -136,11 +136,7 @@ export class TaskControlApi {
         return { kind: 'applied', task: this.advance(taskId, task.controlRevision) };
     }
     pause(taskId) {
-        const task = this.requireTask(taskId);
-        if (task.state !== 'RUNNING')
-            throw new Error(`task ${taskId} is not running`);
-        this.runtime.store.transaction(() => this.runtime.store.append([{ type: 'GoalPaused', goalId: taskId, payload: { reason: 'user_requested' } }]));
-        return this.requireTask(taskId);
+        return this.runtime.pauseGoal(taskId);
     }
     /**
      * Idempotently ensure a session is durably linked to the task and is its

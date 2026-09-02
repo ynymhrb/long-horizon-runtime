@@ -44,7 +44,7 @@ export class Scheduler {
   private readonly validators: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   private readonly artifactStore: ArtifactStore | undefined
   private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
-  private readonly aborters = new Map<string, { readonly goalId: string; readonly controller: AbortController }>()
+  private readonly aborters = new Map<string, { readonly goalId: string; readonly taskId: string; readonly controller: AbortController }>()
   /** Resolves an in-process dispatch when its durable lease is terminalized. */
   private readonly livenessSettlers = new Map<string, () => void>()
   /** Durable retry due timestamps keyed by `${goalId}\u0000${taskId}`; respected by ready selection. */
@@ -206,6 +206,19 @@ export class Scheduler {
     for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); this.adapter.cancel?.(attemptId) }
   }
 
+  /** Stop active child work and durably return its logical nodes to PENDING. */
+  pause(goalId: string): void {
+    this.clearRetryAfter(goalId)
+    const events: Array<{ type: string; goalId: string; taskId: string; payload: Record<string, unknown> }> = []
+    for (const [attemptId, active] of this.aborters) {
+      if (active.goalId !== goalId) continue
+      active.controller.abort()
+      this.adapter.cancel?.(attemptId)
+      events.push({ type: 'TaskInterrupted', goalId, taskId: active.taskId, payload: { attemptId, reason: 'user_requested_pause' } })
+    }
+    if (events.length > 0) this.store?.transaction(() => this.store!.append(events))
+  }
+
   /** Milliseconds until the earliest pending retry for this goal, or undefined when none is waiting. */
   nextRetryDelayMs(goalId: string): number | undefined {
     let earliest: number | undefined
@@ -259,7 +272,7 @@ export class Scheduler {
     else executionSignal?.addEventListener('abort', relayAbort, { once: true })
     const attemptRevision = this.store!.getGoal(goalId)?.revision ?? 1
     const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`
-    this.aborters.set(attemptId, { goalId, controller })
+    this.aborters.set(attemptId, { goalId, taskId: task.id, controller })
     let context: ContextView
     try { context = this.context(goalId, task) }
     catch (error) {

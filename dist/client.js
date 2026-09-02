@@ -4386,7 +4386,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				label: "未知状态"
 			};
 		}
-		function quotaRecoveryPresentation(recovery, now = /* @__PURE__ */ new Date()) {
+		function quotaRecoveryPresentation(recovery, now = /* @__PURE__ */ new Date(), latestRecoveryEvent) {
+			if (latestRecoveryEvent?.type === "QuotaRecoveryResumed") return {
+				tone: "ongoing",
+				label: "额度已恢复，正在自动继续执行"
+			};
+			if (!recovery) return void 0;
 			if (Date.parse(recovery.retryAt) <= now.getTime()) return {
 				tone: "warning",
 				label: "额度恢复时间已到，请在已关联会话中继续"
@@ -4661,6 +4666,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			DecisionRecorded: "已记录决策",
 			TaskRetryBudgetExhausted: "重试预算已耗尽",
 			QuotaRecoveryScheduled: "已计划额度恢复",
+			QuotaRecoveryResumed: "额度已恢复，已自动继续执行",
 			TaskInterrupted: "节点已中断",
 			TaskAttemptSuperseded: "尝试已被新修订取代",
 			TaskReady: "节点已就绪",
@@ -4785,7 +4791,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				cancel: "取消任务"
 			};
 			const externalResolutionRequired = task.state === "PAUSED" && task.tasks?.some((node) => node.state === "BLOCKED" && node.sideEffectClass === "external_effect");
-			const quotaRecovery = task.quotaRecovery ? quotaRecoveryPresentation(task.quotaRecovery) : void 0;
+			const latestQuotaRecovery = [...task.recentEvents ?? []].reverse().find((event) => event.type === "QuotaRecoveryResumed");
+			const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, /* @__PURE__ */ new Date(), latestQuotaRecovery);
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
