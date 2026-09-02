@@ -17,7 +17,9 @@ export function taskStatePresentation(state) {
   return STATES[state] ?? { tone: 'muted', label: '未知状态' }
 }
 
-export function quotaRecoveryPresentation(recovery, now = new Date()) {
+export function quotaRecoveryPresentation(recovery, now = new Date(), latestRecoveryEvent) {
+  if (latestRecoveryEvent?.type === 'QuotaRecoveryResumed') return { tone: 'ongoing', label: '额度已恢复，正在自动继续执行' }
+  if (!recovery) return undefined
   if (Date.parse(recovery.retryAt) <= now.getTime()) return { tone: 'warning', label: '额度恢复时间已到，请在已关联会话中继续' }
   return { tone: 'warning', label: `LLM 额度耗尽，预计 ${new Date(recovery.retryAt).toLocaleString()} 后重试` }
 }

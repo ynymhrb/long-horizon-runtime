@@ -67,7 +67,8 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const jump = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => { const target = remoteValue(result)?.currentSessionId; if (target && target === sessionId) setError('该任务绑定的会话就是当前会话，无需跳转。'); else if (target && typeof openSession === 'function') openSession(target); else setError(target ? '当前 DSH 槽未提供会话跳转能力。' : '此任务尚未关联可跳转的会话：先点击“附加到当前会话”绑定本会话，或从创建它的会话继续运行。') }).catch(value => setError(String(value)))
   const labels = { confirm: '确认执行', pause: '暂停任务', resume: '继续任务', cancel: '取消任务' }
   const externalResolutionRequired = task.state === 'PAUSED' && task.tasks?.some(node => node.state === 'BLOCKED' && node.sideEffectClass === 'external_effect')
-  const quotaRecovery = task.quotaRecovery ? quotaRecoveryPresentation(task.quotaRecovery) : undefined
+  const latestQuotaRecovery = [...(task.recentEvents ?? [])].reverse().find(event => event.type === 'QuotaRecoveryResumed')
+  const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, new Date(), latestQuotaRecovery)
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },
       e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'),

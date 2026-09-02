@@ -75,6 +75,8 @@ export declare class Scheduler {
     cancel(goalId: string): void;
     /** Stop in-flight child work without choosing a durable lifecycle transition. */
     interrupt(goalId: string): void;
+    /** Stop active child work and durably return its logical nodes to PENDING. */
+    pause(goalId: string): void;
     /** Milliseconds until the earliest pending retry for this goal, or undefined when none is waiting. */
     nextRetryDelayMs(goalId: string): number | undefined;
     private key;

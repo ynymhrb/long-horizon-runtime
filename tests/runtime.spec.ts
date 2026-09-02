@@ -115,6 +115,67 @@ describe('LongTaskRuntime', () => {
     expect(running.availableActions).toContain('pause')
   })
 
+  test('pausing aborts and durably interrupts an active child attempt', async () => {
+    let started!: () => void
+    const executing = new Promise<void>(resolve => { started = resolve })
+    let cancelled = 0
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = {
+      async execute(input) {
+        started()
+        await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true }))
+        return { status: 'failed', summary: 'child cancelled', failureKind: 'interrupted', artifacts: [], evidence: [] }
+      },
+      cancel() { cancelled += 1 },
+    }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const goal = await runtime.createGoal({ objective: 'pause child', planningMode: 'require_confirmation' })
+    await runtime.confirmGoal(goal.id)
+    runtime.startBackground(goal.id, {})
+    await executing
+
+    const paused = runtime.pauseGoal(goal.id)
+
+    expect(cancelled).toBe(1)
+    expect(paused.state).toBe('PAUSED')
+    expect(paused.attempts[0]?.state).toBe('INTERRUPTED')
+    expect(paused.tasks[0]?.state).toBe('PENDING')
+    await runtime.awaitBackground(goal.id)
+  })
+
+  test('ignores a late child success after pause and resumes with a new attempt', async () => {
+    let started!: () => void
+    const executing = new Promise<void>(resolve => { started = resolve })
+    let releaseFirst!: () => void
+    const firstResult = new Promise<void>(resolve => { releaseFirst = resolve })
+    let executions = 0
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = {
+      async execute() {
+        executions += 1
+        if (executions === 1) { started(); await firstResult }
+        return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] }
+      },
+      cancel() {},
+    }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const goal = await runtime.createGoal({ objective: 'resume after pause', planningMode: 'require_confirmation' })
+    await runtime.confirmGoal(goal.id)
+    runtime.startBackground(goal.id, {})
+    await executing
+
+    runtime.pauseGoal(goal.id)
+    releaseFirst()
+    await runtime.awaitBackground(goal.id)
+    const resumed = await runtime.resumeGoal(goal.id, {})
+
+    expect(executions).toBe(2)
+    expect(resumed.state).toBe('SUCCEEDED')
+    expect(resumed.attempts).toHaveLength(2)
+    expect(resumed.attempts[0]?.state).toBe('INTERRUPTED')
+    expect(resumed.attempts[1]?.state).toBe('SUCCEEDED')
+  })
+
   test('runs every superstep and terminalizes a successful goal', async () => {
     const calls: string[] = []
     const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'first'), strictTask('b', 'second', ['a'])] } } }
@@ -265,6 +326,7 @@ describe('LongTaskRuntime', () => {
 
       expect(executions).toBe(2)
       expect(runtime.getStatus(created.id)?.state).toBe('SUCCEEDED')
+      expect(runtime.store.listEvents(created.id, 0, 100).map(event => event.type)).toContain('QuotaRecoveryResumed')
     } finally {
       vi.useRealTimers()
     }
@@ -347,7 +409,7 @@ describe('LongTaskRuntime', () => {
     expect(events.slice(proposalIndex + 1).some(event => event.type === 'CheckpointCreated')).toBe(false)
   })
 
-  test('auto-applies a replan that only rewrites the text of a completed task and keeps its original objective', async () => {
+  test('holds a replan that rewrites the text of a completed task for confirmation', async () => {
     let planningCalls = 0
     const planner: PlannerAdapter = { async plan(input) {
       planningCalls += 1
@@ -364,11 +426,9 @@ describe('LongTaskRuntime', () => {
     const runtime = new LongTaskRuntime(planner, execution, { autoReplan: true })
     const goal = await runtime.createGoal({ objective: 'text rewrite' }, {})
 
-    expect(goal.state).toBe('SUCCEEDED')
-    expect(goal.revision).toBe(2)
-    // The planner's text edit to the completed task must neither force a
-    // confirmation nor mutate the applied plan's historical objective.
-    expect(goal.tasks.find(task => task.id === 'b')?.objective).toBe('second')
+    expect(goal.state).toBe('AWAITING_CONFIRMATION')
+    expect(goal.pendingProposal?.revision).toBe(2)
+    expect(goal.decisions.at(-1)?.payload.reasons).toEqual(expect.arrayContaining(['candidate changes succeeded task b']))
   })
 
   test('confirms without blocking and drives the remaining DAG in the background', async () => {

@@ -101,6 +101,8 @@ export declare class LongTaskRuntime {
     attachSession(goalId: string, sessionId: string, kind?: TaskSessionLink['kind']): GoalView;
     resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal): Promise<GoalView>;
     cancelGoal(goalId: string): GoalView;
+    /** Pause scheduling and terminate all currently running child attempts. */
+    pauseGoal(goalId: string): GoalView;
     /** Record the interruption cause before applying the caller-selected recovery policy. */
     interruptGoal(goalId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView;
     invalidateTask(goalId: string, taskId: string, reason: string, evidenceRefs?: readonly string[]): GoalView;
