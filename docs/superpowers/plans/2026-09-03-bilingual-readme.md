@@ -30,7 +30,7 @@
 - Produces reciprocal language links: `README.md` -> `README.en.md`, `README.en.md` -> `README.md`.
 - Produces matching anchors for overview, capabilities, installation, normal-chat use, safety/evidence, and development.
 
-- [ ] **Step 1: Replace the default entry with Chinese-first navigation and concise positioning**
+- [x] **Step 1: Replace the default entry with Chinese-first navigation and concise positioning**
 
 Use a reciprocal language switch directly below the project title:
 
@@ -42,7 +42,7 @@ Use a reciprocal language switch directly below the project title:
 [是什么](#是什么) · [核心能力](#核心能力) · [快速开始](#快速开始) · [安全与证据](#安全与证据) · [开发](#开发)
 ```
 
-- [ ] **Step 2: Add the English peer with the same information architecture**
+- [x] **Step 2: Add the English peer with the same information architecture**
 
 Use the equivalent English entry block:
 
@@ -54,7 +54,7 @@ Use the equivalent English entry block:
 [Overview](#overview) · [Capabilities](#capabilities) · [Quick start](#quick-start) · [Safety and evidence](#safety-and-evidence) · [Development](#development)
 ```
 
-- [ ] **Step 3: Verify the language links and section anchors exist**
+- [x] **Step 3: Verify the language links and section anchors exist**
 
 Run:
 
@@ -64,7 +64,7 @@ rg -n "README\.en\.md|README\.md|## 什么是|## Overview|docs/assets/readme/tas
 
 Expected: both documents contain a reciprocal language link, their primary overview heading, and the same relative image path.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add README.md README.en.md
@@ -79,7 +79,7 @@ git commit -m "docs: add bilingual README entry points"
 **Interfaces:**
 - Both READMEs include identical install paths, normal-chat examples, strict-routing warning, and evidence links.
 
-- [ ] **Step 1: Carry the supported install paths into both languages**
+- [x] **Step 1: Carry the supported install paths into both languages**
 
 Include Git, local checkout, and built-tarball commands. The Git command must be:
 
@@ -88,11 +88,11 @@ dsh plugin --profile web add github:ynymhrb/long-horizon-runtime#master
 dsh web
 ```
 
-- [ ] **Step 2: Carry the safety constraints into both languages**
+- [x] **Step 2: Carry the safety constraints into both languages**
 
 State that automatic replanning is limited to bounded unfinished `read_only` work, and that external effects, completed work, or deactivated verified artifacts require confirmation. Keep `30/30` explicitly scoped as deterministic scenario evidence, not live-LLM or manual UI acceptance.
 
-- [ ] **Step 3: Verify the documentation and package checks**
+- [x] **Step 3: Verify the documentation and package checks**
 
 Run:
 
@@ -106,7 +106,7 @@ git diff --check
 
 Expected: all commands exit successfully. Restore only generated `dist/` changes before committing, if build rewrites them without source changes.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add README.md README.en.md
