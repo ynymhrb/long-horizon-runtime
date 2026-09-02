@@ -33,6 +33,10 @@ const HANDBOOK = path.join(REPO_ROOT, 'docs', 'superpowers', 'specs', '2026-08-2
 
 const createdDirs: string[] = []
 
+async function readTextWithLfLineEndings(file: string): Promise<string> {
+  return (await readFile(file, 'utf8')).replace(/\r\n?/g, '\n')
+}
+
 async function tempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix))
   createdDirs.push(dir)
@@ -98,12 +102,12 @@ async function writeBundle(input: {
 
 describe('triage prompts match the handbook verbatim', () => {
   test('runner prompt is the handbook block quote, word for word', async () => {
-    const handbook = await readFile(HANDBOOK, 'utf8')
+    const handbook = await readTextWithLfLineEndings(HANDBOOK)
     expect(handbook).toContain(`Runner prompt:\n\n> ${RUNNER_PROMPT.split('\n').join('\n> ')}`)
   })
 
   test('triager prompt is the handbook block quote, word for word', async () => {
-    const handbook = await readFile(HANDBOOK, 'utf8')
+    const handbook = await readTextWithLfLineEndings(HANDBOOK)
     expect(handbook).toContain(`Triager prompt:\n\n> ${TRIAGER_PROMPT.split('\n').join('\n> ')}`)
   })
 
