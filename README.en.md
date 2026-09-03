@@ -4,6 +4,8 @@
 
 > Turn a long piece of work into one task you can confirm, track, and resume.
 
+> If Long Horizon Runtime has saved one of your agent runs — please ⭐ this repo. It helps people who keep losing long AI work find a way to finish it.
+
 [What it solves](#what-it-solves) · [Quick start](#quick-start) · [How to use it](#how-to-use-it)
 
 Long Horizon Runtime is a long-task plugin for [DeepSeek Harness](https://github.com/deepseek-harness/deepseek-harness). It is for research, development, debugging, and other work that needs several steps and more than one conversation: see a plan first, confirm before execution, follow progress as it happens, and resume after an interruption.
