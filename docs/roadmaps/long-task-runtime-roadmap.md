@@ -21,9 +21,9 @@ This roadmap sequences the Long-Horizon Agent Runtime from its durable single-ag
 | V2 | Artifact contracts, explainable context manifests, and layered task/project/episodic memory. | V1.1 API/events plus V1 durable artifacts and execution records. | A downstream task receives only explicit dependency artifacts and relevant memory; every supplied item has a source and selection reason. | Context selection becomes too large or too lossy. |
 | V3 | Policy-driven local replan: evidence creates a versioned proposal, and Runtime validates, accepts, rejects, or awaits confirmation. | V1.1 controls and V2 evidence/context. | A disproven assumption invalidates only its reachable dependent subgraph; the replacement graph preserves unrelated successful work. | A planner proposes unsafe or low-quality graph changes. |
 | V4 | Out-of-tree long-task browser plugin: Task Area overview, DAG/timeline cockpit, session task strip, and later revision-fenced controls. | V1.1 query/control API; V2/V3 projections enrich the views. | The plugin installs without modifying DSH Web; it reconstructs a task solely from Runtime API/events and controls it without bypassing the service. | Browser UI and runtime contracts drift. |
-| V5 | Heterogeneous multi-agent execution and routing policies. | Stable ExecutionAdapter and AgentProfile boundaries. | One graph routes tasks to different model/agent profiles while preserving uniform execution history and recovery. | Model-specific capability and permission differences leak into Task semantics. |
-| V6 | Budgeting, evaluation, and adaptive execution policy. | V5 aggregate accounting and comparable execution telemetry. | Runtime enforces per-goal/task budgets and compares retry/agent choices against recorded outcomes. | Measurements are incomplete or misleading across providers. |
-| V7 | Learned and vector-backed memory retrieval. | V2 source-linked memory and V6 evaluation. | Retrieval can improve context selection while every included memory item remains inspectable and source-linked. | Opaque retrieval degrades correctness or traceability. |
+| V5 | Heterogeneous multi-agent execution and routing policies. | Stable ExecutionAdapter and AgentProfile boundaries. | Completed: one graph routes nodes through declared profiles with durable profile snapshots, capability checks, and union deny filters. | Model-specific capability and permission differences leak into Task semantics. |
+| V6 | Budgeting, evaluation, and adaptive execution policy. | V5 aggregate accounting and comparable execution telemetry. | Completed: per-goal/task reservations settle or release on terminal paths; evaluated selection is explicit opt-in and bounded by a node allow-list. | Measurements are incomplete or misleading across providers. |
+| V7 | Source-linked explainable local memory retrieval. | V2 source-linked memory and V6 evaluation. | Completed: opt-in deterministic lexical retrieval filters invalid records and writes an inspectable context decision; feedback is audit-only. | Opaque retrieval degrades correctness or traceability. |
 | V8 | Cross-environment execution and advanced autonomy. | Proven durable state, security policy, and multi-agent routing. | Goals recover across approved execution environments with auditable capability and identity boundaries. | Distributed consistency, security, and operator complexity. |
 
 ## Decision gates
@@ -33,7 +33,8 @@ This roadmap sequences the Long-Horizon Agent Runtime from its durable single-ag
 - Do not automate V3 replanning until user-reviewed mutations demonstrate valid local replacement behavior.
 - Do not enable V4b controls until every UI action is revision-fenced and has the same event semantics as the model tool.
 - Do not begin V5 until one ExecutionAdapter can be replaced without changing Task or event semantics.
-- Do not begin V6-V8 until the preceding phase has enough real execution data to evaluate it.
+- V5–V7 use the approved staged gate: deterministic/replay tests, fault injection, opt-in local smoke, and explicit feature enablement. They do not become enabled merely because a preceding phase is implemented.
+- Do not begin V8 until its cross-environment protocol receives a separate approved design and evidence gate.
 
 ## Documents
 

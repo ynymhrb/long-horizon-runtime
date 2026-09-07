@@ -7,13 +7,17 @@ import { Scheduler, type RecoveryResult } from './scheduler.js'
 import { ArtifactStore } from './artifacts.js'
 import { withDshParent } from './dsh-adapters.js'
 import { classifyAutomaticReplan } from './replan-policy.js'
+import type { ProfileRouter } from './execution-profiles.js'
+import type { ExecutionPolicy } from './execution-policy.js'
+import type { MemoryRetriever } from './memory-retrieval.js'
+import type { BudgetLimit } from './budgets.js'
 
 export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
 export interface OriginalGoalEdit { readonly objective: string; readonly reason: string; readonly source?: 'user' | 'model' }
 
 export interface CreateGoalRequest { readonly objective: string; readonly constraints?: readonly string[]; readonly planningMode?: 'auto' | 'require_confirmation'; readonly workspaceScope?: string }
 export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly quotaRecovery?: import('./event-store.js').QuotaRecovery; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[] }
-export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly retryBackoffMs?: number; readonly maxRetryBackoffMs?: number; readonly idleTimeoutMs?: number; readonly maxWallTimeMs?: number; readonly now?: () => number; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators']; readonly autoReplan?: boolean }
+export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly retryBackoffMs?: number; readonly maxRetryBackoffMs?: number; readonly idleTimeoutMs?: number; readonly maxWallTimeMs?: number; readonly now?: () => number; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators']; readonly autoReplan?: boolean; readonly profileRouter?: ProfileRouter; readonly executionPolicy?: ExecutionPolicy; readonly memoryRetriever?: MemoryRetriever; readonly maxMemoryItems?: number; readonly goalBudget?: BudgetLimit }
 
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
 export class LongTaskRuntime {
@@ -23,6 +27,7 @@ export class LongTaskRuntime {
   private readonly scheduler: Scheduler
   private readonly livenessCheckIntervalMs: number
   private readonly now: () => number
+  private readonly goalBudget: BudgetLimit | undefined
   constructor(private readonly planner: PlannerAdapter, execution: ExecutionAdapter, options: number | RuntimeOptions = {}) {
     const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options
     this.ownsStore = normalized.store === undefined
@@ -30,13 +35,17 @@ export class LongTaskRuntime {
     this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536)
     this.livenessCheckIntervalMs = Math.max(10, Math.min(normalized.idleTimeoutMs ?? 300_000, 30_000))
     this.now = normalized.now ?? Date.now
-    this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
+    this.goalBudget = normalized.goalBudget
+    this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(normalized.profileRouter === undefined ? {} : { profileRouter: normalized.profileRouter }), ...(normalized.executionPolicy === undefined ? {} : { executionPolicy: normalized.executionPolicy }), ...(normalized.memoryRetriever === undefined ? {} : { memoryRetriever: normalized.memoryRetriever }), ...(normalized.maxMemoryItems === undefined ? {} : { maxMemoryItems: normalized.maxMemoryItems }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async input => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) })
   }
   async createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView> {
     if (request.objective.trim().length === 0) throw new Error('goal objective must not be empty')
     const id = `lt_${randomUUID()}`
     const mode = request.planningMode ?? 'auto'
-    this.store.transaction(() => this.store.append([{ type: 'GoalCreated', goalId: id, payload: { objective: request.objective, constraints: request.constraints ?? [], planningMode: mode, workspaceScope: request.workspaceScope } }]))
+    this.store.transaction(() => this.store.append([
+      { type: 'GoalCreated', goalId: id, payload: { objective: request.objective, constraints: request.constraints ?? [], planningMode: mode, workspaceScope: request.workspaceScope } },
+      ...(normalizedGoalBudget(this.goalBudget) === undefined ? [] : [{ type: 'BudgetConfigured', goalId: id, payload: { scope: 'goal', limit: this.goalBudget } }]),
+    ]))
     let plan
     try { plan = await planWithValidation(this.planner, { goalId: id, objective: request.objective, constraints: request.constraints ?? [], ...(executionSignal === undefined ? {} : { signal: executionSignal }) }) }
     catch (error) {
@@ -202,6 +211,17 @@ export class LongTaskRuntime {
     this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: 'user_requested' } }]))
     return this.view(goalId)
   }
+  extendGoalBudget(goalId: string, limit: BudgetLimit): GoalView {
+    const goal = this.requireGoal(goalId)
+    const previous = this.store.getBudgetSummary(goalId)?.goal ?? {}
+    for (const [name, value] of Object.entries(limit)) {
+      if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`budget ${name} must be a non-negative safe integer`)
+      const old = previous[name as keyof BudgetLimit]
+      if (old !== undefined && value < old) throw new Error(`budget ${name} may not reduce`)
+    }
+    this.store.transaction(() => this.store.append([{ type: 'BudgetExtended', goalId, payload: { previous, limit } }, { type: 'BudgetConfigured', goalId, payload: { scope: 'goal', limit: { ...previous, ...limit } } }]))
+    return this.view(goal.id)
+  }
   /** Record the interruption cause before applying the caller-selected recovery policy. */
   interruptGoal(goalId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView {
     const goal = this.requireGoal(goalId)
@@ -362,3 +382,5 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
   })
 }
+
+function normalizedGoalBudget(value: BudgetLimit | undefined): BudgetLimit | undefined { return value === undefined || Object.keys(value).length === 0 ? undefined : value }

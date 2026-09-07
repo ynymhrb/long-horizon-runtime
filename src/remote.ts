@@ -20,6 +20,7 @@ export class LongTaskRemote extends TypertRemoteService {
   list(): unknown { return this.runtime.listGoals() }
   listTasks(input: { cursor?: number; filter?: { state?: string; query?: string; archived?: boolean; sessionId?: string } }): unknown { return this.ui.listTasks(input as Parameters<TaskUiApi['listTasks']>[0]) }
   getTask(input: { taskId: string }): unknown { return this.ui.getTask(input) }
+  getTaskAudit(input: { taskId: string }): unknown { return this.ui.getTaskAudit(input) }
   getTaskGraph(input: { taskId: string; revision?: number }): unknown { return this.ui.getTaskGraph(input) }
   listTaskEvents(input: { taskId: string; cursor?: number; taskNodeId?: string }): unknown { return this.ui.listTaskEvents(input) }
   getCurrentTaskForSession(input: { sessionId: string }): unknown { return this.ui.getCurrentTaskForSession(input) }
@@ -69,6 +70,11 @@ Remote('getTask')(LongTaskRemote.prototype.getTask, {
   kind: 'method', name: 'getTask', static: false, private: false,
   addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
   access: { has: () => true, get: (object: LongTaskRemote) => object.getTask }, metadata: undefined,
+} as never)
+Remote('getTaskAudit')(LongTaskRemote.prototype.getTaskAudit, {
+  kind: 'method', name: 'getTaskAudit', static: false, private: false,
+  addInitializer(initializer: (this: LongTaskRemote) => void) { remoteInitializers.push(initializer) },
+  access: { has: () => true, get: (object: LongTaskRemote) => object.getTaskAudit }, metadata: undefined,
 } as never)
 Remote('getTaskGraph')(LongTaskRemote.prototype.getTaskGraph, {
   kind: 'method', name: 'getTaskGraph', static: false, private: false,

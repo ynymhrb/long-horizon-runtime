@@ -5,6 +5,8 @@ import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } fro
 import { LongTaskRuntime } from './runtime.js'
 import { TaskControlApi } from './task-api.js'
 import { filterRoutingTools, routingPolicyText, type RoutingMode } from './routing-policy.js'
+import { normalizeExecutionProfiles, ProfileRouter, type ExecutionProfile, type ExecutionProfileSet } from './execution-profiles.js'
+import { ExecutionPolicy, type PolicyMode } from './execution-policy.js'
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -26,11 +28,15 @@ export interface Config {
   /** Profile-local compatibility scope for tasks resumed from another chat. */
   readonly workspaceScope?: string
   readonly defaultAgentProfile?: Record<string, unknown>
+  /** Explicit worker profiles; omitted keeps the historic single spawn worker. */
+  readonly executionProfiles?: readonly ExecutionProfile[]
+  readonly defaultExecutionProfile?: string
+  readonly policyMode?: PolicyMode
   /** Test/composition seam; normal deployments use the configured DSH adapters. */
   readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime
 }
 
-interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes'> {
+interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes' | 'executionProfiles' | 'defaultExecutionProfile' | 'policyMode'> {
   readonly maxConcurrentTasks: number
   readonly defaultPlanningMode: 'auto' | 'require_confirmation'
   readonly executionTimeoutMs: number
@@ -39,6 +45,8 @@ interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPla
   readonly retryPolicy: { readonly maxAttempts: number }
   readonly artifactInlineLimitBytes: number
   readonly routingMode: RoutingMode
+  readonly executionProfiles: ExecutionProfileSet
+  readonly policyMode: PolicyMode
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -55,7 +63,7 @@ export function apply(ctx: Context, input: Config): void {
   const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile })
   const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.maxWallTimeMs, ...profile })
   const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true,
+    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
   })
   ctx.provide('longTaskRuntime', runtime)
   ctx.systemPrompt.section({
@@ -157,6 +165,16 @@ export function apply(ctx: Context, input: Config): void {
       return result
     })),
   }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_extend_budget', description: 'Increase a durable task budget using the displayed control revision. Budget limits may only increase.',
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, limit: { type: 'object', required: true, properties: { max_attempts: { type: 'number' }, max_wall_time_ms: { type: 'number' }, max_estimated_tokens: { type: 'number' }, max_estimated_cost_micros: { type: 'number' } }, additionalProperties: false } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.extendBudget({ taskId: args.goal_id, expectedRevision: args.expected_revision, limit: { ...(args.limit.max_attempts === undefined ? {} : { maxAttempts: args.limit.max_attempts }), ...(args.limit.max_wall_time_ms === undefined ? {} : { maxWallTimeMs: args.limit.max_wall_time_ms }), ...(args.limit.max_estimated_tokens === undefined ? {} : { maxEstimatedTokens: args.limit.max_estimated_tokens }), ...(args.limit.max_estimated_cost_micros === undefined ? {} : { maxEstimatedCostMicros: args.limit.max_estimated_cost_micros }) } }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+  }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_record_memory_feedback', description: 'Record revision-fenced user or validator feedback about one memory retrieval. This creates an audit record only and never changes ranking automatically.',
+    parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, memory_id: { type: 'string', required: true }, helpful: { type: 'boolean', required: true }, reason: { type: 'string', required: true } }, output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.recordMemoryRetrievalFeedback({ taskId: args.goal_id, expectedRevision: args.expected_revision, memoryId: args.memory_id, helpful: args.helpful, reason: args.reason }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+  }))
 }
 
 const goalParameter = { goal_id: { type: 'string', required: true } } as const
@@ -184,6 +202,7 @@ function resolveConfig(config: Config): ResolvedConfig {
   const artifactInlineLimitBytes = config.artifactInlineLimitBytes ?? 65_536
   const retryPolicy = config.retryPolicy ?? { maxAttempts: 1 }
   const routingMode = config.routingMode ?? 'advisory'
+  const policyMode = config.policyMode ?? 'fixed'
   if (!Number.isSafeInteger(maxConcurrentTasks) || maxConcurrentTasks < 1) throw new TypeError('maxConcurrentTasks must be a positive safe integer')
   if (!Number.isSafeInteger(executionTimeoutMs) || executionTimeoutMs < 1) throw new TypeError('executionTimeoutMs must be a positive safe integer')
   if (!Number.isSafeInteger(idleTimeoutMs) || idleTimeoutMs < 1) throw new TypeError('idleTimeoutMs must be a positive safe integer')
@@ -193,7 +212,12 @@ function resolveConfig(config: Config): ResolvedConfig {
   const defaultPlanningMode = config.defaultPlanningMode ?? 'auto'
   if (defaultPlanningMode !== 'auto' && defaultPlanningMode !== 'require_confirmation') throw new TypeError('defaultPlanningMode must be auto or require_confirmation')
   if (routingMode !== 'advisory' && routingMode !== 'strict') throw new TypeError('routingMode must be advisory or strict')
-  return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode }
+  if (policyMode !== 'fixed' && policyMode !== 'evaluated') throw new TypeError('policyMode must be fixed or evaluated')
+  const executionProfiles = normalizeExecutionProfiles({
+    ...(config.defaultExecutionProfile === undefined ? {} : { defaultProfile: config.defaultExecutionProfile }),
+    profiles: config.executionProfiles ?? [{ id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }) }],
+  })
+  return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode, policyMode, executionProfiles }
 }
 
 function requiredText(value: string, name: string): void { if (value.trim().length === 0) throw new TypeError(`${name} must be non-empty`) }

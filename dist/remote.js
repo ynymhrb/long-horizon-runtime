@@ -16,6 +16,7 @@ export class LongTaskRemote extends TypertRemoteService {
     list() { return this.runtime.listGoals(); }
     listTasks(input) { return this.ui.listTasks(input); }
     getTask(input) { return this.ui.getTask(input); }
+    getTaskAudit(input) { return this.ui.getTaskAudit(input); }
     getTaskGraph(input) { return this.ui.getTaskGraph(input); }
     listTaskEvents(input) { return this.ui.listTaskEvents(input); }
     getCurrentTaskForSession(input) { return this.ui.getCurrentTaskForSession(input); }
@@ -64,6 +65,11 @@ Remote('getTask')(LongTaskRemote.prototype.getTask, {
     kind: 'method', name: 'getTask', static: false, private: false,
     addInitializer(initializer) { remoteInitializers.push(initializer); },
     access: { has: () => true, get: (object) => object.getTask }, metadata: undefined,
+});
+Remote('getTaskAudit')(LongTaskRemote.prototype.getTaskAudit, {
+    kind: 'method', name: 'getTaskAudit', static: false, private: false,
+    addInitializer(initializer) { remoteInitializers.push(initializer); },
+    access: { has: () => true, get: (object) => object.getTaskAudit }, metadata: undefined,
 });
 Remote('getTaskGraph')(LongTaskRemote.prototype.getTaskGraph, {
     kind: 'method', name: 'getTaskGraph', static: false, private: false,

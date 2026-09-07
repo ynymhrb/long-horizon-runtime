@@ -18,6 +18,19 @@ export class TaskUiApi {
         return { items, ...(cursor + items.length < all.length ? { nextCursor: cursor + items.length } : {}) };
     }
     getTask(input) { return this.runtime.getStatus(input.taskId) ?? null; }
+    /** Safe V5–V7 audit summaries; raw profile options and memory text stay host-private. */
+    getTaskAudit(input) {
+        if (this.runtime.getStatus(input.taskId) === undefined)
+            return null;
+        return {
+            profiles: this.runtime.store.listExecutionProfileResolutions(input.taskId),
+            budget: this.runtime.store.getBudgetSummary(input.taskId) ?? null,
+            policy: this.runtime.store.listExecutionPolicyDecisions(input.taskId),
+            evaluations: this.runtime.store.listExecutionEvaluations(input.taskId),
+            memories: this.runtime.store.listMemoryRecords(input.taskId).map(record => ({ memoryId: record.memoryId, sourceRef: record.sourceRef, active: record.active, ...(record.workspaceId === undefined ? {} : { workspaceId: record.workspaceId }) })),
+            retrievals: this.runtime.store.listContextManifests(input.taskId).flatMap(manifest => manifest.context.retrieval === undefined ? [] : [{ attemptId: manifest.attemptId, taskId: manifest.taskId, retrieval: manifest.context.retrieval }]),
+        };
+    }
     getTaskGraph(input) {
         const task = this.runtime.getStatus(input.taskId);
         if (task === undefined)

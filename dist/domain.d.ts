@@ -11,6 +11,12 @@ export type RecoveryPolicyOutcome = 'requeue' | 'wait_for_live_parent' | 'requir
 export interface RetryPolicy {
     readonly maxAttempts: number;
 }
+export interface BudgetLimit {
+    readonly maxAttempts?: number;
+    readonly maxWallTimeMs?: number;
+    readonly maxEstimatedTokens?: number;
+    readonly maxEstimatedCostMicros?: number;
+}
 /** The seven artifact types the V1 runtime accepts from a completed child. */
 export declare const V1_ARTIFACT_TYPES: readonly ["plan", "analysis", "code_patch", "command_result", "test_report", "review", "note"];
 export type ArtifactType = typeof V1_ARTIFACT_TYPES[number];
@@ -30,6 +36,14 @@ export interface TaskDraft {
     readonly validator?: string;
     /** Per-task child execution budget in milliseconds; overrides the deployment default when set. */
     readonly timeoutMs?: number;
+    /** Optional named execution profile selected by the planner. */
+    readonly executionProfile?: string;
+    /** Capabilities that the selected profile must advertise. */
+    readonly requiredCapabilities?: readonly string[];
+    /** Profiles the evaluated policy may consider; omitted preserves fixed routing. */
+    readonly allowedExecutionProfiles?: readonly string[];
+    /** Optional task budget composed with the durable goal budget. */
+    readonly budget?: BudgetLimit;
 }
 /** Planner output before validation. */
 export interface PlanDraft {

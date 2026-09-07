@@ -6,6 +6,11 @@
         artifactDirectory: !!js dshHomePath('long-task-runtime', 'artifacts')
         plannerProvider: spawn
         executionProvider: spawn
+        policyMode: fixed
+        defaultExecutionProfile: default
+        executionProfiles:
+          - id: default
+            providerName: spawn
         maxConcurrentTasks: 1
         autoReplan: true
         routingMode: advisory

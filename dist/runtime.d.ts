@@ -2,6 +2,10 @@ import { type ExecutionAdapter, type PlannerAdapter } from './adapters.js';
 import type { GoalState, GraphMutation, InterruptionCause, RecoveryPolicyOutcome } from './domain.js';
 import { RuntimeEventStore, type TaskSessionLink } from './event-store.js';
 import { type RecoveryResult } from './scheduler.js';
+import type { ProfileRouter } from './execution-profiles.js';
+import type { ExecutionPolicy } from './execution-policy.js';
+import type { MemoryRetriever } from './memory-retrieval.js';
+import type { BudgetLimit } from './budgets.js';
 export type RecoveryResolution = 'retry' | 'confirmed_succeeded';
 export interface OriginalGoalEdit {
     readonly objective: string;
@@ -66,6 +70,11 @@ export interface RuntimeOptions {
     readonly validator?: import('./scheduler.js').SchedulerOptions['validator'];
     readonly validators?: import('./scheduler.js').SchedulerOptions['validators'];
     readonly autoReplan?: boolean;
+    readonly profileRouter?: ProfileRouter;
+    readonly executionPolicy?: ExecutionPolicy;
+    readonly memoryRetriever?: MemoryRetriever;
+    readonly maxMemoryItems?: number;
+    readonly goalBudget?: BudgetLimit;
 }
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
 export declare class LongTaskRuntime {
@@ -76,6 +85,7 @@ export declare class LongTaskRuntime {
     private readonly scheduler;
     private readonly livenessCheckIntervalMs;
     private readonly now;
+    private readonly goalBudget;
     constructor(planner: PlannerAdapter, execution: ExecutionAdapter, options?: number | RuntimeOptions);
     createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
     confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
@@ -103,6 +113,7 @@ export declare class LongTaskRuntime {
     cancelGoal(goalId: string): GoalView;
     /** Pause scheduling and terminate all currently running child attempts. */
     pauseGoal(goalId: string): GoalView;
+    extendGoalBudget(goalId: string, limit: BudgetLimit): GoalView;
     /** Record the interruption cause before applying the caller-selected recovery policy. */
     interruptGoal(goalId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView;
     invalidateTask(goalId: string, taskId: string, reason: string, evidenceRefs?: readonly string[]): GoalView;

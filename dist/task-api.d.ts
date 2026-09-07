@@ -1,6 +1,7 @@
 import type { GoalView, CreateGoalRequest, LongTaskRuntime, RecoveryResolution } from './runtime.js';
 import type { InterruptionCause, RecoveryPolicyOutcome } from './domain.js';
 import type { GraphMutation } from './domain.js';
+import type { BudgetLimit } from './budgets.js';
 export interface TaskInvocation {
     readonly sessionId?: string;
     readonly workspaceScope?: string;
@@ -63,6 +64,18 @@ export declare class TaskControlApi {
         readonly taskId: string;
         readonly expectedRevision: number;
     }, invocation: TaskInvocation): Promise<TaskUpdateResult>;
+    extendBudget(request: {
+        readonly taskId: string;
+        readonly expectedRevision: number;
+        readonly limit: BudgetLimit;
+    }, invocation: Pick<TaskInvocation, 'workspaceScope'>): TaskUpdateResult;
+    recordMemoryRetrievalFeedback(request: {
+        readonly taskId: string;
+        readonly expectedRevision: number;
+        readonly memoryId: string;
+        readonly helpful: boolean;
+        readonly reason: string;
+    }, invocation: Pick<TaskInvocation, 'workspaceScope'>): TaskUpdateResult;
     get(taskId: string, invocation?: Pick<TaskInvocation, 'workspaceScope'>): GoalView | undefined;
     /**
      * Model-friendly incremental event page. Events are projected to a compact

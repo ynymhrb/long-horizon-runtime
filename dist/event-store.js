@@ -33,7 +33,7 @@ export class RuntimeEventStore {
     /** Rebuild every owned projection from ordered append-only events. */
     rebuild() {
         this.transaction(() => {
-            this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;');
+            this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM execution_profile_resolutions; DELETE FROM execution_evaluations; DELETE FROM execution_policy_decisions; DELETE FROM memory_index_entries; DELETE FROM memory_records; DELETE FROM budget_state; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;');
             const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all();
             for (const row of rows)
                 projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) }, row.seq);
@@ -65,6 +65,12 @@ export class RuntimeEventStore {
             remove('current_task_bindings').run(goalId);
             remove('task_session_links').run(goalId);
             remove('context_manifests').run(goalId);
+            remove('execution_profile_resolutions').run(goalId);
+            remove('execution_evaluations').run(goalId);
+            remove('execution_policy_decisions').run(goalId);
+            remove('memory_index_entries').run(goalId);
+            remove('memory_records').run(goalId);
+            remove('budget_state').run(goalId);
             remove('goal_versions').run(goalId);
             remove('plan_revisions').run(goalId);
             remove('task_nodes').run(goalId);
@@ -100,6 +106,28 @@ export class RuntimeEventStore {
     }
     listContextManifests(goalId) {
         return this.db.prepare('SELECT attempt_id, task_id, revision, selection_reason, context_json FROM context_manifests WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ attemptId: String(row.attempt_id), taskId: String(row.task_id), revision: Number(row.revision), selectionReason: String(row.selection_reason), context: JSON.parse(String(row.context_json)) }));
+    }
+    listExecutionProfileResolutions(goalId) {
+        return this.db.prepare('SELECT task_id, attempt_id, profile_id, provider_name, agent_options_hash, capabilities_json, tool_deny_json, timeout_ms, selection_reason FROM execution_profile_resolutions WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ taskId: String(row.task_id), attemptId: String(row.attempt_id), profileId: String(row.profile_id), providerName: String(row.provider_name), agentOptionsHash: String(row.agent_options_hash), capabilities: JSON.parse(String(row.capabilities_json)), toolDeny: JSON.parse(String(row.tool_deny_json)), timeoutMs: Number(row.timeout_ms), selectionReason: String(row.selection_reason) }));
+    }
+    getBudgetSummary(goalId) {
+        const row = this.db.prepare('SELECT goal_limit_json, usage_json, reservations_json FROM budget_state WHERE goal_id = ?').get(goalId);
+        return row === undefined ? undefined : { goal: JSON.parse(String(row.goal_limit_json)), usage: JSON.parse(String(row.usage_json)), reservations: JSON.parse(String(row.reservations_json)) };
+    }
+    listExecutionEvaluations(goalId) {
+        return this.db.prepare('SELECT task_id, attempt_id, profile_id, outcome, wall_time_ms, validator_ok, artifact_contract_ok FROM execution_evaluations WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ taskId: String(row.task_id), attemptId: String(row.attempt_id), ...(row.profile_id == null ? {} : { profileId: String(row.profile_id) }), outcome: String(row.outcome), wallTimeMs: Number(row.wall_time_ms), validatorOk: Boolean(row.validator_ok), artifactContractOk: Boolean(row.artifact_contract_ok) }));
+    }
+    listExecutionPolicyDecisions(goalId) {
+        return this.db.prepare('SELECT task_id, attempt_id, payload_json FROM execution_policy_decisions WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => {
+            const payload = JSON.parse(String(row.payload_json));
+            return { taskId: String(row.task_id), attemptId: String(row.attempt_id), selectedProfileId: String(payload.selectedProfileId), policyVersion: String(payload.policyVersion), candidates: Array.isArray(payload.candidates) ? payload.candidates : [], excluded: Array.isArray(payload.excluded) ? payload.excluded : [] };
+        });
+    }
+    listMemoryIndexEntries(goalId) {
+        return this.db.prepare('SELECT memory_id, content_hash, source_ref, active FROM memory_index_entries WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ memoryId: String(row.memory_id), contentHash: String(row.content_hash), sourceRef: String(row.source_ref), active: Boolean(row.active) }));
+    }
+    listMemoryRecords(goalId) {
+        return this.db.prepare('SELECT memory_id, text, source_ref, active, workspace_id FROM memory_records WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ memoryId: String(row.memory_id), text: String(row.text), sourceRef: String(row.source_ref), active: Boolean(row.active), ...(row.workspace_id == null ? {} : { workspaceId: String(row.workspace_id) }) }));
     }
     getPlan(goalId, revision) {
         const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision]));

@@ -6,6 +6,9 @@ import { RuntimeEventStore } from '../src/event-store.js'
 import { LongTaskRuntime } from '../src/runtime.js'
 import { ArtifactStore } from '../src/artifacts.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
+import { ProfileRouter, normalizeExecutionProfiles } from '../src/execution-profiles.js'
+import { ExecutionPolicy } from '../src/execution-policy.js'
+import { MemoryRetriever } from '../src/memory-retrieval.js'
 
 const directories: string[] = []
 const stores: RuntimeEventStore[] = []
@@ -37,6 +40,69 @@ const planner: PlannerAdapter = {
 }
 
 describe('durable runtime core', () => {
+  test('pauses before starting a child when its goal budget cannot reserve an attempt', async () => {
+    const store = createStore()
+    let executions = 0
+    const runtime = new LongTaskRuntime(planner, { async execute() { executions += 1; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, goalBudget: { maxAttempts: 0 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(executions).toBe(0)
+    expect(goal.state).toBe('PAUSED')
+    expect(store.listEvents(goal.id).map(event => event.type)).toContain('BudgetExhausted')
+  })
+
+  test('extends an exhausted goal budget without reducing an existing limit', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, goalBudget: { maxAttempts: 0 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(runtime.extendGoalBudget(goal.id, { maxAttempts: 2 }).state).toBe('PAUSED')
+    expect(store.getBudgetSummary(goal.id)?.goal).toEqual({ maxAttempts: 2 })
+    expect(() => runtime.extendGoalBudget(goal.id, { maxAttempts: 1 })).toThrow('may not reduce')
+  })
+  test('releases a reservation when the execution adapter throws', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { throw new Error('provider start failed') } }, { store, goalBudget: { maxAttempts: 2 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.listEvents(goal.id).map(event => event.type)).toContain('BudgetReleased')
+    expect(store.getBudgetSummary(goal.id)?.reservations).toEqual([])
+  })
+  test('settles provider-reported token and cost usage', async () => {
+    const store = createStore()
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [], usage: { tokens: 21, costMicros: 8, estimated: false } } } }, { store, goalBudget: { maxEstimatedTokens: 100, maxEstimatedCostMicros: 100 } })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(store.getBudgetSummary(goal.id)?.usage).toMatchObject({ attempts: 2, estimatedTokens: 42, estimatedCostMicros: 16 })
+    expect(store.listEvents(goal.id).find(event => event.type === 'BudgetSettled')?.payload).toMatchObject({ actual: { estimatedTokens: 21, estimatedCostMicros: 8, estimated: false } })
+  })
+  test('persists the selected execution profile before dispatching the child', async () => {
+    const store = createStore()
+    let receivedProfile: unknown
+    const routedPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', executionProfile: 'fast', requiredCapabilities: ['code'] }] } } }
+    const router = new ProfileRouter(normalizeExecutionProfiles({ profiles: [{ id: 'default', providerName: 'spawn' }, { id: 'fast', providerName: 'spawn-fast', capabilities: ['code'] }], defaultProfile: 'default' }))
+    const runtime = new LongTaskRuntime(routedPlanner, { async execute(input) { receivedProfile = input.profile; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, profileRouter: router })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(receivedProfile).toMatchObject({ id: 'fast', providerName: 'spawn-fast' })
+    expect(store.listExecutionProfileResolutions(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', taskId: 'a' })])
+    expect(store.listExecutionEvaluations(goal.id)).toEqual([expect.objectContaining({ profileId: 'fast', outcome: 'succeeded', validatorOk: true })])
+  })
+  test('uses an evaluated policy only within a task declared profile allow-list', async () => {
+    const store = createStore()
+    let selected: string | undefined
+    const policyPlanner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'work', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required', allowedExecutionProfiles: ['cheap', 'reliable'] }] } } }
+    const router = new ProfileRouter(normalizeExecutionProfiles({ profiles: [{ id: 'default', providerName: 'spawn' }, { id: 'cheap', providerName: 'spawn-cheap' }, { id: 'reliable', providerName: 'spawn-reliable' }], defaultProfile: 'default' }))
+    store.append([{ type: 'GoalCreated', goalId: 'history', payload: { objective: 'history', planningMode: 'auto' } }, { type: 'ExecutionEvaluationRecorded', goalId: 'history', taskId: 'old', payload: { attemptId: 'old', profileId: 'reliable', outcome: 'succeeded', wallTimeMs: 1, validatorOk: true, artifactContractOk: true } }])
+    const runtime = new LongTaskRuntime(policyPlanner, { async execute(input) { selected = input.profile?.id; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, profileRouter: router, executionPolicy: new ExecutionPolicy('evaluated') })
+    const goal = await runtime.createGoal({ objective: 'ship' }, {})
+    expect(selected).toBe('cheap')
+    expect(store.listEvents(goal.id).find(event => event.type === 'ExecutionPolicyDecided')?.payload).toMatchObject({ selectedProfileId: 'cheap' })
+  })
+  test('dispatches an explainable retrieval from active source-linked memory only when enabled', async () => {
+    const store = createStore()
+    let retrieval: unknown
+    const runtime = new LongTaskRuntime(planner, { async execute(input) { retrieval = input.context.retrieval; return { status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store, memoryRetriever: new MemoryRetriever(), maxMemoryItems: 1 })
+    const goal = await runtime.createGoal({ objective: 'ship runtime', planningMode: 'require_confirmation' }, {})
+    store.append([{ type: 'MemoryRecorded', goalId: goal.id, payload: { memoryId: 'active', text: 'runtime shipping guidance', sourceRef: 'event:1', active: true } }, { type: 'MemoryRecorded', goalId: goal.id, payload: { memoryId: 'stale', text: 'runtime stale guidance', sourceRef: 'event:2', active: false } }])
+    await runtime.confirmGoal(goal.id, {})
+    expect(retrieval).toMatchObject({ selected: [expect.objectContaining({ memoryId: 'active' })], excluded: expect.arrayContaining([expect.objectContaining({ memoryId: 'stale', reason: 'inactive' })]) })
+  })
   test('archives a running goal by cancelling it first and can restore it', async () => {
     const store = createStore()
     const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } }, { store })

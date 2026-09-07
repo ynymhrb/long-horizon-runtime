@@ -15,6 +15,7 @@ export class LongTaskRuntime {
     scheduler;
     livenessCheckIntervalMs;
     now;
+    goalBudget;
     constructor(planner, execution, options = {}) {
         this.planner = planner;
         const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options;
@@ -23,14 +24,18 @@ export class LongTaskRuntime {
         this.artifactStore = normalized.artifactDirectory === undefined ? undefined : new ArtifactStore(normalized.artifactDirectory, normalized.artifactInlineLimitBytes ?? 65_536);
         this.livenessCheckIntervalMs = Math.max(10, Math.min(normalized.idleTimeoutMs ?? 300_000, 30_000));
         this.now = normalized.now ?? Date.now;
-        this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
+        this.goalBudget = normalized.goalBudget;
+        this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(normalized.profileRouter === undefined ? {} : { profileRouter: normalized.profileRouter }), ...(normalized.executionPolicy === undefined ? {} : { executionPolicy: normalized.executionPolicy }), ...(normalized.memoryRetriever === undefined ? {} : { memoryRetriever: normalized.memoryRetriever }), ...(normalized.maxMemoryItems === undefined ? {} : { maxMemoryItems: normalized.maxMemoryItems }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
     }
     async createGoal(request, executionParent, executionSignal) {
         if (request.objective.trim().length === 0)
             throw new Error('goal objective must not be empty');
         const id = `lt_${randomUUID()}`;
         const mode = request.planningMode ?? 'auto';
-        this.store.transaction(() => this.store.append([{ type: 'GoalCreated', goalId: id, payload: { objective: request.objective, constraints: request.constraints ?? [], planningMode: mode, workspaceScope: request.workspaceScope } }]));
+        this.store.transaction(() => this.store.append([
+            { type: 'GoalCreated', goalId: id, payload: { objective: request.objective, constraints: request.constraints ?? [], planningMode: mode, workspaceScope: request.workspaceScope } },
+            ...(normalizedGoalBudget(this.goalBudget) === undefined ? [] : [{ type: 'BudgetConfigured', goalId: id, payload: { scope: 'goal', limit: this.goalBudget } }]),
+        ]));
         let plan;
         try {
             plan = await planWithValidation(this.planner, { goalId: id, objective: request.objective, constraints: request.constraints ?? [], ...(executionSignal === undefined ? {} : { signal: executionSignal }) });
@@ -235,6 +240,19 @@ export class LongTaskRuntime {
         this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: 'user_requested' } }]));
         return this.view(goalId);
     }
+    extendGoalBudget(goalId, limit) {
+        const goal = this.requireGoal(goalId);
+        const previous = this.store.getBudgetSummary(goalId)?.goal ?? {};
+        for (const [name, value] of Object.entries(limit)) {
+            if (!Number.isSafeInteger(value) || value < 0)
+                throw new TypeError(`budget ${name} must be a non-negative safe integer`);
+            const old = previous[name];
+            if (old !== undefined && value < old)
+                throw new Error(`budget ${name} may not reduce`);
+        }
+        this.store.transaction(() => this.store.append([{ type: 'BudgetExtended', goalId, payload: { previous, limit } }, { type: 'BudgetConfigured', goalId, payload: { scope: 'goal', limit: { ...previous, ...limit } } }]));
+        return this.view(goal.id);
+    }
     /** Record the interruption cause before applying the caller-selected recovery policy. */
     interruptGoal(goalId, cause, recoveryOutcome) {
         const goal = this.requireGoal(goalId);
@@ -415,3 +433,4 @@ async function sleep(ms, signal) {
         signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
     });
 }
+function normalizedGoalBudget(value) { return value === undefined || Object.keys(value).length === 0 ? undefined : value; }

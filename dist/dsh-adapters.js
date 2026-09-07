@@ -29,6 +29,10 @@ const PLAN_SCHEMA = {
                     retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer' } }, required: ['maxAttempts'], additionalProperties: false },
                     sideEffectClass: { type: 'string', enum: ['read_only', 'idempotent', 'external_effect'] }, validator: { type: 'string' },
                     timeoutMs: { type: 'integer' },
+                    executionProfile: { type: 'string' },
+                    requiredCapabilities: { type: 'array', items: { type: 'string' } },
+                    allowedExecutionProfiles: { type: 'array', items: { type: 'string' } },
+                    budget: { type: 'object', properties: { maxAttempts: { type: 'integer' }, maxWallTimeMs: { type: 'integer' }, maxEstimatedTokens: { type: 'integer' }, maxEstimatedCostMicros: { type: 'integer' } }, additionalProperties: false },
                 }, required: ['id', 'objective', 'summary', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
             },
         },
@@ -63,14 +67,15 @@ export function createDshExecutionAdapter(subagents, options) {
             // A per-task timeoutMs overrides the deployment default, which itself
             // overrides an absent timeout. Distinguish a timeout abort from an
             // operator/other abort so the failure summary is actionable.
-            const timeoutMs = input.timeoutMs ?? options.timeoutMs;
+            const timeoutMs = input.profile?.timeoutMs ?? input.timeoutMs ?? options.timeoutMs;
             const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
             const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout]);
             let settled;
             let dshSessionId;
             try {
+                const profileOptions = { ...options, ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }) };
                 try {
-                    settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId); }, timeoutMs);
+                    settled = await runStructured(subagents, profileOptions, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId); }, timeoutMs);
                 }
                 catch (error) {
                     // The seam could not represent the outcome as a stop reason: an
@@ -121,7 +126,7 @@ async function runStructured(subagents, options, label, prompt, outputSchema, si
         parent,
         signal,
         ...(agentOptions === undefined ? {} : { agentOptions }),
-        toolFilter: { deny: [...CHILD_TASK_TOOL_DENY] },
+        toolFilter: { deny: [...new Set([...CHILD_TASK_TOOL_DENY, ...(options.toolDeny ?? [])])] },
         outputSchema: outputSchema,
     });
     onStarted?.(String(run.id));

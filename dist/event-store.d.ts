@@ -1,4 +1,5 @@
 import type { GoalState, TaskNode } from './domain.js';
+import type { BudgetLimit, BudgetUsage } from './budgets.js';
 /** Durable event accepted by the runtime event log. Payloads must be JSON serializable. */
 export interface RuntimeEvent {
     readonly type: string;
@@ -99,6 +100,61 @@ export interface QuotaRecovery {
     readonly retryAt: string;
     readonly diagnostic: string;
 }
+export interface ExecutionProfileResolutionProjection {
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly profileId: string;
+    readonly providerName: string;
+    readonly agentOptionsHash: string;
+    readonly capabilities: readonly string[];
+    readonly toolDeny: readonly string[];
+    readonly timeoutMs: number;
+    readonly selectionReason: string;
+}
+export interface BudgetSummaryProjection {
+    readonly goal: BudgetLimit;
+    readonly usage: BudgetUsage;
+    readonly reservations: readonly {
+        readonly attemptId: string;
+        readonly usage: BudgetUsage;
+    }[];
+}
+export interface ExecutionEvaluationProjection {
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly profileId?: string;
+    readonly outcome: string;
+    readonly wallTimeMs: number;
+    readonly validatorOk: boolean;
+    readonly artifactContractOk: boolean;
+}
+export interface ExecutionPolicyDecisionProjection {
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly selectedProfileId: string;
+    readonly policyVersion: string;
+    readonly candidates: readonly {
+        readonly profileId: string;
+        readonly score: number;
+    }[];
+    readonly excluded: readonly {
+        readonly profileId: string;
+        readonly reason: string;
+    }[];
+}
+export interface MemoryIndexEntryProjection {
+    readonly memoryId: string;
+    readonly contentHash: string;
+    readonly sourceRef: string;
+    readonly active: boolean;
+}
+export interface MemoryRecordProjection {
+    readonly memoryId: string;
+    readonly text: string;
+    readonly sourceRef: string;
+    readonly active: boolean;
+    readonly workspaceId?: string;
+}
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export declare class RuntimeEventStore {
     private readonly db;
@@ -126,6 +182,12 @@ export declare class RuntimeEventStore {
     /** One explicit display binding per conversation; historic task links remain separate. */
     getCurrentTaskForSession(sessionId: string): CurrentTaskBinding | undefined;
     listContextManifests(goalId: string): ContextManifestProjection[];
+    listExecutionProfileResolutions(goalId: string): ExecutionProfileResolutionProjection[];
+    getBudgetSummary(goalId: string): BudgetSummaryProjection | undefined;
+    listExecutionEvaluations(goalId: string): ExecutionEvaluationProjection[];
+    listExecutionPolicyDecisions(goalId: string): ExecutionPolicyDecisionProjection[];
+    listMemoryIndexEntries(goalId: string): MemoryIndexEntryProjection[];
+    listMemoryRecords(goalId: string): MemoryRecordProjection[];
     getPlan(goalId: string, revision?: number): {
         readonly revision: number;
         readonly state: string;

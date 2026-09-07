@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { validateExecutionResult } from './adapters.js';
 import { V1_ARTIFACT_TYPES } from './domain.js';
+import { BudgetLedger } from './budgets.js';
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
 export class Scheduler {
     adapter;
@@ -17,6 +18,10 @@ export class Scheduler {
     validators;
     artifactStore;
     onTerminalFailure;
+    profileRouter;
+    executionPolicy;
+    memoryRetriever;
+    maxMemoryItems;
     aborters = new Map();
     /** Resolves an in-process dispatch when its durable lease is terminalized. */
     livenessSettlers = new Map();
@@ -40,6 +45,10 @@ export class Scheduler {
         this.validators = { required: async () => ({ ok: true }), ...(typeof options === 'number' ? {} : options.validators ?? {}) };
         this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore;
         this.onTerminalFailure = typeof options === 'number' ? undefined : options.onTerminalFailure;
+        this.profileRouter = typeof options === 'number' ? undefined : options.profileRouter;
+        this.executionPolicy = typeof options === 'number' ? undefined : options.executionPolicy;
+        this.memoryRetriever = typeof options === 'number' ? undefined : options.memoryRetriever;
+        this.maxMemoryItems = typeof options === 'number' ? undefined : options.maxMemoryItems;
         if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1)
             throw new Error('maxConcurrentTasks must be at least one');
     }
@@ -264,7 +273,8 @@ export class Scheduler {
             const summary = this.store.listAttempts(dependencyId, goalId).filter(attempt => attempt.state === 'SUCCEEDED').at(-1)?.summary;
             return { taskId: dependencyId, objective: dependency?.objective ?? dependencyId, ...(summary === undefined ? {} : { summary }) };
         });
-        return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store.listDecisions(goalId), evidence: this.store.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) };
+        const retrieval = this.memoryRetriever === undefined || this.maxMemoryItems === undefined ? undefined : this.memoryRetriever.retrieve({ query: `${goal?.objective ?? goalId} ${task.objective} ${dependencySummaries.map(item => item.summary ?? '').join(' ')}`, maxItems: this.maxMemoryItems, memories: this.store.listMemoryRecords(goalId).map(record => ({ id: record.memoryId, content: record.text, active: record.active, sourceRef: record.sourceRef })) });
+        return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store.listDecisions(goalId), evidence: this.store.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }), ...(retrieval === undefined ? {} : { retrieval }) };
     }
     async executeOne(goalId, task, executionParent, executionSignal) {
         const attemptId = randomUUID();
@@ -277,6 +287,33 @@ export class Scheduler {
         const attemptRevision = this.store.getGoal(goalId)?.revision ?? 1;
         const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`;
         this.aborters.set(attemptId, { goalId, taskId: task.id, controller });
+        let profile;
+        let policyDecision;
+        try {
+            const requestedProfileId = task.executionProfile ?? task.allowedExecutionProfiles?.[0] ?? this.profileRouter?.profileIds()[0];
+            if (this.executionPolicy !== undefined && requestedProfileId !== undefined && task.allowedExecutionProfiles !== undefined) {
+                policyDecision = this.executionPolicy.choose({ requestedProfileId, candidates: task.allowedExecutionProfiles.map(profileId => ({ profileId, enabled: this.profileRouter.profileIds().includes(profileId), compatible: true })) });
+                profile = this.profileRouter.resolve({ task: { ...task, executionProfile: policyDecision.selectedProfileId }, defaultTimeoutMs: task.timeoutMs ?? this.maxWallTimeMs });
+            }
+            else
+                profile = this.profileRouter?.resolve({ task, defaultTimeoutMs: task.timeoutMs ?? this.maxWallTimeMs });
+        }
+        catch (error) {
+            this.aborters.delete(attemptId);
+            executionSignal?.removeEventListener('abort', relayAbort);
+            const reason = failureMessage(error);
+            this.store.transaction(() => this.store.append([{ type: 'ExecutionProfileRejected', goalId, taskId: task.id, payload: { attemptId, reason, requestedProfile: task.executionProfile ?? null } }, { type: 'GoalPaused', goalId, payload: { reason: `execution profile rejected for ${task.id}: ${reason}` } }]));
+            return;
+        }
+        const reservation = { attempts: 1, wallTimeMs: profile?.timeoutMs ?? task.timeoutMs ?? this.maxWallTimeMs, estimatedTokens: 0, estimatedCostMicros: 0 };
+        const budgetSummary = this.store.getBudgetSummary(goalId);
+        const budgetActive = budgetSummary !== undefined || task.budget !== undefined;
+        if (budgetActive && !new BudgetLedger(budgetSummary?.usage).reserve({ ...(budgetSummary === undefined ? {} : { goal: budgetSummary.goal }), ...(task.budget === undefined ? {} : { task: task.budget }), estimate: reservation }).ok) {
+            this.aborters.delete(attemptId);
+            executionSignal?.removeEventListener('abort', relayAbort);
+            this.store.transaction(() => this.store.append([{ type: 'BudgetExhausted', goalId, taskId: task.id, payload: { attemptId, estimate: reservation } }, { type: 'GoalPaused', goalId, payload: { reason: `budget exhausted for ${task.id}` } }]));
+            return;
+        }
         let context;
         try {
             context = this.context(goalId, task);
@@ -290,21 +327,34 @@ export class Scheduler {
                 { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
             ]));
             this.aborters.delete(attemptId);
-            this.terminalFailure(goalId, task, attemptId, failureMessage(error));
+            this.terminalFailure(goalId, task, attemptId, failureMessage(error), undefined, false, budgetActive);
             return;
         }
         this.store.transaction(() => this.store.append([
+            ...(profile === undefined ? [] : [{ type: 'ExecutionProfileResolved', goalId, taskId: task.id, payload: { attemptId, profileId: profile.id, providerName: profile.providerName, agentOptionsHash: profile.agentOptionsHash, capabilities: profile.capabilities, toolDeny: profile.toolDeny, timeoutMs: profile.timeoutMs, selectionReason: profile.selectionReason } }]),
+            ...(policyDecision === undefined ? [] : [{ type: 'ExecutionPolicyDecided', goalId, taskId: task.id, payload: { attemptId, ...policyDecision } }]),
+            ...(budgetActive ? [{ type: 'BudgetReserved', goalId, taskId: task.id, payload: { attemptId, usage: reservation } }] : []),
             { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
             { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined, startedAt: new Date(this.now()).toISOString(), leaseExpiresAt: new Date(this.now() + this.idleTimeoutMs).toISOString(), maxWallExpiresAt: new Date(this.now() + Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs)).toISOString() } },
         ]));
+        const dispatchStartedAt = this.now();
         let result;
+        let adapterThrew = false;
         let sessionRecorded = false;
         const leaseExpired = new Promise(resolve => { this.livenessSettlers.set(attemptId, () => resolve({ status: 'failed', summary: 'attempt lease expired', failureKind: 'infrastructure', artifacts: [], evidence: [] })); });
-        const effectiveTimeoutMs = Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs);
+        const effectiveTimeoutMs = profile?.timeoutMs ?? Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs);
+        const onSessionId = (dshSessionId) => {
+            sessionRecorded = true;
+            this.store.transaction(() => this.store.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]));
+        };
         try {
-            result = await Promise.race([this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, timeoutMs: effectiveTimeoutMs, onSessionId: dshSessionId => { sessionRecorded = true; this.store.transaction(() => this.store.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])); }, ...(executionParent === undefined ? {} : { parent: executionParent }) }), leaseExpired]);
+            result = await Promise.race([
+                this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, timeoutMs: effectiveTimeoutMs, ...(profile === undefined ? {} : { profile }), onSessionId, ...(executionParent === undefined ? {} : { parent: executionParent }) }),
+                leaseExpired,
+            ]);
         }
         catch (error) {
+            adapterThrew = true;
             const failure = error;
             // An adapter that throws is an environment fault the seam could not
             // represent as a result, so it is classified as infrastructure.
@@ -313,20 +363,27 @@ export class Scheduler {
         this.livenessSettlers.delete(attemptId);
         this.aborters.delete(attemptId);
         executionSignal?.removeEventListener('abort', relayAbort);
-        if (this.store.getGoal(goalId)?.state === 'CANCELLED' || this.store.listAttempts(task.id, goalId).find(item => item.id === attemptId)?.state !== 'RUNNING')
+        if (this.store.getGoal(goalId)?.state === 'CANCELLED' || this.store.listAttempts(task.id, goalId).find(item => item.id === attemptId)?.state !== 'RUNNING') {
+            if (budgetActive)
+                this.store.transaction(() => this.store.append([{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'attempt was terminalized before result processing' } }]));
             return;
+        }
         // A conversation stop is an operator interruption, not a failed unit of
         // work.  In particular, it must never feed the automatic-replan loop.
         if (controller.signal.aborted) {
             this.retryAfter.delete(this.key(goalId, task.id));
             this.store.transaction(() => this.store.append([
+                ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } }] : []),
                 { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } },
                 { type: 'GoalPaused', goalId, payload: { reason: 'conversation stopped; resume with a live parent' } },
             ]));
             return;
         }
         if (this.store.getGoal(goalId)?.revision !== attemptRevision) {
-            this.store.transaction(() => this.store.append([{ type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } }]));
+            this.store.transaction(() => this.store.append([
+                ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'task result belongs to an obsolete plan revision' } }] : []),
+                { type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } },
+            ]));
             return;
         }
         // A child that reports an interruption (e.g. DSH stopReason 'aborted') is
@@ -335,6 +392,7 @@ export class Scheduler {
         if (result.status === 'failed' && failureKind === 'interrupted') {
             this.retryAfter.delete(this.key(goalId, task.id));
             this.store.transaction(() => this.store.append([
+                ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'task execution interrupted' } }] : []),
                 { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: result.summary } },
                 { type: 'GoalPaused', goalId, payload: { reason: 'task execution interrupted; resume with a live parent' } },
             ]));
@@ -353,6 +411,13 @@ export class Scheduler {
             const quotaRetryAt = failureKind === 'quota' ? validQuotaRetryAt(result.retryAt, this.now()) : undefined;
             this.store.transaction(() => {
                 const events = [];
+                if (budgetActive) {
+                    if (adapterThrew)
+                        events.push({ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'execution adapter threw before reporting usage' } });
+                    else
+                        events.push({ type: 'BudgetSettled', goalId, taskId: task.id, payload: { attemptId, reservation, actual: { attempts: 1, wallTimeMs: Math.max(0, this.now() - dispatchStartedAt), estimatedTokens: result.usage?.tokens ?? reservation.estimatedTokens, estimatedCostMicros: result.usage?.costMicros ?? reservation.estimatedCostMicros, estimated: result.usage?.estimated ?? true } } });
+                }
+                events.push({ type: 'ExecutionEvaluationRecorded', goalId, taskId: task.id, payload: { attemptId, ...(profile === undefined ? {} : { profileId: profile.id }), outcome: result.status, wallTimeMs: Math.max(0, this.now() - dispatchStartedAt), validatorOk: contract.ok, artifactContractOk: outputContract.ok } });
                 // onSessionId already recorded the child session at start; the settled
                 // result must not duplicate it for the same attempt.
                 if (result.dshSessionId !== undefined && !sessionRecorded)
@@ -423,15 +488,16 @@ export class Scheduler {
             }
         }
         catch (error) {
-            this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId, sessionRecorded);
+            this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId, sessionRecorded, budgetActive);
         }
     }
-    terminalFailure(goalId, task, attemptId, reason, dshSessionId, sessionRecorded = false) {
+    terminalFailure(goalId, task, attemptId, reason, dshSessionId, sessionRecorded = false, releaseBudget = false) {
         if (this.store.getGoal(goalId)?.state === 'CANCELLED')
             return;
         const attemptCount = this.store.listAttempts(task.id, goalId).length;
         const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts);
         this.store.transaction(() => this.store.append([
+            ...(releaseBudget ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason } }] : []),
             ...(dshSessionId === undefined || sessionRecorded ? [] : [{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]),
             { type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: false, validator: task.validator ?? 'runtime', reason } },
             { type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason } },

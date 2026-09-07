@@ -142,3 +142,57 @@ describe('RuntimeEventStore', () => {
     expect(runtime.listGoals({ archived: true }).map(goal => goal.id)).toEqual(['lt_recent'])
   })
 })
+
+describe('execution profile resolutions', () => {
+  test('projects and replays a durable resolved profile snapshot', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_profile', payload: { objective: 'route', constraints: [], planningMode: 'auto' } },
+      { type: 'ExecutionProfileResolved', goalId: 'lt_profile', taskId: 'node-a', payload: { attemptId: 'attempt-a', profileId: 'fast', providerName: 'spawn-fast', agentOptionsHash: 'abc', capabilities: ['code'], toolDeny: ['shell'], timeoutMs: 30_000, selectionReason: 'task selected fast' } },
+    ])
+    expect(store.listExecutionProfileResolutions('lt_profile')).toEqual([expect.objectContaining({ taskId: 'node-a', attemptId: 'attempt-a', profileId: 'fast', providerName: 'spawn-fast', timeoutMs: 30_000 })])
+    store.rebuild()
+    expect(store.listExecutionProfileResolutions('lt_profile')).toHaveLength(1)
+  })
+})
+
+describe('budget projections', () => {
+  test('projects configured limits and settled usage from append-only facts', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_budget', payload: { objective: 'budget', constraints: [], planningMode: 'auto' } },
+      { type: 'BudgetConfigured', goalId: 'lt_budget', payload: { scope: 'goal', limit: { maxAttempts: 2 } } },
+      { type: 'BudgetReserved', goalId: 'lt_budget', taskId: 'a', payload: { attemptId: 'a1', usage: { attempts: 1, wallTimeMs: 10, estimatedTokens: 2, estimatedCostMicros: 3 } } },
+      { type: 'BudgetSettled', goalId: 'lt_budget', taskId: 'a', payload: { attemptId: 'a1', reservation: { attempts: 1, wallTimeMs: 10, estimatedTokens: 2, estimatedCostMicros: 3 }, actual: { attempts: 1, wallTimeMs: 8, estimatedTokens: 1, estimatedCostMicros: 2 } } },
+    ])
+    expect(store.getBudgetSummary('lt_budget')).toEqual({ goal: { maxAttempts: 2 }, usage: { attempts: 1, wallTimeMs: 8, estimatedTokens: 1, estimatedCostMicros: 2 }, reservations: [] })
+    store.rebuild()
+    expect(store.getBudgetSummary('lt_budget')?.usage.wallTimeMs).toBe(8)
+  })
+})
+
+describe('execution evaluations', () => {
+  test('projects replayable execution evaluation facts', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_eval', payload: { objective: 'evaluate', constraints: [], planningMode: 'auto' } },
+      { type: 'ExecutionEvaluationRecorded', goalId: 'lt_eval', taskId: 'a', payload: { attemptId: 'a1', profileId: 'fast', outcome: 'succeeded', wallTimeMs: 12, validatorOk: true, artifactContractOk: true } },
+    ])
+    expect(store.listExecutionEvaluations('lt_eval')).toEqual([expect.objectContaining({ taskId: 'a', profileId: 'fast', outcome: 'succeeded', wallTimeMs: 12 })])
+    store.rebuild()
+    expect(store.listExecutionEvaluations('lt_eval')).toHaveLength(1)
+  })
+})
+
+describe('memory index projections', () => {
+  test('projects and rebuilds source-linked memory index entries', () => {
+    const store = new RuntimeEventStore(':memory:')
+    store.append([
+      { type: 'GoalCreated', goalId: 'lt_memory', payload: { objective: 'remember', constraints: [], planningMode: 'auto' } },
+      { type: 'MemoryIndexed', goalId: 'lt_memory', payload: { memoryId: 'm1', contentHash: 'hash1', sourceRef: 'event:1', active: true } },
+    ])
+    expect(store.listMemoryIndexEntries('lt_memory')).toEqual([{ memoryId: 'm1', contentHash: 'hash1', sourceRef: 'event:1', active: true }])
+    store.rebuild()
+    expect(store.listMemoryIndexEntries('lt_memory')).toHaveLength(1)
+  })
+})

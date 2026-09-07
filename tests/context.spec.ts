@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { ArtifactStore } from '../src/artifacts.js'
 import { ContextBroker } from '../src/context.js'
+import { MemoryRetriever } from '../src/memory-retrieval.js'
 
 const directories: string[] = []
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }) })
@@ -65,5 +66,13 @@ describe('artifacts and execution context', () => {
         evidence: [{ taskId: 'a', value: { source: 'test-report' } }],
       },
     })
+  })
+
+  test('records a source-linked retrieval decision without displacing direct artifacts', () => {
+    const broker = new ContextBroker({
+      objective: 'ship runtime', tasks: new Map([['a', { id: 'a', objective: 'implement runtime', dependsOn: [] }]]), artifacts: [],
+      memories: [{ id: 'm1', content: 'runtime conventions', active: true, sourceRef: 'event:1' }], memoryRetriever: new MemoryRetriever(), maxMemoryItems: 1,
+    })
+    expect(broker.build('a').retrieval).toMatchObject({ selected: [{ memoryId: 'm1' }], algorithm: 'lexical-v1' })
   })
 })

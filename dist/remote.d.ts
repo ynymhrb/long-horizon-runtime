@@ -20,6 +20,9 @@ export declare class LongTaskRemote extends TypertRemoteService {
     getTask(input: {
         taskId: string;
     }): unknown;
+    getTaskAudit(input: {
+        taskId: string;
+    }): unknown;
     getTaskGraph(input: {
         taskId: string;
         revision?: number;
