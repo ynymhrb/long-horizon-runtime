@@ -13,6 +13,11 @@ export function cockpitDataState(task, graph) {
   return 'ready'
 }
 
+/** Original-goal revisions require a live, non-terminal task. */
+export function canEditOriginalGoal(task) {
+  return task !== undefined && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.state)
+}
+
 /**
  * Build the message injected into the bound session after a web-side resume.
  * The session's model receives it as its next prompt and drives the DAG with

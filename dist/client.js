@@ -4608,6 +4608,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (graph === null) return "no-plan";
 			return "ready";
 		}
+		/** Original-goal revisions require a live, non-terminal task. */
+		function canEditOriginalGoal(task) {
+			return task !== void 0 && ![
+				"SUCCEEDED",
+				"FAILED",
+				"CANCELLED"
+			].includes(task.state);
+		}
 		/**
 		* Build the message injected into the bound session after a web-side resume.
 		* The session's model receives it as its next prompt and drives the DAG with
@@ -4793,6 +4801,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const externalResolutionRequired = task.state === "PAUSED" && task.tasks?.some((node) => node.state === "BLOCKED" && node.sideEffectClass === "external_effect");
 			const latestQuotaRecovery = [...task.recentEvents ?? []].reverse().find((event) => event.type === "QuotaRecoveryResumed");
 			const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, /* @__PURE__ */ new Date(), latestQuotaRecovery);
+			const editableOriginalGoal = canEditOriginalGoal(task);
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
@@ -4819,7 +4828,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					expectedRevision: task.controlRevision,
 					...sessionId ? { sessionId } : {}
 				})
-			}, "接受重规划") : null, e$3("button", {
+			}, "接受重规划") : null, editableOriginalGoal ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
@@ -4828,7 +4837,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					setObjective(task.objective);
 					setReason("");
 				}
-			}, "修改原始目标"), e$3("button", {
+			}, "修改原始目标") : null, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
@@ -4859,7 +4868,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, labels[name])])), error ? e$3("p", {
 				className: "ltr-error",
 				role: "alert"
-			}, error) : null, editing ? e$3("form", {
+			}, error) : null, editing && editableOriginalGoal ? e$3("form", {
 				className: "ltr-goal-edit",
 				onSubmit: (event) => {
 					event.preventDefault();

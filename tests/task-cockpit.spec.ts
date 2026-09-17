@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
+import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
 import { quotaRecoveryPresentation } from '../client/task-presentation.js'
 
 test('prefers a running node then pending work for the Cockpit inspector', () => {
@@ -12,6 +12,13 @@ test('identifies historical tasks that failed before a plan existed', () => {
   expect(cockpitDataState(null, null)).toBe('missing')
   expect(cockpitDataState({ id: 'goal-old', state: 'FAILED' }, null)).toBe('no-plan')
   expect(cockpitDataState({ id: 'lt_current', state: 'FAILED' }, { nodes: [], edges: [] })).toBe('ready')
+})
+
+test('does not offer original-goal edits for terminal tasks', () => {
+  expect(canEditOriginalGoal({ state: 'SUCCEEDED' })).toBe(false)
+  expect(canEditOriginalGoal({ state: 'FAILED' })).toBe(false)
+  expect(canEditOriginalGoal({ state: 'CANCELLED' })).toBe(false)
+  expect(canEditOriginalGoal({ state: 'PAUSED' })).toBe(true)
 })
 
 test('builds a session driver message that asks the model to resume the task', () => {

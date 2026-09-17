@@ -1,6 +1,6 @@
 import React from 'react'
 import { TaskDag } from './TaskDag.js'
-import { cockpitDataState, initialSelectedNode, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from './task-model.js'
+import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from './task-model.js'
 import { quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 import { formatTaskEvent } from './task-events.js'
@@ -69,6 +69,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const externalResolutionRequired = task.state === 'PAUSED' && task.tasks?.some(node => node.state === 'BLOCKED' && node.sideEffectClass === 'external_effect')
   const latestQuotaRecovery = [...(task.recentEvents ?? [])].reverse().find(event => event.type === 'QuotaRecoveryResumed')
   const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, new Date(), latestQuotaRecovery)
+  const editableOriginalGoal = canEditOriginalGoal(task)
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },
       e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'),
@@ -77,14 +78,14 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       sessionId ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending || isCurrent, onClick: attach }, isCurrent ? '当前会话任务' : attached ? '设为当前任务' : '附加到当前会话') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('rejectReplan', { taskId: task.id, expectedRevision: task.controlRevision }) }, '拒绝改计划') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
-      e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标'),
+      editableOriginalGoal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: jump }, '当前会话'),
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...(task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
         ? [e('button', { key: 'resume-retry', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]
         : [e('button', { key: name, type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action(name) }, labels[name])])),
     error ? e('p', { className: 'ltr-error', role: 'alert' }, error) : null,
-    editing ? e('form', { className: 'ltr-goal-edit', onSubmit: event => { event.preventDefault(); if (objective.trim() && reason.trim()) edit() } }, e('label', null, '新原始目标', e('textarea', { value: objective, onChange: event => setObjective(event.target.value) })), e('label', null, '修改原因', e('input', { value: reason, onChange: event => setReason(event.target.value) })), e('button', { type: 'submit', className: 'ltr-btn', disabled: pending || !objective.trim() || !reason.trim() }, '生成重规划')) : null,
+    editing && editableOriginalGoal ? e('form', { className: 'ltr-goal-edit', onSubmit: event => { event.preventDefault(); if (objective.trim() && reason.trim()) edit() } }, e('label', null, '新原始目标', e('textarea', { value: objective, onChange: event => setObjective(event.target.value) })), e('label', null, '修改原因', e('input', { value: reason, onChange: event => setReason(event.target.value) })), e('button', { type: 'submit', className: 'ltr-btn', disabled: pending || !objective.trim() || !reason.trim() }, '生成重规划')) : null,
     e('p', { className: 'ltr-plan-hint' }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
     e('div', { className: 'ltr-cockpit-body' },
       e(TaskDag, { nodes: graph.nodes, selectedId, onSelect: setSelectedId }),
