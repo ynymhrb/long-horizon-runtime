@@ -8,6 +8,7 @@ import { ProfileRouter, type ResolvedExecutionProfile } from './execution-profil
 import { ExecutionPolicy } from './execution-policy.js'
 import { BudgetLedger, type BudgetReservation } from './budgets.js'
 import type { MemoryRetriever } from './memory-retrieval.js'
+import { AcceptanceEngine } from './acceptance.js'
 
 type MutableTask = { -readonly [Key in keyof TaskNode]: TaskNode[Key] }
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate'
@@ -35,6 +36,7 @@ export interface SchedulerOptions {
   readonly executionPolicy?: ExecutionPolicy
   readonly memoryRetriever?: MemoryRetriever
   readonly maxMemoryItems?: number
+  readonly acceptanceEngine?: AcceptanceEngine
 }
 
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
@@ -56,6 +58,7 @@ export class Scheduler {
   private readonly executionPolicy: ExecutionPolicy | undefined
   private readonly memoryRetriever: MemoryRetriever | undefined
   private readonly maxMemoryItems: number | undefined
+  private readonly acceptanceEngine: AcceptanceEngine | undefined
   private readonly aborters = new Map<string, { readonly goalId: string; readonly taskId: string; readonly controller: AbortController }>()
   /** Resolves an in-process dispatch when its durable lease is terminalized. */
   private readonly livenessSettlers = new Map<string, () => void>()
@@ -83,6 +86,7 @@ export class Scheduler {
     this.executionPolicy = typeof options === 'number' ? undefined : options.executionPolicy
     this.memoryRetriever = typeof options === 'number' ? undefined : options.memoryRetriever
     this.maxMemoryItems = typeof options === 'number' ? undefined : options.maxMemoryItems
+    this.acceptanceEngine = typeof options === 'number' ? undefined : options.acceptanceEngine
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
 
@@ -399,7 +403,13 @@ export class Scheduler {
       const namedValidatorResult = task.validator !== undefined && selectedValidator === undefined
         ? { ok: false as const, reason: `unknown task validator: ${task.validator}` }
         : baseContract.ok && outputContract.ok && selectedValidator !== undefined ? await selectedValidator({ goalId, task, attemptId, result }) : undefined
-      const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
+      const baseAcceptance = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
+      const acceptance = task.acceptanceChecks === undefined || task.acceptanceChecks.length === 0 ? undefined
+        : this.acceptanceEngine === undefined ? { verdict: 'failed' as const, checks: [{ id: 'engine', kind: 'command' as const, ok: false, summary: 'acceptance engine is not configured' }] }
+        : await this.acceptanceEngine.evaluate({ attemptId, workspace: process.cwd(), checks: task.acceptanceChecks })
+      const contract = baseAcceptance.ok && (task.acceptancePolicy !== 'required' || acceptance?.verdict === 'passed')
+        ? { ok: true as const }
+        : { ok: false as const, reason: baseAcceptance.ok ? acceptance === undefined ? 'required task has no acceptance checks' : acceptance.checks.find(check => !check.ok)?.summary ?? 'acceptance failed' : baseAcceptance.reason }
       const attemptCount = this.store!.listAttempts(task.id, goalId).length
       const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
       const quotaRetryAt = failureKind === 'quota' ? validQuotaRetryAt(result.retryAt, this.now()) : undefined
@@ -421,6 +431,7 @@ export class Scheduler {
           : { ...stored, attemptId } })
       }
       for (const evidence of result.evidence) events.push({ type: 'EvidenceRecorded', goalId, taskId: task.id, payload: { attemptId, evidence } })
+      if (acceptance !== undefined) for (const check of acceptance.checks) events.push({ type: 'AcceptanceCheckFinished', goalId, taskId: task.id, payload: { attemptId, ...check } })
       events.push({ type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: contract.ok, validator: task.validator ?? 'result-contract', ...(contract.ok ? {} : { reason: contract.reason }), ...(failureKind === 'output' ? {} : { failureKind }) } })
       if (contract.ok) {
         this.retryAfter.delete(this.key(goalId, task.id))
