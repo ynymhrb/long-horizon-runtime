@@ -6,6 +6,7 @@ export type TaskState = 'PENDING' | 'READY' | 'RUNNING' | 'BLOCKED' | 'SUCCEEDED
 
 /** How a scheduler may recover an interrupted task. */
 export type SideEffectClass = 'read_only' | 'idempotent' | 'external_effect'
+import type { AcceptanceCheck, AcceptancePolicy } from './acceptance-contract.js'
 
 /** Durable observation, separate from the policy chosen for what happens next. */
 export type InterruptionCause = 'user_stop' | 'timeout' | 'process_loss' | 'child_failure'
@@ -33,6 +34,8 @@ export interface TaskDraft {
   readonly completionCriteria?: string
   readonly retryPolicy?: RetryPolicy
   readonly validator?: string
+  readonly acceptanceChecks?: readonly AcceptanceCheck[]
+  readonly acceptancePolicy?: AcceptancePolicy
   /** Per-task child execution budget in milliseconds; overrides the deployment default when set. */
   readonly timeoutMs?: number
   /** Optional named execution profile selected by the planner. */
