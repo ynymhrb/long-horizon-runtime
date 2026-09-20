@@ -38,3 +38,19 @@ test('分支写入初始快照时硬停止并保留污染证据', async () => {
   expect(result.verdict).toBe('hard_stop')
   expect(result.contamination).toContain('initial_snapshot_modified')
 })
+
+test('命令分支在各自副本中执行并由 oracle 产生效用', async () => {
+  const { root, snapshot, evidenceRoot } = await setup()
+  await writeFile(path.join(snapshot, 'action.mjs'), "import { writeFile } from 'node:fs/promises'; await writeFile(process.argv[2], process.argv[3])", 'utf8')
+  const result = await runCounterfactualBranches({
+    initialSnapshot: snapshot, workspaceRoot: root, evidenceRoot,
+    actions: [
+      { id: 'pass', command: ['node', 'action.mjs', 'result.txt', 'pass'] },
+      { id: 'fail', command: ['node', 'action.mjs', 'result.txt', 'fail'] },
+    ],
+    continuationCommand: ['node', 'action.mjs', 'continued.txt', 'yes'],
+    oracleCommand: ['node', '-e', "process.exit(require('fs').readFileSync('result.txt','utf8') === 'pass' ? 0 : 1)"],
+  })
+  expect(result.verdict).toBe('pass')
+  expect(result.branches.map(row => row.utility)).toEqual([1, 0])
+})

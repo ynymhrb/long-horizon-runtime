@@ -1,5 +1,6 @@
 import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 
 /**
@@ -16,7 +17,11 @@ export async function runCounterfactualBranches(input) {
     const branch = path.join(input.workspaceRoot, `branch-${safeName(action.id)}`)
     await cp(input.initialSnapshot, branch, { recursive: true, force: false, errorOnExist: true })
     let outcome
-    try { outcome = await input.executor.execute({ branch, action }) } catch (error) { outcome = { utility: Number.NEGATIVE_INFINITY, error: error instanceof Error ? error.message : String(error) } }
+    try {
+      outcome = input.executor === undefined
+        ? await executeCommands(branch, action, input.continuationCommand, input.oracleCommand)
+        : await input.executor.execute({ branch, action })
+    } catch (error) { outcome = { utility: 0, error: error instanceof Error ? error.message : String(error) } }
     const after = await directoryHash(input.initialSnapshot)
     if (after !== before) contamination.push('initial_snapshot_modified')
     branches.push({ actionId: action.id, branch, initialStateHash: before, utility: outcome.utility, ...(outcome.error === undefined ? {} : { error: outcome.error }) })
@@ -26,6 +31,25 @@ export async function runCounterfactualBranches(input) {
   const result = { verdict, branches, contamination: [...new Set(contamination)] }
   await writeEvidence(input.evidenceRoot, result)
   return result
+}
+
+/** @param {string} cwd @param {{ command?: string[] }} action @param {string[] | undefined} continuationCommand @param {string[] | undefined} oracleCommand */
+async function executeCommands(cwd, action, continuationCommand, oracleCommand) {
+  if (!Array.isArray(action.command) || action.command.length === 0) throw new Error('命令分支需要非空 action.command')
+  if (!await runCommand(action.command, cwd)) return { utility: 0, error: 'action command failed' }
+  if (continuationCommand !== undefined && !await runCommand(continuationCommand, cwd)) return { utility: 0, error: 'continuation command failed' }
+  return { utility: oracleCommand === undefined || await runCommand(oracleCommand, cwd) ? 1 : 0 }
+}
+
+/** @param {string[]} command @param {string} cwd */
+function runCommand(command, cwd) {
+  return new Promise(resolve => {
+    const [file, ...args] = command
+    if (file === undefined) return resolve(false)
+    const child = spawn(file, args, { cwd, shell: false, stdio: 'ignore', windowsHide: true })
+    child.once('error', () => resolve(false))
+    child.once('exit', code => resolve(code === 0))
+  })
 }
 
 /** @param {string} root */
