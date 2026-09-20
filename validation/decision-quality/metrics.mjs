@@ -31,7 +31,7 @@ export function scoreDecisionPoint(estimates, outcomes) {
   }
 }
 
-/** @param {{ verdict: string, bestActionHit?: boolean, gccaMse?: number, taskSuccess?: boolean, wrongPathLength?: number, replanTimingError?: number, constraintViolation?: boolean, cost?: number }[]} records */
+/** @param {{ verdict: string, bestActionHit?: boolean, gccaMse?: number, rankTau?: number, taskSuccess?: boolean, wrongPathLength?: number, replanTimingError?: number, constraintViolation?: boolean, cost?: number }[]} records */
 export function aggregateDecisionQuality(records) {
   const complete = records.filter(record => record.verdict === 'complete')
   const hits = complete.filter(record => record.bestActionHit === true).length
@@ -40,12 +40,38 @@ export function aggregateDecisionQuality(records) {
     decision_points: { complete: complete.length, inconclusive: records.length - complete.length },
     best_action_accuracy: rate(hits, complete.length),
     gcca_mse: average(finite('gccaMse')),
+    rank_tau_b: average(finite('rankTau')),
     task_success_rate: rate(complete.filter(record => record.taskSuccess === true).length, complete.filter(record => typeof record.taskSuccess === 'boolean').length),
     wrong_path_length: average(finite('wrongPathLength')),
     replan_timing_error: average(finite('replanTimingError')),
     constraint_violation_rate: rate(complete.filter(record => record.constraintViolation === true).length, complete.filter(record => typeof record.constraintViolation === 'boolean').length),
     mean_cost: average(finite('cost')),
   }
+}
+
+/**
+ * 排名估计与反事实效用之间的 Kendall tau-b；并列对不被误当作排序错误。
+ * @param {number[]} estimates @param {number[]} outcomes
+ */
+export function kendallTauB(estimates, outcomes) {
+  if (!Array.isArray(estimates) || !Array.isArray(outcomes) || estimates.length !== outcomes.length || estimates.length < 2 || estimates.some(value => !Number.isFinite(value)) || outcomes.some(value => !Number.isFinite(value))) return null
+  let concordant = 0
+  let discordant = 0
+  let estimateTies = 0
+  let outcomeTies = 0
+  for (let left = 0; left < estimates.length; left += 1) {
+    for (let right = left + 1; right < estimates.length; right += 1) {
+      const estimateDelta = Math.sign(estimates[left] - estimates[right])
+      const outcomeDelta = Math.sign(outcomes[left] - outcomes[right])
+      if (estimateDelta === 0 && outcomeDelta === 0) continue
+      if (estimateDelta === 0) { estimateTies += 1; continue }
+      if (outcomeDelta === 0) { outcomeTies += 1; continue }
+      if (estimateDelta === outcomeDelta) concordant += 1
+      else discordant += 1
+    }
+  }
+  const denominator = Math.sqrt((concordant + discordant + estimateTies) * (concordant + discordant + outcomeTies))
+  return denominator === 0 ? null : (concordant - discordant) / denominator
 }
 
 /** @param {number} numerator @param {number} denominator */

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { validateDecisionScenario } from './contract.mjs'
-import { aggregateDecisionQuality, deriveCausalAdvantages, scoreDecisionPoint } from './metrics.mjs'
+import { aggregateDecisionQuality, deriveCausalAdvantages, kendallTauB, scoreDecisionPoint } from './metrics.mjs'
 import { createScorer } from './scorers.mjs'
 import { renderChineseReport } from './report.mjs'
 import { runCounterfactualBranches } from './branch-runner.mjs'
@@ -20,7 +20,7 @@ export async function runFixture(input) {
   const outcomes = branchResult === undefined ? point.actions.map(action => ({ actionId: action.id, utility: action.potential_outcome ?? 0 })) : branchResult.branches.map(row => ({ actionId: row.actionId, utility: row.utility }))
   const truth = new Map(deriveCausalAdvantages(outcomes).map(row => [row.actionId, row.advantage]))
   const decision = scoreDecisionPoint(estimates.map(row => ({ actionId: row.actionId, estimate: row.total })), outcomes)
-  const enriched = { ...decision, gccaMse: estimates.reduce((sum, row) => sum + (row.causalAdvantage - /** @type {number} */ (truth.get(row.actionId))) ** 2, 0) / estimates.length, taskSuccess: decision.bestActionHit, cost: estimates.find(row => row.actionId === decision.chosen[0])?.total ?? 0 }
+  const enriched = { ...decision, gccaMse: estimates.reduce((sum, row) => sum + (row.causalAdvantage - /** @type {number} */ (truth.get(row.actionId))) ** 2, 0) / estimates.length, rankTau: kendallTauB(estimates.map(row => row.total), outcomes.map(row => row.utility)), taskSuccess: decision.bestActionHit, cost: estimates.find(row => row.actionId === decision.chosen[0])?.total ?? 0 }
   const metrics = aggregateDecisionQuality([enriched])
   await mkdir(evidenceDir, { recursive: true })
   const decisionText = JSON.stringify({ scenario_id: scenario.id, method: input.method, estimates, outcomes, decision: enriched }, null, 2)
@@ -50,7 +50,8 @@ export async function runLive(input) {
   const estimates = await createScorer(input.method, { model: async () => output }).score({ goal: scenario.goal, constraints: scenario.constraints, actions: point.actions, evidenceIds: ['live-model'] })
   await mkdir(evidenceDir, { recursive: true })
   const outcomes = branchResult.branches.map(row => ({ actionId: row.actionId, utility: row.utility }))
-  const decision = scoreDecisionPoint(estimates.map(row => ({ actionId: row.actionId, estimate: row.total })), outcomes)
+  const baseDecision = scoreDecisionPoint(estimates.map(row => ({ actionId: row.actionId, estimate: row.total })), outcomes)
+  const decision = { ...baseDecision, rankTau: kendallTauB(estimates.map(row => row.total), outcomes.map(row => row.utility)) }
   const decisionText = JSON.stringify({ scenario_id: scenario.id, method: input.method, estimates, outcomes, decision, usage: settled.usage, verdict: decision.verdict }, null, 2)
   await writeFile(path.join(evidenceDir, 'decision.json'), decisionText, 'utf8')
   await writeFile(path.join(evidenceDir, 'usage.json'), JSON.stringify(settled.usage, null, 2), 'utf8')

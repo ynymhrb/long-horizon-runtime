@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { aggregateDecisionQuality, deriveCausalAdvantages, scoreDecisionPoint } from '../validation/decision-quality/metrics.mjs'
+import { aggregateDecisionQuality, deriveCausalAdvantages, kendallTauB, scoreDecisionPoint } from '../validation/decision-quality/metrics.mjs'
 
 describe('反事实决策指标', () => {
   test('以最佳替代行动为基线计算 GCCA', () => {
@@ -39,5 +39,11 @@ describe('反事实决策指标', () => {
     expect(result.best_action_accuracy).toEqual({ numerator: 0, denominator: 0, rate: 0 })
     expect(result.gcca_mse).toBeNull()
     expect(JSON.stringify(result)).not.toContain('NaN')
+  })
+
+  test('Kendall tau-b 对排序一致、相反和并列给出可解释结果', () => {
+    expect(kendallTauB([3, 2, 1], [9, 8, 7])).toBe(1)
+    expect(kendallTauB([3, 2, 1], [7, 8, 9])).toBe(-1)
+    expect(kendallTauB([1, 1, 2], [1, 1, 2])).toBe(1)
   })
 })
