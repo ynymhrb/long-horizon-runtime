@@ -16,6 +16,7 @@ export async function runCounterfactualBranches(input) {
   for (const action of input.actions) {
     const branch = path.join(input.workspaceRoot, `branch-${safeName(action.id)}`)
     await cp(input.initialSnapshot, branch, { recursive: true, force: false, errorOnExist: true })
+    if (input.setup !== undefined) await writeFile(path.join(branch, 'scenario-config.json'), JSON.stringify(input.setup), 'utf8')
     let outcome
     try {
       outcome = input.executor === undefined

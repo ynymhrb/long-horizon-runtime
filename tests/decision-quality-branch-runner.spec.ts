@@ -67,3 +67,12 @@ test('命令模式拒绝未允许的可执行文件和越界脚本路径', async
     actions: [{ id: 'traversal', command: ['node', '../escape.mjs'] }],
   })).resolves.toMatchObject({ branches: [expect.objectContaining({ error: expect.stringMatching(/越界/) })] })
 })
+
+test('每条分支在复制后接收同一份场景配置而不修改初始快照', async () => {
+  const { root, snapshot, evidenceRoot } = await setup()
+  await writeFile(path.join(snapshot, 'read-config.mjs'), "import { readFile, writeFile } from 'node:fs/promises'; await writeFile('result.txt', (await readFile('scenario-config.json', 'utf8')).includes('diagnose') ? 'ok' : 'bad')", 'utf8')
+  await writeFile(path.join(snapshot, 'oracle.mjs'), "import { readFile } from 'node:fs/promises'; process.exit(await readFile('result.txt', 'utf8') === 'ok' ? 0 : 1)", 'utf8')
+  const result = await runCounterfactualBranches({ initialSnapshot: snapshot, workspaceRoot: root, evidenceRoot, actions: [{ id: 'a', command: ['node', 'read-config.mjs'] }], setup: { family: 'diagnose' }, oracleCommand: ['node', 'oracle.mjs'] })
+  expect(result.branches[0].utility).toBe(1)
+  await expect(readFile(path.join(snapshot, 'scenario-config.json'), 'utf8')).rejects.toThrow()
+})

@@ -115,7 +115,7 @@ async function executeScenarioBranches(scenario, scenarioFile, actions, evidence
   const result = await runCounterfactualBranches({
     initialSnapshot: path.resolve(path.dirname(scenarioFile), executable.snapshot_dir),
     workspaceRoot: path.join(evidenceDir, 'branches'), evidenceRoot: evidenceDir,
-    actions, continuationCommand: executable.continuation_command, oracleCommand: scenario.oracle.command,
+    actions, setup: executable.setup, continuationCommand: executable.continuation_command, oracleCommand: scenario.oracle.command,
   })
   if (result.verdict === 'hard_stop') throw new Error('反事实分支检测到初始快照污染，已硬停止')
   return result
