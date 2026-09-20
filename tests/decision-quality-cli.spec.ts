@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, test } from 'vitest'
-import { runFixture, runLive, runLiveSuite } from '../validation/decision-quality/cli.mjs'
+import { aggregateEvidence, runFixture, runLive, runLiveSuite } from '../validation/decision-quality/cli.mjs'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))) })
@@ -41,6 +41,15 @@ test('runLiveSuite 汇总逐场景的完整 verdict 与 token 使用量', async 
   expect(result.records).toHaveLength(2)
   expect(result.totalTokens).toBe(6)
   expect(JSON.parse(await readFile(path.join(result.evidenceDir, 'suite.json'), 'utf8'))).toMatchObject({ complete: true, totalTokens: 6 })
+})
+
+test('aggregateEvidence 不静默丢弃不确定记录', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dq-aggregate-'))
+  dirs.push(root)
+  await writeFile(path.join(root, 'decision.json'), JSON.stringify({ decision: { verdict: 'complete', bestActionHit: true, gccaMse: 1, rankTau: 1 } }), 'utf8')
+  await writeFile(path.join(root, 'other.json'), JSON.stringify({ decision: { verdict: 'inconclusive' } }), 'utf8')
+  const result = await aggregateEvidence(root)
+  expect(result.metrics.decision_points).toEqual({ complete: 1, inconclusive: 1 })
 })
 
 function fakeModel() {

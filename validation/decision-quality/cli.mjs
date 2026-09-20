@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { validateDecisionScenario } from './contract.mjs'
@@ -85,6 +85,29 @@ export async function runLiveSuite(input) {
   return { evidenceDir, records, totalTokens }
 }
 
+/** @param {string} evidenceRoot */
+export async function aggregateEvidence(evidenceRoot) {
+  const files = await findDecisionFiles(evidenceRoot)
+  const records = []
+  for (const file of files) {
+    const value = JSON.parse(await readFile(file, 'utf8'))
+    if (value?.decision?.verdict !== undefined) records.push(value.decision)
+  }
+  return { records, metrics: aggregateDecisionQuality(records) }
+}
+
+/** @param {string} root */
+async function findDecisionFiles(root) {
+  const found = []
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const full = path.join(root, entry.name)
+    if (entry.isDirectory()) found.push(...await findDecisionFiles(full))
+    else if (entry.isFile() && entry.name === 'decision.json') found.push(full)
+    else if (entry.isFile() && entry.name.endsWith('.json')) found.push(full)
+  }
+  return found.sort()
+}
+
 /** @param {any} scenario @param {string} scenarioFile @param {any[]} actions @param {string} evidenceDir */
 async function executeScenarioBranches(scenario, scenarioFile, actions, evidenceDir) {
   const executable = scenario.execution
@@ -101,6 +124,19 @@ async function executeScenarioBranches(scenario, scenarioFile, actions, evidence
 async function main() {
   const [command, scenarioFile, ...rest] = process.argv.slice(2)
   const options = Object.fromEntries(rest.reduce((pairs, value, index) => index % 2 === 0 ? [...pairs, [value.replace(/^--/, ''), rest[index + 1]]] : pairs, []))
+  if (command === 'aggregate') {
+    if (scenarioFile === undefined || typeof options.output !== 'string') throw new Error('用法：aggregate <证据目录> --output <文件>')
+    const result = await aggregateEvidence(scenarioFile)
+    await writeFile(options.output, JSON.stringify(result, null, 2), 'utf8')
+    process.stdout.write(`${options.output}\n`)
+    return
+  }
+  if (command === 'validate') {
+    if (scenarioFile === undefined) throw new Error('用法：validate <场景>')
+    validateDecisionScenario(JSON.parse(await readFile(scenarioFile, 'utf8')), scenarioFile)
+    process.stdout.write(`${scenarioFile}\n`)
+    return
+  }
   if (scenarioFile === undefined || typeof options['evidence-root'] !== 'string' || (command !== 'run-live-suite' && typeof options.method !== 'string')) throw new Error('用法：run-fixture <场景> --method <方法> --evidence-root <目录>')
   const result = command === 'run-fixture'
     ? await runFixture({ scenarioFile, method: /** @type {any} */ (options.method), evidenceRoot: options['evidence-root'] })
