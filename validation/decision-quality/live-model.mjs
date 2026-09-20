@@ -9,7 +9,7 @@ export function createDeepSeekDecisionModel(options) {
   return {
     async evaluate(input) {
       if (used >= options.tokenBudget) throw new Error('token 预算已耗尽')
-      const body = JSON.stringify({ model: options.model, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'user', content: JSON.stringify({ task: '为候选行动给出结构化评分', input }) }] })
+      const body = JSON.stringify({ model: options.model, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'user', content: JSON.stringify({ task: '只根据公开目标、约束与行动元数据评分；返回 JSON 对象 {scores:[{actionId,causalAdvantage,informationValue,lower,upper,evidenceRefs:["live-model"]}]}，不得声称执行过代码或测试', input }) }] })
       let response
       try {
         response = await fetchImpl('https://api.deepseek.com/chat/completions', {
