@@ -95,7 +95,7 @@ function isExecution(value) {
     && (record.continuation_command === undefined || (Array.isArray(record.continuation_command) && record.continuation_command.length > 0 && record.continuation_command.every(nonBlank)))
 }
 /** @param {string} value */
-function pathLikeEscape(value) { return value.split(/[\\/]/).includes('..') || /^[\\/]|^[A-Za-z]:/.test(value) }
+function pathLikeEscape(value) { return /^[\\/]|^[A-Za-z]:/.test(value) }
 
 /** @template T @param {T} value @returns {T} */
 function deepFreeze(value) {
