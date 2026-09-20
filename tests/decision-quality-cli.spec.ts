@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, test } from 'vitest'
-import { runFixture, runLive } from '../validation/decision-quality/cli.mjs'
+import { runFixture, runLive, runLiveSuite } from '../validation/decision-quality/cli.mjs'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))) })
@@ -27,7 +27,20 @@ test('runLive 要求显式成本确认并保存脱敏 usage', async () => {
   await expect(runLive({ scenarioFile, method: 'full', evidenceRoot: output, model: fakeModel(), acknowledgedCost: false })).rejects.toThrow(/显式确认/)
   const result = await runLive({ scenarioFile, method: 'full', evidenceRoot: output, model: fakeModel(), acknowledgedCost: true })
   expect(result.usage).toEqual({ totalTokens: 3, usedTokens: 3 })
-  expect(JSON.stringify(JSON.parse(await readFile(path.join(result.evidenceDir, 'decision.json'), 'utf8')))).not.toContain('test-secret')
+  const decision = JSON.parse(await readFile(path.join(result.evidenceDir, 'decision.json'), 'utf8'))
+  expect(decision.verdict).toBe('complete')
+  expect(decision.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ actionId: 'diagnose', utility: 1 })]))
+  expect(JSON.stringify(decision)).not.toContain('test-secret')
+})
+
+test('runLiveSuite 汇总逐场景的完整 verdict 与 token 使用量', async () => {
+  const output = await mkdtemp(path.join(tmpdir(), 'dq-suite-'))
+  dirs.push(output)
+  const scenarioFile = path.resolve('validation/decision-quality/fixtures/diagnose-before-edit.json')
+  const result = await runLiveSuite({ scenarioFiles: [scenarioFile], methods: ['full', 'causal_advantage'], evidenceRoot: output, model: fakeModel(), acknowledgedCost: true })
+  expect(result.records).toHaveLength(2)
+  expect(result.totalTokens).toBe(6)
+  expect(JSON.parse(await readFile(path.join(result.evidenceDir, 'suite.json'), 'utf8'))).toMatchObject({ complete: true, totalTokens: 6 })
 })
 
 function fakeModel() {
