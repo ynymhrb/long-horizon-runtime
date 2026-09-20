@@ -74,6 +74,21 @@ export function kendallTauB(estimates, outcomes) {
   return denominator === 0 ? null : (concordant - discordant) / denominator
 }
 
+/** @param {number[]} values @param {number} [samples] @param {number} [seed] */
+export function bootstrapInterval(values, samples = 1000, seed = 1) {
+  if (!Array.isArray(values) || values.length === 0 || values.some(value => !Number.isFinite(value))) return null
+  let state = seed >>> 0
+  const random = () => { state = (1664525 * state + 1013904223) >>> 0; return state / 0x1_0000_0000 }
+  const means = []
+  for (let draw = 0; draw < samples; draw += 1) {
+    let sum = 0
+    for (let index = 0; index < values.length; index += 1) sum += values[Math.floor(random() * values.length)]
+    means.push(sum / values.length)
+  }
+  means.sort((left, right) => left - right)
+  return { lower: means[Math.floor(samples * 0.025)], upper: means[Math.min(samples - 1, Math.floor(samples * 0.975))], samples }
+}
+
 /** @param {number} numerator @param {number} denominator */
 function rate(numerator, denominator) { return { numerator, denominator, rate: denominator === 0 ? 0 : numerator / denominator } }
 /** @param {number[]} values */

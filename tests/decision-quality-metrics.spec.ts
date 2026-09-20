@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { aggregateDecisionQuality, deriveCausalAdvantages, kendallTauB, scoreDecisionPoint } from '../validation/decision-quality/metrics.mjs'
+import { aggregateDecisionQuality, bootstrapInterval, deriveCausalAdvantages, kendallTauB, scoreDecisionPoint } from '../validation/decision-quality/metrics.mjs'
 
 describe('反事实决策指标', () => {
   test('以最佳替代行动为基线计算 GCCA', () => {
@@ -45,5 +45,12 @@ describe('反事实决策指标', () => {
     expect(kendallTauB([3, 2, 1], [9, 8, 7])).toBe(1)
     expect(kendallTauB([3, 2, 1], [7, 8, 9])).toBe(-1)
     expect(kendallTauB([1, 1, 2], [1, 1, 2])).toBe(1)
+  })
+
+  test('任务级 bootstrap 区间可重复且包含样本均值', () => {
+    const interval = bootstrapInterval([0, 1, 1, 0], 200, 7)
+    expect(interval?.lower).toBeLessThanOrEqual(0.5)
+    expect(interval?.upper).toBeGreaterThanOrEqual(0.5)
+    expect(bootstrapInterval([0, 1, 1, 0], 200, 7)).toEqual(interval)
   })
 })
