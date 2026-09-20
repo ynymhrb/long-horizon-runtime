@@ -15,6 +15,9 @@ test('runFixture 生成完整证据和中文报告', async () => {
   expect(result.metrics.best_action_accuracy).toEqual({ numerator: 1, denominator: 1, rate: 1 })
   expect(JSON.parse(await readFile(path.join(result.evidenceDir, 'manifest.json'), 'utf8'))).toMatchObject({ complete: true })
   expect(await readFile(path.join(result.evidenceDir, '报告.md'), 'utf8')).toContain('最佳行动命中率')
+  const branches = JSON.parse(await readFile(path.join(result.evidenceDir, 'branch-outcomes.json'), 'utf8'))
+  expect(branches.verdict).toBe('pass')
+  expect(branches.branches.map((row: { actionId: string, utility: number }) => [row.actionId, row.utility])).toEqual([['diagnose', 1], ['patch', 0], ['rewrite', 0]])
 })
 
 test('runLive 要求显式成本确认并保存脱敏 usage', async () => {

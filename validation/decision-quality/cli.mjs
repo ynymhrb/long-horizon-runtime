@@ -5,6 +5,7 @@ import { validateDecisionScenario } from './contract.mjs'
 import { aggregateDecisionQuality, deriveCausalAdvantages, scoreDecisionPoint } from './metrics.mjs'
 import { createScorer } from './scorers.mjs'
 import { renderChineseReport } from './report.mjs'
+import { runCounterfactualBranches } from './branch-runner.mjs'
 
 /** @param {{ scenarioFile: string, method: 'local_progress' | 'goal_value' | 'causal_advantage' | 'full', evidenceRoot: string }} input */
 export async function runFixture(input) {
@@ -13,19 +14,26 @@ export async function runFixture(input) {
   if (point === undefined) throw new Error('场景没有决策点')
   const evidenceIds = ['synthetic-prior']
   const estimates = await createScorer(input.method).score({ actions: point.actions, evidenceIds })
-  const outcomes = point.actions.map(action => ({ actionId: action.id, utility: action.potential_outcome ?? 0 }))
+  const runId = `${scenario.id}-${input.method}`
+  const evidenceDir = path.join(input.evidenceRoot, scenario.id, runId)
+  const executable = scenario.execution
+  const branchResult = executable === undefined ? undefined : await runCounterfactualBranches({
+    initialSnapshot: path.resolve(path.dirname(input.scenarioFile), executable.snapshot_dir),
+    workspaceRoot: path.join(evidenceDir, 'branches'), evidenceRoot: evidenceDir,
+    actions: point.actions, continuationCommand: executable.continuation_command, oracleCommand: scenario.oracle.command,
+  })
+  if (branchResult?.verdict === 'hard_stop') throw new Error('反事实分支检测到初始快照污染，已硬停止')
+  const outcomes = branchResult === undefined ? point.actions.map(action => ({ actionId: action.id, utility: action.potential_outcome ?? 0 })) : branchResult.branches.map(row => ({ actionId: row.actionId, utility: row.utility }))
   const truth = new Map(deriveCausalAdvantages(outcomes).map(row => [row.actionId, row.advantage]))
   const decision = scoreDecisionPoint(estimates.map(row => ({ actionId: row.actionId, estimate: row.total })), outcomes)
   const enriched = { ...decision, gccaMse: estimates.reduce((sum, row) => sum + (row.causalAdvantage - /** @type {number} */ (truth.get(row.actionId))) ** 2, 0) / estimates.length, taskSuccess: decision.bestActionHit, cost: estimates.find(row => row.actionId === decision.chosen[0])?.total ?? 0 }
   const metrics = aggregateDecisionQuality([enriched])
-  const runId = `${scenario.id}-${input.method}`
-  const evidenceDir = path.join(input.evidenceRoot, scenario.id, runId)
   await mkdir(evidenceDir, { recursive: true })
   const decisionText = JSON.stringify({ scenario_id: scenario.id, method: input.method, estimates, outcomes, decision: enriched }, null, 2)
   await writeFile(path.join(evidenceDir, 'decision.json'), decisionText, 'utf8')
   await writeFile(path.join(evidenceDir, '报告.md'), renderChineseReport(metrics), 'utf8')
-  const files = ['decision.json', '报告.md']
-  await writeFile(path.join(evidenceDir, 'manifest.json'), JSON.stringify({ complete: true, files: files.map(name => ({ name, sha256: createHash('sha256').update(name === 'decision.json' ? decisionText : renderChineseReport(metrics)).digest('hex') })) }, null, 2), 'utf8')
+  const files = ['decision.json', '报告.md', ...(branchResult === undefined ? [] : ['branch-outcomes.json'])]
+  await writeFile(path.join(evidenceDir, 'manifest.json'), JSON.stringify({ complete: true, files: await Promise.all(files.map(async name => ({ name, sha256: createHash('sha256').update(await readFile(path.join(evidenceDir, name))).digest('hex') }))) }, null, 2), 'utf8')
   return { evidenceDir, metrics }
 }
 

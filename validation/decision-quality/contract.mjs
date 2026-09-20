@@ -47,6 +47,7 @@ export function validateDecisionScenario(raw, source = 'scenario') {
   }
 
   if (!isOracle(doc.oracle)) problems.push('oracle 必须包含非空 id 和 command 数组')
+  if (doc.execution !== undefined && !isExecution(doc.execution)) problems.push('execution 必须包含相对 snapshot_dir 和可选 continuation_command')
   if (problems.length > 0) throw new DecisionScenarioError(source, problems)
   return deepFreeze(structuredClone(/** @type {object} */ (raw)))
 }
@@ -86,6 +87,15 @@ function isInitialState(value) { return value !== null && typeof value === 'obje
 function isContinuationPolicy(value) { return value !== null && typeof value === 'object' && nonBlank(/** @type {Record<string, unknown>} */ (value).id) && positiveInteger(/** @type {Record<string, unknown>} */ (value).version) }
 /** @param {unknown} value */
 function isOracle(value) { return value !== null && typeof value === 'object' && nonBlank(/** @type {Record<string, unknown>} */ (value).id) && Array.isArray(/** @type {Record<string, unknown>} */ (value).command) && /** @type {Record<string, unknown>} */ (value).command.length > 0 }
+/** @param {unknown} value */
+function isExecution(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = /** @type {Record<string, unknown>} */ (value)
+  return typeof record.snapshot_dir === 'string' && record.snapshot_dir !== '' && !pathLikeEscape(record.snapshot_dir)
+    && (record.continuation_command === undefined || (Array.isArray(record.continuation_command) && record.continuation_command.length > 0 && record.continuation_command.every(nonBlank)))
+}
+/** @param {string} value */
+function pathLikeEscape(value) { return value.split(/[\\/]/).includes('..') || /^[\\/]|^[A-Za-z]:/.test(value) }
 
 /** @template T @param {T} value @returns {T} */
 function deepFreeze(value) {

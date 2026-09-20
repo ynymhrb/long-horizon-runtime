@@ -42,14 +42,26 @@ async function executeCommands(cwd, action, continuationCommand, oracleCommand) 
 }
 
 /** @param {string[]} command @param {string} cwd */
-function runCommand(command, cwd) {
+async function runCommand(command, cwd) {
+  const [file, ...args] = command
+  if (file === undefined) return false
+  validateCommand(file, args)
   return new Promise(resolve => {
-    const [file, ...args] = command
-    if (file === undefined) return resolve(false)
     const child = spawn(file, args, { cwd, shell: false, stdio: 'ignore', windowsHide: true })
     child.once('error', () => resolve(false))
     child.once('exit', code => resolve(code === 0))
   })
+}
+
+/**
+ * 命令式基准只支持 Node 运行夹具内的相对脚本。它避免 shell 注入、解释器
+ * 切换及简单的路径逃逸，但不是操作系统隔离边界。
+ * @param {string} file @param {string[]} args
+ */
+function validateCommand(file, args) {
+  if (file !== 'node') throw new Error(`可执行文件不在允许列表：${file}`)
+  const script = args[0]
+  if (typeof script !== 'string' || script === '' || script.startsWith('-') || path.isAbsolute(script) || script.split(/[\\/]/).includes('..')) throw new Error('脚本路径越界或无效')
 }
 
 /** @param {string} root */
