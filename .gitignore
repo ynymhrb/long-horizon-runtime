@@ -9,6 +9,7 @@ lib/
 .claude/
 .playwright-mcp/
 .tmp-dsh-web*.log
+.tmp/
 .tmp-profile-db-copy.sqlite*
 long-task-real-acceptance.png
 

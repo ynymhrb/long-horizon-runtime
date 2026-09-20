@@ -21,10 +21,10 @@ test('三个行动从同一快照运行且互不读取其他分支写入', async
   const result = await runCounterfactualBranches({
     initialSnapshot: snapshot, workspaceRoot: root, evidenceRoot,
     actions: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
-    executor: { async execute({ branch, action }) { await writeFile(path.join(branch, `${action.id}.txt`), action.id); return { utility: action.id === 'a' ? 1 : 0 } } },
+    executor: { async execute({ branch, action }: { branch: string, action: { id: string } }) { await writeFile(path.join(branch, `${action.id}.txt`), action.id); return { utility: action.id === 'a' ? 1 : 0 } } },
   })
   expect(result.verdict).toBe('pass')
-  expect(new Set(result.branches.map(row => row.initialStateHash)).size).toBe(1)
+  expect(new Set(result.branches.map(row => (row as { initialStateHash: string }).initialStateHash)).size).toBe(1)
   expect(await readFile(path.join(snapshot, 'state.txt'), 'utf8')).toBe('original')
 })
 

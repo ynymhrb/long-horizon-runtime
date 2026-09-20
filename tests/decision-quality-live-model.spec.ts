@@ -10,7 +10,7 @@ test('请求和错误对象均不包含 API 密钥，且累计 usage 受预算�
   let request: Request | undefined
   const model = createDeepSeekDecisionModel({
     apiKey: secret, model: 'deepseek-chat', tokenBudget: 8,
-    fetchImpl: async (url: string, init: RequestInit) => {
+    fetchImpl: async (url: RequestInfo | URL, init?: RequestInit) => {
       request = new Request(url, init)
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify([{ actionId: 'a', causalAdvantage: 1, informationValue: 0, lower: 0, upper: 1, evidenceRefs: ['e'] }]) } }], usage: { total_tokens: 8 } }), { status: 200 })
     },

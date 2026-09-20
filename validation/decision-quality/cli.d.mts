@@ -1,0 +1,1 @@
+export function runFixture(input: { scenarioFile: string; method: 'local_progress' | 'goal_value' | 'causal_advantage' | 'full'; evidenceRoot: string }): Promise<{ evidenceDir: string; metrics: Record<string, unknown> }>
