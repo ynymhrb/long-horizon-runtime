@@ -14,13 +14,16 @@ export function createScorer(method, options = {}) {
 
 /** @param {{ actions: object[] } & Record<string, unknown>} input */
 export function publicDecisionView(input) {
-  const { actions, ...rest } = input
   return {
-    ...rest,
-    actions: (actions ?? []).map(action => {
-      const { potential_outcome: _hidden, ...visible } = action
-      return visible
-    }),
+    ...(typeof input.goal === 'string' ? { goal: input.goal } : {}),
+    ...(Array.isArray(input.constraints) ? { constraints: input.constraints.filter(item => typeof item === 'string') } : {}),
+    actions: (input.actions ?? []).map(action => ({
+      id: action.id,
+      kind: action.kind,
+      cost: action.cost,
+      irreversibility_risk: action.irreversibility_risk,
+      constraint_risk: action.constraint_risk,
+    })),
   }
 }
 

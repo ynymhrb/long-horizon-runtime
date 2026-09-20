@@ -8,7 +8,7 @@ const actions = [
 
 describe('决策评分器', () => {
   test('公开输入不会泄漏隐藏潜在结果', () => {
-    expect(JSON.stringify(publicDecisionView({ actions }))).not.toContain('potential_outcome')
+    expect(JSON.stringify(publicDecisionView({ actions, hidden_oracle: 'secret', nested: { optimal_action: 'diagnose' } }))).not.toMatch(/potential_outcome|hidden_oracle|optimal_action/)
   })
 
   test('完整方法在置信区间重叠时选择可逆诊断行动', async () => {
