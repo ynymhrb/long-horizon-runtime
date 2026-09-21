@@ -10,6 +10,7 @@ test('公开 GCCA 上下文不泄漏 gold patch 或测试补丁', () => {
 })
 
 test('分支真值只能来自官方评测器', async () => {
-  const result = await evaluateSweBenchBranches({ record, actions: [{ id: 'a', patch: 'x' }, { id: 'b', patch: 'y' }], continuationPolicy: { id: 'fixed' }, officialEvaluator: { async evaluate({ action }: { action: { id: string } }) { return { resolved: action.id === 'a', evidenceRef: 'docker-log' } } })
+  const officialEvaluator = { async evaluate({ action }: { action: { id: string } }) { return { resolved: action.id === 'a', evidenceRef: 'docker-log' } } }
+  const result = await evaluateSweBenchBranches({ record, actions: [{ id: 'a', patch: 'x' }, { id: 'b', patch: 'y' }], continuationPolicy: { id: 'fixed' }, officialEvaluator })
   expect(result.results.map(row => row.utility)).toEqual([1, 0])
 })
