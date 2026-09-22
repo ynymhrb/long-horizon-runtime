@@ -16,7 +16,7 @@ test('以唯一运行标识调用官方模块并从实例报告读取 resolved',
       calls.push({ file, args })
       const runId = args[args.indexOf('--run_id') + 1]
       const model = 'gcca-counterfactual'
-      const report = path.join(root, 'logs', 'evaluation', runId, model, 'repo__x-1', 'report.json')
+      const report = path.join(root, 'logs', 'run_evaluation', runId, model, 'repo__x-1', 'report.json')
       await mkdir(path.dirname(report), { recursive: true })
       await writeFile(report, JSON.stringify({ resolved: true }), 'utf8')
       return { status: 0, stdout: 'official output', stderr: '' }
@@ -40,4 +40,23 @@ test('当官方模块没有生成实例报告时拒绝把执行成功当作已�
   const root = await mkdtemp(path.join(tmpdir(), 'swe-cli-')); dirs.push(root)
   const evaluator = createSweBenchCliEvaluator({ python: 'python', datasetName: 'SWE-bench/SWE-bench_Verified', evidenceRoot: root, run: async () => ({ status: 0, stdout: '', stderr: '' }) })
   await expect(evaluator.evaluate({ context: { instanceId: 'repo__x-1' }, action: { id: 'repair', patch: 'diff' } })).rejects.toThrow('未生成实例报告')
+})
+
+test('不同的行动标识即使清洗后相同也使用不同的官方缓存键', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'swe-cli-')); dirs.push(root)
+  const runIds: string[] = []
+  const evaluator = createSweBenchCliEvaluator({
+    python: 'python', datasetName: 'SWE-bench/SWE-bench_Lite', evidenceRoot: root,
+    run: async (_file, args) => {
+      const runId = args[args.indexOf('--run_id') + 1]
+      runIds.push(runId)
+      const report = path.join(root, 'logs', 'run_evaluation', runId, 'gcca-counterfactual', 'repo__x-1', 'report.json')
+      await mkdir(path.dirname(report), { recursive: true })
+      await writeFile(report, JSON.stringify({ resolved: true }), 'utf8')
+      return { status: 0, stdout: '', stderr: '' }
+    },
+  })
+  await evaluator.evaluate({ context: { instanceId: 'repo__x-1' }, action: { id: 'a/b', patch: 'same patch' } })
+  await evaluator.evaluate({ context: { instanceId: 'repo__x-1' }, action: { id: 'a?b', patch: 'same patch' } })
+  expect(new Set(runIds).size).toBe(2)
 })

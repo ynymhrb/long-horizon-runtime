@@ -21,8 +21,9 @@ export function createSweBenchCliEvaluator(options) {
     const actionId = requiredString(input?.action?.id, '行动 ID')
     const patch = requiredString(input?.action?.patch, '候选补丁')
     const patchHash = createHash('sha256').update(patch).digest('hex').slice(0, 12)
-    const runId = `gcca-${safeName(instanceId)}-${safeName(actionId)}-${patchHash}`
-    const evidenceDir = path.join(options.evidenceRoot, safeName(instanceId), `${safeName(actionId)}-${patchHash}`)
+    const actionHash = createHash('sha256').update(actionId).digest('hex').slice(0, 12)
+    const runId = `gcca-${safeName(instanceId)}-${safeName(actionId)}-${actionHash}-${patchHash}`
+    const evidenceDir = path.join(options.evidenceRoot, safeName(instanceId), `${safeName(actionId)}-${actionHash}-${patchHash}`)
     await mkdir(evidenceDir, { recursive: true })
     const predictionPath = path.join(evidenceDir, 'prediction.jsonl')
     await writeFile(predictionPath, `${JSON.stringify({ instance_id: instanceId, model_name_or_path: MODEL_NAME, model_patch: patch })}\n`, 'utf8')
@@ -32,7 +33,7 @@ export function createSweBenchCliEvaluator(options) {
     const executed = await run(options.python, args, { cwd: options.evidenceRoot, env: options.env })
     await writeFile(path.join(evidenceDir, 'harness-output.json'), JSON.stringify(executed, null, 2), 'utf8')
     if (executed.status !== 0) throw new Error(`官方 SWE-bench harness 退出码：${executed.status}`)
-    const reportPath = path.join(options.evidenceRoot, 'logs', 'evaluation', runId, MODEL_NAME, instanceId, 'report.json')
+    const reportPath = path.join(options.evidenceRoot, 'logs', 'run_evaluation', runId, MODEL_NAME, instanceId, 'report.json')
     let report
     try { report = JSON.parse(await readFile(reportPath, 'utf8')) } catch { throw new Error(`官方 SWE-bench 未生成实例报告：${reportPath}`) }
     const resolved = report?.resolved ?? report?.[instanceId]?.resolved
