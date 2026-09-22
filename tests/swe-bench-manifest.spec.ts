@@ -13,3 +13,13 @@ test('SWE-bench 清单固定 10 个开发实例和 30 个 golden 实例且无重
 test('Docker 缺失时明确阻止 SWE-bench 真实执行', () => {
   expect(checkSweBenchPreflight(() => ({ status: 1, stdout: '' }))).toMatchObject({ ready: false, reason: expect.stringMatching(/Docker/) })
 })
+
+test('预检允许显式指定未加入 PATH 的 Docker 程序', () => {
+  const calls: unknown[][] = []
+  const result = checkSweBenchPreflight(((file: string, args: string[]) => {
+    calls.push([file, args])
+    return { status: 0, stdout: '29.8.0\n' }
+  }) as any, { dockerCommand: 'D:\\env\\DockerDesktop\\resources\\bin\\docker.exe' })
+  expect(result).toEqual({ ready: true, dockerVersion: '29.8.0' })
+  expect(calls).toEqual([['D:\\env\\DockerDesktop\\resources\\bin\\docker.exe', ['version', '--format', '{{.Server.Version}}']]])
+})
