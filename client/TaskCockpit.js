@@ -13,7 +13,23 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const [editing, setEditing] = React.useState(false)
   const [objective, setObjective] = React.useState('')
   const [reason, setReason] = React.useState('')
+  const automaticallyDriven = React.useRef(new Set())
   React.useEffect(() => setSelectedId(previous => (previous !== undefined && graph?.nodes.some(node => node.id === previous)) ? previous : initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph])
+  React.useEffect(() => {
+    if (!task?.requiresSessionDriver || !sessionId || typeof driveInSession !== 'function') return
+    const key = `${task.id}:${task.controlRevision}`
+    if (automaticallyDriven.current.has(key)) return
+    automaticallyDriven.current.add(key)
+    let live = true
+    void Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => {
+      const navigation = remoteValue(result)
+      if (resumeDriverMode(navigation, sessionId) !== 'inject') return false
+      return Promise.resolve(driveInSession(sessionId, task.id, task.objective))
+    }).then(driven => {
+      if (live && driven === false) setError('未能向绑定会话发送继续指令；请点击“继续执行会话”重试。')
+    }).catch(() => { if (live) setError('无法读取绑定会话；请点击“继续执行会话”重试。') })
+    return () => { live = false }
+  }, [task?.id, task?.controlRevision, task?.requiresSessionDriver, task?.objective, sessionId, remote, driveInSession])
   const dataState = cockpitDataState(task, graph)
   if (dataState === 'loading') return e('p', null, '正在加载任务…')
   if (dataState === 'missing') return e('section', { className: 'ltr-cockpit' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('p', { className: 'ltr-error' }, '任务不存在或已被清理。'))
@@ -45,18 +61,18 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => {
     const navigation = remoteValue(result)
     const mode = resumeDriverMode(navigation, sessionId)
-    if (shouldDriveBoundSession(mode)) {
+    if (mode === 'inject') {
       if (typeof driveInSession !== 'function') { setError('任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。'); return }
       setError(null)
-      const targetSessionId = mode === 'inject' ? sessionId : navigation.currentSessionId
+      const targetSessionId = sessionId
       Promise.resolve(driveInSession(targetSessionId, task.id, task.objective))
         .then(driven => {
-          if (mode === 'open' && typeof openSession === 'function') openSession(targetSessionId)
           setError(driven ? '已向绑定会话发送继续执行指令。' : '绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。')
         })
         .catch(() => setError('向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。'))
       return
     }
+    if (mode === 'open' && navigation.currentSessionId && typeof openSession === 'function') { openSession(navigation.currentSessionId); setError('已打开绑定会话，请在该会话继续执行。'); return }
     setError('任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。')
   }).catch(value => setError(String(value)))
   const action = (label, recoveryResolution) => invoke('updateTask', { taskId: task.id, expectedRevision: task.controlRevision, action: label, ...(sessionId ? { sessionId } : {}), ...(recoveryResolution ? { recoveryResolution } : {}) })
@@ -80,6 +96,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
       editableOriginalGoal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: jump }, '当前会话'),
+      waitingForDriver ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: guideAfterResume }, '继续执行会话') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...(task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
         ? [e('button', { key: 'resume-retry', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]

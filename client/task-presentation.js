@@ -39,7 +39,7 @@ export function taskStripPresentation(task) {
   // A web-side resume only marks the goal RUNNING; a live agent session must
   // drive the actual rounds. Surface that "waiting for driver" state instead
   // of pretending the task is executing on its own.
-  const waitingForDriver = task.state === 'RUNNING' && task.currentOrLastNode?.state !== undefined && task.currentOrLastNode.state !== 'RUNNING'
+  const waitingForDriver = task.requiresSessionDriver === true || (task.requiresSessionDriver === undefined && task.state === 'RUNNING' && task.currentOrLastNode?.state !== undefined && task.currentOrLastNode.state !== 'RUNNING')
   const current = task.currentOrLastNode?.objective
   return { ...state, progress: formatTaskProgress(task.progress, task.currentOrLastNode), detail: waitingForDriver ? `等待会话驱动执行${current ? ` · ${current}` : ''}` : (task.reason ?? current ?? '') }
 }

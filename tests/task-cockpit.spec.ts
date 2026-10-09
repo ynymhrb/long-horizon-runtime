@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
+import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
 import { quotaRecoveryPresentation } from '../client/task-presentation.js'
 
 test('prefers a running node then pending work for the Cockpit inspector', () => {
@@ -38,6 +38,14 @@ test('decides how to hand a web resume to a live parent session', () => {
 test('marks a running task with no running node as waiting for its bound session', () => {
   expect(waitingForSessionDriver({ state: 'RUNNING', tasks: [{ state: 'PENDING' }] })).toBe(true)
   expect(waitingForSessionDriver({ state: 'RUNNING', tasks: [{ state: 'RUNNING' }] })).toBe(false)
+})
+
+test('会话驱动恢复只对运行时明确标记的缺失父会话生效', () => {
+  const needsDriver = { state: 'RUNNING', requiresSessionDriver: true, tasks: [{ state: 'PENDING' }] }
+  expect(sessionDriverMode(needsDriver, { currentSessionId: 'session-1' }, 'session-1')).toBe('inject')
+  expect(sessionDriverMode(needsDriver, { currentSessionId: 'session-2' }, 'session-1')).toBe('open')
+  expect(sessionDriverMode(needsDriver, {}, 'session-1')).toBe('attach')
+  expect(sessionDriverMode({ state: 'RUNNING', requiresSessionDriver: false, tasks: [{ state: 'PENDING' }] }, { currentSessionId: 'session-1' }, 'session-1')).toBe('none')
 })
 
 test('drives both current and opened bound sessions after a web resume', () => {

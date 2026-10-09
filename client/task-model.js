@@ -43,9 +43,15 @@ export function resumeDriverMode(navigation, currentSessionId) {
   return 'open'
 }
 
-/** A durable RUNNING state still needs a live session parent before it can dispatch child work. */
+/** Use the runtime lease signal when available; retain the old derivation only for an older host during rollout. */
 export function waitingForSessionDriver(task) {
+  if (typeof task?.requiresSessionDriver === 'boolean') return task.requiresSessionDriver
   return task?.state === 'RUNNING' && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some(node => node.state === 'RUNNING')
+}
+
+/** Combine the durable driver requirement with the session-routing decision. */
+export function sessionDriverMode(task, navigation, currentSessionId) {
+  return waitingForSessionDriver(task) ? resumeDriverMode(navigation, currentSessionId) : 'none'
 }
 
 /** Both the current and a bound background session can accept a driver prompt. */
