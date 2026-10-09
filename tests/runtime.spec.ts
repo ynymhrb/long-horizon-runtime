@@ -115,6 +115,26 @@ describe('LongTaskRuntime', () => {
     expect(running.availableActions).toContain('pause')
   })
 
+  test('requires a live session driver only when running work has no background loop', async () => {
+    let release!: () => void
+    let started!: () => void
+    const executing = new Promise<void>(resolve => { started = resolve })
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'work')] } } }
+    const execution: ExecutionAdapter = { async execute() { started(); await blocked; return { status: 'succeeded' as const, summary: 'done', artifacts: [], evidence: [] } } }
+    const runtime = new LongTaskRuntime(planner, execution)
+    const created = await runtime.createGoal({ objective: 'recover live parent', planningMode: 'require_confirmation' })
+    await runtime.confirmGoal(created.id)
+
+    expect(runtime.getStatus(created.id)?.requiresSessionDriver).toBe(true)
+
+    runtime.startBackground(created.id, {})
+    await executing
+    expect(runtime.getStatus(created.id)?.requiresSessionDriver).toBe(false)
+    release()
+    await runtime.awaitBackground(created.id)
+  })
+
   test('pausing aborts and durably interrupts an active child attempt', async () => {
     let started!: () => void
     const executing = new Promise<void>(resolve => { started = resolve })

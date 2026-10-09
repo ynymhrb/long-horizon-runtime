@@ -36,6 +36,20 @@ test('returns a bound non-terminal task strip with progress and immutable graph 
   expect(ui.listTaskEvents({ taskId: created.id, cursor: 0 }).items.map(event => event.type)).toContain('TaskSessionCurrentSet')
 })
 
+test('projects a missing live session driver into the bound task strip', async () => {
+  const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [
+    { id: 'resume', objective: 'resume', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' },
+  ] } } }
+  const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'done', artifacts: [], evidence: [] } } })
+  const control = new TaskControlApi(runtime)
+  const created = await control.create({ objective: 'recover browser driver', planningMode: 'require_confirmation' }, { sessionId: 'session-1' })
+  const confirmed = await control.update({ taskId: created.id, expectedRevision: created.controlRevision, action: 'confirm' }, { sessionId: 'session-1' })
+  if (confirmed.kind !== 'applied') throw new Error('expected applied confirm')
+
+  const strip = new TaskUiApi(runtime, control).getCurrentTaskForSession({ sessionId: 'session-1' })
+  expect(strip?.requiresSessionDriver).toBe(true)
+})
+
 test('attaches a cross-session task only on explicit request and can reject a revision-fenced replan', async () => {
   const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [{ id: 'a', objective: 'a', dependsOn: [], priority: 0, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] } } }
   const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded', summary: 'done', artifacts: [], evidence: [] } } })

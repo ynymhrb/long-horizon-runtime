@@ -18,6 +18,7 @@ export interface TaskSummary {
   readonly currentOrLastNode?: { readonly id: string; readonly objective: string; readonly state: string }
   readonly reason?: string
   readonly latestEventCursor: number
+  readonly requiresSessionDriver: boolean
 }
 export interface TaskStripView extends TaskSummary { readonly availableActions: readonly string[] }
 export interface TaskGraphView { readonly taskId: string; readonly revision: number; readonly nodes: readonly TaskNode[]; readonly edges: readonly { readonly from: string; readonly to: string }[] }
@@ -139,6 +140,7 @@ export class TaskUiApi {
       ...(current === undefined ? {} : { currentOrLastNode: { id: current.id, objective: current.objective, state: current.state } }),
       ...(task.pauseReason === undefined ? {} : { reason: task.pauseReason }),
       latestEventCursor: this.runtime.store.latestSeq(task.id),
+      requiresSessionDriver: task.requiresSessionDriver,
     }
   }
 }
