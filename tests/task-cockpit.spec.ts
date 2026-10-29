@@ -1,6 +1,13 @@
 import { expect, test } from 'vitest'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
-import { formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation } from '../client/task-presentation.js'
+import { formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaOverlayPresentation } from '../client/task-presentation.js'
+
+test('任务区以顶部非模态面板展示，不创建遮罩层', () => {
+  expect(taskAreaOverlayPresentation(true)).toEqual({
+    layerClassName: 'ltr-modal-layer ltr-task-area-open',
+    panelClassName: 'ltr-modal ltr-task-area-panel',
+  })
+})
 
 test('将过长任务目标标记为单行省略并可悬浮查看完整内容', () => {
   const objective = '这是一个很长的任务目标，用于验证驾驶舱标题不会因自动换行挤压操作区。'

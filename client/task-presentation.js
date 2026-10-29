@@ -38,6 +38,13 @@ export function goalObjectivePresentation(objective) {
   return { className: 'ltr-goal-objective', singleLine: true, title: objective }
 }
 
+export function taskAreaOverlayPresentation(open) {
+  return {
+    layerClassName: open ? 'ltr-modal-layer ltr-task-area-open' : 'ltr-modal-layer',
+    panelClassName: 'ltr-modal ltr-task-area-panel',
+  }
+}
+
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
   // A web-side resume only marks the goal RUNNING; a live agent session must
