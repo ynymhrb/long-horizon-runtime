@@ -4,6 +4,9 @@ lib/
 .superpowers/
 .worktrees/
 
+# Local agent workspace state (session logs, notes); never shared.
+.workbuddy-ai/
+
 # Machine-local governance, browser automation, and DSH acceptance artifacts.
 .cat-cafe/
 .claude/
