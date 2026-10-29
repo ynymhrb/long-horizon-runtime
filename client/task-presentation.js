@@ -35,7 +35,7 @@ export function quotaRecoveryPresentation(recovery, now = new Date(), latestReco
 export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}'
 
 export function goalObjectivePresentation(objective) {
-  return { className: 'ltr-goal-objective', maxLines: 50, title: objective }
+  return { className: 'ltr-goal-objective', singleLine: true, title: objective }
 }
 
 export function taskStripPresentation(task) {
