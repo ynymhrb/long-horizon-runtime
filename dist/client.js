@@ -4417,11 +4417,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				title: objective
 			};
 		}
-		function taskAreaOverlayPresentation(open) {
-			return {
-				layerClassName: open ? "ltr-modal-layer ltr-task-area-open" : "ltr-modal-layer",
-				panelClassName: "ltr-modal ltr-task-area-panel"
-			};
+		function taskAreaPresentation() {
+			return { panelClassName: "ltr-task-area-panel" };
 		}
 		function cockpitLayoutPresentation() {
 			return {
@@ -5086,7 +5083,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				sessionId
 			]);
 			if (!open) return null;
-			const overlay = taskAreaOverlayPresentation(open);
+			const presentation = taskAreaPresentation();
 			const overview = e$2("section", null, e$2("h2", null, "任务区"), e$2("p", null, showAll ? "跨会话长任务" : "当前会话任务"), e$2("div", { className: "ltr-task-filter" }, e$2("input", {
 				value: query,
 				placeholder: "搜索任务 ID 或目标",
@@ -5115,9 +5112,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					onClick: () => setSelectedId(item.id)
 				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1e3)} 秒`)));
 			})));
-			return e$2("div", { className: overlay.layerClassName }, e$2("section", {
-				className: overlay.panelClassName,
-				role: "dialog",
+			return e$2("section", {
+				className: presentation.panelClassName,
 				"aria-label": "任务区"
 			}, e$2("button", {
 				className: "ltr-btn ltr-close",
@@ -5135,7 +5131,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onCurrentChanged: setCurrentTaskId,
 				onTaskChanged: setTask,
 				onBack: () => setSelectedId(null)
-			}) : overview));
+			}) : overview);
 		}
 		//#endregion
 		//#region client/TaskStrip.js
@@ -5290,8 +5286,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		];
 		const e = react.default.createElement;
 		const CSS = `
-.ltr-modal-layer{position:absolute;inset:0;z-index:50;pointer-events:none}.ltr-task-area-open{display:flex;align-items:flex-start;justify-content:center}
-.ltr-modal{position:relative;width:min(1160px,calc(100vw - 48px));overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-task-area-panel{pointer-events:auto;max-height:min(55vh,430px);margin:0 auto;border-radius:0 0 16px 16px}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
+.ltr-task-area-panel{box-sizing:border-box;width:min(1160px,calc(100vw - 48px));max-height:min(55vh,430px);margin:0 auto;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:0 0 16px 16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
 .ltr-task-filter{display:flex;align-items:center;gap:8px;margin:16px 0}.ltr-task-filter input,.ltr-task-filter select{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.ltr-task-filter input{min-width:260px}.ltr-task-filter .ltr-check{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px}.ltr-task-filter .ltr-check input{min-width:0;margin:0}
 .ltr-task-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0;border-top:1px solid var(--dsw-alias-border-l1)}.ltr-task-list button{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;align-items:center;width:100%;min-height:54px;padding:10px 4px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;text-align:left}.ltr-task-list button:hover{background:var(--dsw-alias-interactive-bg-hover)}.ltr-task-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.ltr-task-list small{overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-empty-task-list{margin:0;padding:18px 4px;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .ltr-strip{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));height:36px;margin:0 auto 8px;padding:4px 5px 4px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-specific-tip);color:var(--dsw-alias-label-primary)}.ltr-strip-glyph{color:var(--dsw-alias-label-tertiary)}.ltr-strip-label{flex:none;font-size:13px;font-weight:500}.ltr-strip-objective{flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;text-align:left;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.ltr-strip-progress{flex:0 1 auto;min-width:0;max-width:38%;overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-strip-actions{display:flex;gap:3px}.ltr-icon-button{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.ltr-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ltr-icon-button:disabled{opacity:.4;cursor:default}
@@ -5349,13 +5344,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onClick: () => open ? closeTaskArea() : openTaskArea()
 			}, "任务区");
 		}
-		function Overlay({ props, remote, openSession, driveInSession }) {
+		function SessionTop({ useSessions, remote, openSession, driveInSession }) {
 			return e(TaskArea, {
 				open: useOpen(),
 				onClose: closeTaskArea,
 				remote,
 				initialTaskId: selectedTaskId,
-				useSessions: props?.useSessions,
+				useSessions,
 				openSession,
 				driveInSession
 			});
@@ -5494,12 +5489,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				openSession,
 				driveInSession
 			})));
-			ctx.slots.inject("shell.overlay", () => ctx.slots.register({
-				name: "shell.overlay",
-				id: "long-task-overlay",
+			ctx.slots.inject("conversation.session.top", () => ctx.slots.register({
+				name: "conversation.session.top",
+				id: "long-task-top",
 				order: 90
-			}, (props) => e(Overlay, {
-				props,
+			}, (props) => e(SessionTop, {
+				...props,
 				remote,
 				openSession,
 				driveInSession

@@ -1,11 +1,10 @@
 import { expect, test } from 'vitest'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
-import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaOverlayPresentation } from '../client/task-presentation.js'
+import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaPresentation } from '../client/task-presentation.js'
 
-test('任务区以顶部非模态面板展示，不创建遮罩层', () => {
-  expect(taskAreaOverlayPresentation(true)).toEqual({
-    layerClassName: 'ltr-modal-layer ltr-task-area-open',
-    panelClassName: 'ltr-modal ltr-task-area-panel',
+test('任务区挂载到原生会话流，不保留浮层容器', () => {
+  expect(taskAreaPresentation()).toEqual({
+    panelClassName: 'ltr-task-area-panel',
   })
 })
 

@@ -38,10 +38,9 @@ export function goalObjectivePresentation(objective) {
   return { className: 'ltr-goal-objective', singleLine: true, title: objective }
 }
 
-export function taskAreaOverlayPresentation(open) {
+export function taskAreaPresentation() {
   return {
-    layerClassName: open ? 'ltr-modal-layer ltr-task-area-open' : 'ltr-modal-layer',
-    panelClassName: 'ltr-modal ltr-task-area-panel',
+    panelClassName: 'ltr-task-area-panel',
   }
 }
 

@@ -1,6 +1,6 @@
 import React from 'react'
 import { TaskCockpit } from './TaskCockpit.js'
-import { formatTaskProgress, taskAreaOverlayPresentation, taskStatePresentation } from './task-presentation.js'
+import { formatTaskProgress, taskAreaPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 
 const e = React.createElement
@@ -63,7 +63,7 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
     Promise.resolve(remote.getCurrentTaskForSession({ sessionId })).then(value => setCurrentTaskId(remoteValue(value)?.id ?? null)).catch(() => setCurrentTaskId(null))
   }, [open, remote, sessionId])
   if (!open) return null
-  const overlay = taskAreaOverlayPresentation(open)
+  const presentation = taskAreaPresentation()
   const overview = e('section', null,
     e('h2', null, '任务区'), e('p', null, showAll ? '跨会话长任务' : '当前会话任务'),
     e('div', { className: 'ltr-task-filter' },
@@ -83,9 +83,8 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
         e('strong', null, item.objective),
         e('small', null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1000)} 秒`)))
     })))
-  return e('div', { className: overlay.layerClassName },
-    e('section', { className: overlay.panelClassName, role: 'dialog', 'aria-label': '任务区' },
-      e('button', { className: 'ltr-btn ltr-close', type: 'button', onClick: onClose }, '关闭'),
-      error ? e('p', { className: 'ltr-error' }, error) : null,
-      selectedId ? e(TaskCockpit, { task, graph, events, remote, sessionId, openSession, driveInSession, isCurrent: selectedId === currentTaskId, onCurrentChanged: setCurrentTaskId, onTaskChanged: setTask, onBack: () => setSelectedId(null) }) : overview))
+  return e('section', { className: presentation.panelClassName, 'aria-label': '任务区' },
+    e('button', { className: 'ltr-btn ltr-close', type: 'button', onClick: onClose }, '关闭'),
+    error ? e('p', { className: 'ltr-error' }, error) : null,
+    selectedId ? e(TaskCockpit, { task, graph, events, remote, sessionId, openSession, driveInSession, isCurrent: selectedId === currentTaskId, onCurrentChanged: setCurrentTaskId, onTaskChanged: setTask, onBack: () => setSelectedId(null) }) : overview)
 }
