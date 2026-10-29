@@ -13,6 +13,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS plan_revisions (goal_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, tasks_json TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(goal_id, revision));
     CREATE TABLE IF NOT EXISTS task_nodes (goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL, priority INTEGER NOT NULL, side_effect_class TEXT NOT NULL, state TEXT NOT NULL, task_json TEXT NOT NULL, created_order INTEGER NOT NULL, PRIMARY KEY(goal_id, task_id, revision));
     CREATE TABLE IF NOT EXISTS task_attempts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL, dsh_session_id TEXT, context_json TEXT NOT NULL DEFAULT '{}', summary TEXT, started_at TEXT, last_activity_at TEXT, lease_expires_at TEXT, max_wall_expires_at TEXT, latest_progress_json TEXT, created_order INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS goal_run_rounds (goal_id TEXT NOT NULL, round INTEGER NOT NULL, revision INTEGER NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, outcome TEXT, PRIMARY KEY(goal_id, round));
     CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, type TEXT NOT NULL, content_hash TEXT NOT NULL, storage TEXT NOT NULL, content TEXT, path TEXT, mime_type TEXT, active INTEGER NOT NULL DEFAULT 1, validated INTEGER NOT NULL DEFAULT 0, superseded_by TEXT);
     CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT, attempt_id TEXT, value_json TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS validation_results (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, task_id TEXT NOT NULL, attempt_id TEXT NOT NULL, ok INTEGER NOT NULL, validator TEXT NOT NULL, reason TEXT);
@@ -154,6 +155,12 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       if (taskId === undefined) throw new Error('TaskAttemptStarted requires taskId')
       db.prepare('INSERT INTO task_attempts (id, goal_id, task_id, revision, state, dsh_session_id, context_json, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, created_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(String(p.attemptId), event.goalId, taskId, Number(p.revision ?? 1), 'RUNNING', p.dshSessionId == null ? null : String(p.dshSessionId), JSON.stringify(p.context ?? {}), p.startedAt == null ? null : String(p.startedAt), p.startedAt == null ? null : String(p.startedAt), p.leaseExpiresAt == null ? null : String(p.leaseExpiresAt), p.maxWallExpiresAt == null ? null : String(p.maxWallExpiresAt), seq)
       updateCurrentTask(db, event.goalId, taskId, 'RUNNING')
+      break
+    case 'GoalRunRoundStarted':
+      db.prepare('INSERT INTO goal_run_rounds (goal_id, round, revision, started_at) VALUES (?, ?, ?, ?)').run(event.goalId, Number(p.round), Number(p.revision), String(p.startedAt))
+      break
+    case 'GoalRunRoundFinished':
+      db.prepare('UPDATE goal_run_rounds SET finished_at = ?, outcome = ? WHERE goal_id = ? AND round = ? AND finished_at IS NULL').run(String(p.finishedAt), p.outcome == null ? null : String(p.outcome), event.goalId, Number(p.round))
       break
     case 'AttemptProgressRecorded':
       if (taskId === undefined) throw new Error('AttemptProgressRecorded requires taskId')

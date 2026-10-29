@@ -74,6 +74,37 @@ describe('RuntimeEventStore', () => {
     })
   })
 
+  test('projects durable run rounds into active and elapsed runtime metrics', () => {
+    const runtime = store()
+    runtime.append([
+      { type: 'GoalRunRoundStarted', goalId: 'lt_metrics', payload: { round: 1, revision: 1, startedAt: '2026-10-29T00:00:00.000Z' } },
+      { type: 'GoalRunRoundFinished', goalId: 'lt_metrics', payload: { round: 1, finishedAt: '2026-10-29T00:00:05.000Z', outcome: 'idle' } },
+      { type: 'GoalRunRoundStarted', goalId: 'lt_metrics', payload: { round: 2, revision: 1, startedAt: '2026-10-29T00:00:15.000Z' } },
+      { type: 'GoalRunRoundFinished', goalId: 'lt_metrics', payload: { round: 2, finishedAt: '2026-10-29T00:00:20.000Z', outcome: 'paused' } },
+    ])
+
+    expect(runtime.getRuntimeMetrics('lt_metrics', Date.parse('2026-10-29T00:00:30.000Z'))).toEqual({
+      runRoundCount: 2,
+      activeRunTimeMs: 10_000,
+      elapsedRunTimeMs: 20_000,
+      firstStartedAt: '2026-10-29T00:00:00.000Z',
+      lastFinishedAt: '2026-10-29T00:00:20.000Z',
+    })
+  })
+
+  test('counts an open round once and clamps clock rollback to zero', () => {
+    const runtime = store()
+    runtime.append([{ type: 'GoalRunRoundStarted', goalId: 'lt_open_round', payload: { round: 1, revision: 1, startedAt: '2026-10-29T00:00:10.000Z' } }])
+
+    expect(runtime.getRuntimeMetrics('lt_open_round', Date.parse('2026-10-29T00:00:05.000Z'))).toEqual({
+      runRoundCount: 1,
+      activeRunTimeMs: 0,
+      elapsedRunTimeMs: 0,
+      firstStartedAt: '2026-10-29T00:00:10.000Z',
+      activeRound: { round: 1, revision: 1, startedAt: '2026-10-29T00:00:10.000Z' },
+    })
+  })
+
   test('projects and clears the latest quota recovery through lifecycle events', () => {
     const runtime = store()
     runtime.append([

@@ -24,6 +24,8 @@ export interface ExecutionEvaluationProjection { readonly taskId: string; readon
 export interface ExecutionPolicyDecisionProjection { readonly taskId: string; readonly attemptId: string; readonly selectedProfileId: string; readonly policyVersion: string; readonly candidates: readonly { readonly profileId: string; readonly score: number }[]; readonly excluded: readonly { readonly profileId: string; readonly reason: string }[] }
 export interface MemoryIndexEntryProjection { readonly memoryId: string; readonly contentHash: string; readonly sourceRef: string; readonly active: boolean }
 export interface MemoryRecordProjection { readonly memoryId: string; readonly text: string; readonly sourceRef: string; readonly active: boolean; readonly workspaceId?: string }
+export interface RunRoundProjection { readonly round: number; readonly revision: number; readonly startedAt: string; readonly finishedAt?: string; readonly outcome?: string }
+export interface RuntimeMetrics { readonly runRoundCount: number; readonly activeRunTimeMs: number; readonly elapsedRunTimeMs: number; readonly firstStartedAt?: string; readonly lastFinishedAt?: string; readonly activeRound?: Pick<RunRoundProjection, 'round' | 'revision' | 'startedAt'> }
 
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export class RuntimeEventStore {
@@ -44,7 +46,7 @@ export class RuntimeEventStore {
   /** Rebuild every owned projection from ordered append-only events. */
   rebuild(): void {
     this.transaction(() => {
-      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM execution_profile_resolutions; DELETE FROM execution_evaluations; DELETE FROM execution_policy_decisions; DELETE FROM memory_index_entries; DELETE FROM memory_records; DELETE FROM budget_state; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
+      this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM execution_profile_resolutions; DELETE FROM execution_evaluations; DELETE FROM execution_policy_decisions; DELETE FROM memory_index_entries; DELETE FROM memory_records; DELETE FROM budget_state; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM goal_run_rounds; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;')
       const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all() as Array<{ seq: number; type: string; goal_id: string; task_id: string | null; payload_json: string }>
       for (const row of rows) projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) as Record<string, unknown> }, row.seq)
     })
@@ -73,7 +75,7 @@ export class RuntimeEventStore {
     for (const goalId of goalIds) {
       remove('current_task_bindings').run(goalId)
       remove('task_session_links').run(goalId); remove('context_manifests').run(goalId); remove('execution_profile_resolutions').run(goalId); remove('execution_evaluations').run(goalId); remove('execution_policy_decisions').run(goalId); remove('memory_index_entries').run(goalId); remove('memory_records').run(goalId); remove('budget_state').run(goalId); remove('goal_versions').run(goalId)
-      remove('plan_revisions').run(goalId); remove('task_nodes').run(goalId); remove('task_attempts').run(goalId); remove('quota_recoveries').run(goalId); remove('artifacts').run(goalId)
+      remove('plan_revisions').run(goalId); remove('task_nodes').run(goalId); remove('task_attempts').run(goalId); remove('goal_run_rounds').run(goalId); remove('quota_recoveries').run(goalId); remove('artifacts').run(goalId)
       remove('evidence').run(goalId); remove('validation_results').run(goalId); remove('decisions').run(goalId); remove('memories').run(goalId); remove('checkpoints').run(goalId)
       remove('runtime_events').run(goalId)
       this.db.prepare('DELETE FROM goals WHERE id = ?').run(goalId)
@@ -138,6 +140,26 @@ export class RuntimeEventStore {
       .all(...(goalId === undefined ? [taskId] : [taskId, goalId])) as Array<Record<string, unknown>>
     return rows.map(attemptProjection)
   }
+  listRunRounds(goalId: string): RunRoundProjection[] {
+    return (this.db.prepare('SELECT round, revision, started_at, finished_at, outcome FROM goal_run_rounds WHERE goal_id = ? ORDER BY round').all(goalId) as Array<Record<string, unknown>>).map(row => ({ round: Number(row.round), revision: Number(row.revision), startedAt: String(row.started_at), ...(row.finished_at == null ? {} : { finishedAt: String(row.finished_at) }), ...(row.outcome == null ? {} : { outcome: String(row.outcome) }) }))
+  }
+  getRuntimeMetrics(goalId: string, now: number = Date.now()): RuntimeMetrics {
+    const rounds = this.listRunRounds(goalId)
+    const first = rounds[0]
+    const last = rounds.at(-1)
+    const active = last?.finishedAt === undefined ? last : undefined
+    const activeEnd = active === undefined ? undefined : Math.max(Date.parse(active.startedAt), now)
+    const activeRunTimeMs = rounds.reduce((total, round) => total + durationMs(round.startedAt, round.finishedAt === undefined ? activeEnd : Date.parse(round.finishedAt)), 0)
+    const lastEnd = last === undefined ? undefined : last.finishedAt === undefined ? activeEnd : Date.parse(last.finishedAt)
+    return {
+      runRoundCount: rounds.length,
+      activeRunTimeMs,
+      elapsedRunTimeMs: first === undefined || lastEnd === undefined ? 0 : durationMs(first.startedAt, lastEnd),
+      ...(first === undefined ? {} : { firstStartedAt: first.startedAt }),
+      ...(last?.finishedAt === undefined ? {} : { lastFinishedAt: last!.finishedAt! }),
+      ...(active === undefined ? {} : { activeRound: { round: active.round, revision: active.revision, startedAt: active.startedAt } }),
+    }
+  }
   listRunningAttempts(): AttemptProjection[] {
     const rows = this.db.prepare("SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE state = 'RUNNING'").all() as Array<Record<string, unknown>>
     return rows.map(attemptProjection)
@@ -194,4 +216,9 @@ function attemptProjection(row: Record<string, unknown>): AttemptProjection {
     ...(row.max_wall_expires_at == null ? {} : { maxWallExpiresAt: String(row.max_wall_expires_at) }),
     ...(row.latest_progress_json == null ? {} : { latestProgress: JSON.parse(String(row.latest_progress_json)) as NonNullable<AttemptProjection['latestProgress']> }),
   }
+}
+
+function durationMs(startedAt: string, endedAt: number | undefined): number {
+  const started = Date.parse(startedAt)
+  return Number.isFinite(started) && endedAt !== undefined && Number.isFinite(endedAt) ? Math.max(0, endedAt - started) : 0
 }
