@@ -1,7 +1,7 @@
 import React from 'react'
 import { TaskDag } from './TaskDag.js'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from './task-model.js'
-import { formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
+import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 import { formatTaskEvent } from './task-events.js'
 const e = React.createElement
@@ -30,11 +30,12 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
     }).catch(() => { if (live) setError('无法读取绑定会话；请点击“继续执行会话”重试。') })
     return () => { live = false }
   }, [task?.id, task?.controlRevision, task?.requiresSessionDriver, task?.objective, sessionId, remote, driveInSession])
+  const layout = cockpitLayoutPresentation()
   const dataState = cockpitDataState(task, graph)
   if (dataState === 'loading') return e('p', null, '正在加载任务…')
   if (dataState === 'missing') return e('section', { className: 'ltr-cockpit' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('p', { className: 'ltr-error' }, '任务不存在或已被清理。'))
   if (dataState === 'no-plan') return e('section', { className: 'ltr-cockpit ltr-no-plan' },
-    e('header', { className: 'ltr-cockpit-header' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('div', null, e('strong', goalObjectivePresentation(task.objective), task.objective), e('small', null, `${task.id} · 修订 ${task.revision}`)), e('span', { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)),
+    e('header', { className: 'ltr-cockpit-header' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('div', { className: layout.identityClassName }, e('div', { className: 'ltr-cockpit-identity-row' }, e('strong', goalObjectivePresentation(task.objective), task.objective), e('span', { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e('small', null, `${task.id} · 修订 ${task.revision}`))),
     e('p', { className: 'ltr-warning' }, '此历史任务在生成计划前结束，因此没有可展示的 DAG。'),
     e('h4', null, '近期事件'), e('ol', null, ...events.slice(-8).map((event, index) => e('li', { key: `${event.seq ?? index}-${event.type}` }, event.type)))
   )
@@ -90,9 +91,8 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },
       e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'),
-      e('div', null, e('strong', goalObjectivePresentation(task.objective), task.objective), e('small', null, `${task.id} · 修订 ${task.revision}`)),
-      e('span', { className: `ltr-state tone-${state.tone}` }, state.label),
-      e('small', { title: runtimeMetrics.detail }, runtimeMetrics.summary),
+      e('div', { className: layout.identityClassName }, e('div', { className: 'ltr-cockpit-identity-row' }, e('strong', goalObjectivePresentation(task.objective), task.objective), e('span', { className: `ltr-state tone-${state.tone}` }, state.label)), e('small', { title: runtimeMetrics.detail }, `${task.id} · 修订 ${task.revision} · ${runtimeMetrics.summary}`))),
+    e('nav', { className: layout.actionsClassName, 'aria-label': '任务操作' },
       sessionId ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending || isCurrent, onClick: attach }, isCurrent ? '当前会话任务' : attached ? '设为当前任务' : '附加到当前会话') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('rejectReplan', { taskId: task.id, expectedRevision: task.controlRevision }) }, '拒绝改计划') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
@@ -103,13 +103,14 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       ...(task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
         ? [e('button', { key: 'resume-retry', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]
         : [e('button', { key: name, type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action(name) }, labels[name])])),
+    ),
     error ? e('p', { className: 'ltr-error', role: 'alert' }, error) : null,
     editing && editableOriginalGoal ? e('form', { className: 'ltr-goal-edit', onSubmit: event => { event.preventDefault(); if (objective.trim() && reason.trim()) edit() } }, e('label', null, '新原始目标', e('textarea', { value: objective, onChange: event => setObjective(event.target.value) })), e('label', null, '修改原因', e('input', { value: reason, onChange: event => setReason(event.target.value) })), e('button', { type: 'submit', className: 'ltr-btn', disabled: pending || !objective.trim() || !reason.trim() }, '生成重规划')) : null,
     e('p', { className: 'ltr-plan-hint' }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
-    e('div', { className: 'ltr-cockpit-body' },
+    e('div', { className: layout.mainClassName },
       e(TaskDag, { nodes: graph.nodes, selectedId, onSelect: setSelectedId }),
-      e('aside', { className: 'ltr-inspector' }, selected ? e(React.Fragment, null,
+      e('aside', { className: layout.inspectorClassName }, selected ? e(React.Fragment, null,
         e('h3', null, selected.objective), e('p', null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e('p', null, selected.completionCriteria ?? '未声明完成条件'),
         activeAttempt ? e('section', { className: 'ltr-attempt-liveness' }, e('h4', null, '执行活动'), e('p', null, `${activeAttempt.latestProgress?.phase ?? '执行中'}：${activeAttempt.latestProgress?.message ?? '等待子会话进度'}`), activeAttempt.lastActivityAt ? e('time', null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e('time', null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null,
-        e('h4', null, '近期事件'), e('ol', { className: 'ltr-event-list' }, ...events.filter(event => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => { const item = formatTaskEvent(event); return e('li', { key: `${event.seq ?? index}-${event.type}`, className: `tone-${item.tone}` }, e('strong', null, item.label), e('small', null, item.detail), event.createdAt ? e('time', null, new Date(event.createdAt).toLocaleString()) : null) }))) : e('p', null, '选择一个节点查看详情'))))
+        e('h4', null, '近期事件'), e('ol', { className: layout.eventListClassName }, ...events.filter(event => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => { const item = formatTaskEvent(event); return e('li', { key: `${event.seq ?? index}-${event.type}`, className: `tone-${item.tone}` }, e('strong', null, item.label), e('small', null, item.detail), event.createdAt ? e('time', null, new Date(event.createdAt).toLocaleString()) : null) }))) : e('p', null, '选择一个节点查看详情'))))
 }

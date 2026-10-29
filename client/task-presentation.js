@@ -45,6 +45,16 @@ export function taskAreaOverlayPresentation(open) {
   }
 }
 
+export function cockpitLayoutPresentation() {
+  return {
+    identityClassName: 'ltr-cockpit-identity',
+    actionsClassName: 'ltr-cockpit-actions',
+    mainClassName: 'ltr-cockpit-main',
+    inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
+    eventListClassName: 'ltr-event-list ltr-cockpit-events',
+  }
+}
+
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
   // A web-side resume only marks the goal RUNNING; a live agent session must

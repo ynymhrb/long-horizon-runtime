@@ -1,11 +1,21 @@
 import { expect, test } from 'vitest'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
-import { formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaOverlayPresentation } from '../client/task-presentation.js'
+import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaOverlayPresentation } from '../client/task-presentation.js'
 
 test('任务区以顶部非模态面板展示，不创建遮罩层', () => {
   expect(taskAreaOverlayPresentation(true)).toEqual({
     layerClassName: 'ltr-modal-layer ltr-task-area-open',
     panelClassName: 'ltr-modal ltr-task-area-panel',
+  })
+})
+
+test('驾驶舱将身份、操作、等高主体和可滚动事件分区', () => {
+  expect(cockpitLayoutPresentation()).toEqual({
+    identityClassName: 'ltr-cockpit-identity',
+    actionsClassName: 'ltr-cockpit-actions',
+    mainClassName: 'ltr-cockpit-main',
+    inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
+    eventListClassName: 'ltr-event-list ltr-cockpit-events',
   })
 })
 
