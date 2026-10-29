@@ -80,7 +80,7 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
       return e('li', { key: item.id }, e('button', { type: 'button', onClick: () => setSelectedId(item.id) },
         e('span', { className: `ltr-state tone-${presentation.tone}` }, presentation.label),
         e('strong', null, item.objective),
-        e('small', null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)}`)))
+        e('small', null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1000)} 秒`)))
     })))
   return e('div', { className: 'ltr-modal-layer' },
     e('div', { className: 'ltr-mask', onClick: onClose }),

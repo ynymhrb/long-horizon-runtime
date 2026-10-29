@@ -34,6 +34,10 @@ export function quotaRecoveryPresentation(recovery, now = new Date(), latestReco
  */
 export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}'
 
+export function goalObjectivePresentation(objective) {
+  return { className: 'ltr-goal-objective', maxLines: 50, title: objective }
+}
+
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
   // A web-side resume only marks the goal RUNNING; a live agent session must
@@ -49,4 +53,14 @@ export function formatTaskProgress(progress, node) {
   const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective
   const settled = progress?.settled ?? progress?.succeeded ?? 0
   return `${settled}/${progress?.total ?? 0}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
+}
+
+export function formatRuntimeMetrics(metrics) {
+  const duration = value => {
+    const seconds = Math.floor(Math.max(0, value ?? 0) / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const remainder = seconds % 60
+    return minutes > 0 ? `${minutes} 分 ${remainder} 秒` : `${remainder} 秒`
+  }
+  return { summary: `第 ${metrics?.runRoundCount ?? 0} 轮 · 已运行 ${duration(metrics?.activeRunTimeMs)}`, detail: `自然经过 ${duration(metrics?.elapsedRunTimeMs)}` }
 }

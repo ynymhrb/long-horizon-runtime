@@ -65,7 +65,7 @@ export function TaskStrip({ sessionId, remote, onOpen, openSession, driveInSessi
     e('span', { className: 'ltr-strip-glyph', 'aria-hidden': true }, '◎'),
     e('span', { className: 'ltr-strip-label' }, view.label),
     e('button', { type: 'button', className: 'ltr-strip-objective', onClick: () => onOpen(task.id), title: task.objective }, task.objective),
-    e('span', { className: 'ltr-strip-progress', title: view.detail || task.objective }, view.progress),
+    e('span', { className: 'ltr-strip-progress', title: view.detail || task.objective }, `${view.progress} · ${task.runtimeMetrics ? taskStripRuntime(task.runtimeMetrics) : ''}`),
     driverNotice ? e('span', { className: 'ltr-strip-progress', role: 'status' }, driverNotice) : null,
     e('div', { className: 'ltr-strip-actions' },
       (task.availableActions ?? []).includes('pause') ? e('button', { type: 'button', className: 'ltr-icon-button', disabled: pending, onClick: () => update('pause'), 'aria-label': '暂停长任务', title: '暂停长任务' }, 'Ⅱ') : null,
@@ -74,3 +74,5 @@ export function TaskStrip({ sessionId, remote, onOpen, openSession, driveInSessi
       e('button', { type: 'button', className: 'ltr-icon-button', disabled: pending, onClick: () => onOpen(task.id), 'aria-label': '打开任务区', title: '打开任务区' }, '↗'),
       e('button', { type: 'button', className: 'ltr-icon-button', disabled: pending, onClick: clear, 'aria-label': '隐藏当前任务条', title: '隐藏当前任务条' }, '×')))
 }
+
+function taskStripRuntime(metrics) { return `第 ${metrics.runRoundCount} 轮 · 已运行 ${Math.floor(metrics.activeRunTimeMs / 1000)} 秒` }

@@ -207,6 +207,18 @@ describe('LongTaskRuntime', () => {
     expect(runtime.getStatus(goal.id)?.state).toBe('SUCCEEDED')
   })
 
+  test('records one durable runtime round for each dispatched ready set', async () => {
+    const planner: PlannerAdapter = { async plan(input) { return { goalId: input.goalId, revision: 1, tasks: [strictTask('a', 'first'), strictTask('b', 'second', ['a'])] } } }
+    const runtime = new LongTaskRuntime(planner, { async execute() { return { status: 'succeeded' as const, summary: 'no_artifact', artifacts: [], evidence: [] } } })
+    const goal = await runtime.createGoal({ objective: 'record rounds' })
+
+    await runtime.runUntilIdle(goal.id, {})
+
+    const status = runtime.getStatus(goal.id)!
+    expect(status.runtimeMetrics.runRoundCount).toBe(2)
+    expect(runtime.store.listRunRounds(goal.id).every(round => round.finishedAt !== undefined)).toBe(true)
+  })
+
   test('planner failure returns a discoverable durable failed goal', async () => {
     const planner: PlannerAdapter = { async plan() { throw new Error('bad plan') } }
     const execution: ExecutionAdapter = { async execute() { throw new Error('unreachable') } }

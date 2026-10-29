@@ -1,7 +1,7 @@
 import React from 'react'
 import { TaskDag } from './TaskDag.js'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from './task-model.js'
-import { quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
+import { formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 import { formatTaskEvent } from './task-events.js'
 const e = React.createElement
@@ -34,7 +34,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   if (dataState === 'loading') return e('p', null, '正在加载任务…')
   if (dataState === 'missing') return e('section', { className: 'ltr-cockpit' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('p', { className: 'ltr-error' }, '任务不存在或已被清理。'))
   if (dataState === 'no-plan') return e('section', { className: 'ltr-cockpit ltr-no-plan' },
-    e('header', { className: 'ltr-cockpit-header' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('div', null, e('strong', null, task.objective), e('small', null, `${task.id} · 修订 ${task.revision}`)), e('span', { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)),
+    e('header', { className: 'ltr-cockpit-header' }, e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'), e('div', null, e('strong', goalObjectivePresentation(task.objective), task.objective), e('small', null, `${task.id} · 修订 ${task.revision}`)), e('span', { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)),
     e('p', { className: 'ltr-warning' }, '此历史任务在生成计划前结束，因此没有可展示的 DAG。'),
     e('h4', null, '近期事件'), e('ol', null, ...events.slice(-8).map((event, index) => e('li', { key: `${event.seq ?? index}-${event.type}` }, event.type)))
   )
@@ -86,11 +86,13 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const latestQuotaRecovery = [...(task.recentEvents ?? [])].reverse().find(event => event.type === 'QuotaRecoveryResumed')
   const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, new Date(), latestQuotaRecovery)
   const editableOriginalGoal = canEditOriginalGoal(task)
+  const runtimeMetrics = formatRuntimeMetrics(task.runtimeMetrics)
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },
       e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'),
-      e('div', null, e('strong', null, task.objective), e('small', null, `${task.id} · 修订 ${task.revision}`)),
+      e('div', null, e('strong', goalObjectivePresentation(task.objective), task.objective), e('small', null, `${task.id} · 修订 ${task.revision}`)),
       e('span', { className: `ltr-state tone-${state.tone}` }, state.label),
+      e('small', { title: runtimeMetrics.detail }, runtimeMetrics.summary),
       sessionId ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending || isCurrent, onClick: attach }, isCurrent ? '当前会话任务' : attached ? '设为当前任务' : '附加到当前会话') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('rejectReplan', { taskId: task.id, expectedRevision: task.controlRevision }) }, '拒绝改计划') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,

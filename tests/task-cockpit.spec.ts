@@ -1,6 +1,16 @@
 import { expect, test } from 'vitest'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
-import { quotaRecoveryPresentation } from '../client/task-presentation.js'
+import { formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation } from '../client/task-presentation.js'
+
+test('将超过显示上限的任务目标标记为可悬浮查看完整内容', () => {
+  const objective = Array.from({ length: 51 }, (_, index) => `第 ${index + 1} 行`).join('\n')
+
+  expect(goalObjectivePresentation(objective)).toEqual({
+    className: 'ltr-goal-objective',
+    maxLines: 50,
+    title: objective,
+  })
+})
 
 test('prefers a running node then pending work for the Cockpit inspector', () => {
   expect(initialSelectedNode([{ id: 'done', state: 'SUCCEEDED' }, { id: 'run', state: 'RUNNING' }, { id: 'pending', state: 'PENDING' }])).toBe('run')
@@ -62,4 +72,11 @@ test('renders a due quota recovery as an actionable continuation message', () =>
 test('renders an automatic quota recovery notice while work resumes', () => {
   expect(quotaRecoveryPresentation(undefined, new Date(), { type: 'QuotaRecoveryResumed' }))
     .toMatchObject({ tone: 'ongoing', label: '额度已恢复，正在自动继续执行' })
+})
+
+test('formats task runtime rounds and both time measures for the cockpit', () => {
+  expect(formatRuntimeMetrics({ runRoundCount: 3, activeRunTimeMs: 65_000, elapsedRunTimeMs: 125_000 })).toEqual({
+    summary: '第 3 轮 · 已运行 1 分 5 秒',
+    detail: '自然经过 2 分 5 秒',
+  })
 })

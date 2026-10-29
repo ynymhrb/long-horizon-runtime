@@ -99,7 +99,12 @@ export class Scheduler {
     const tasks = this.store.listTasks(goalId)
     const ready = tasks.filter(task => task.state === 'PENDING' && !this.inBackoff(goalId, task.id) && this.dependenciesSatisfied(goalId, task, tasks))
       .sort((a, b) => b.priority - a.priority || (a.createdOrder ?? Number.MAX_SAFE_INTEGER) - (b.createdOrder ?? Number.MAX_SAFE_INTEGER)).slice(0, this.maxConcurrentTasks)
-    this.store.transaction(() => this.store!.append(ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} }))))
+    const round = ready.length === 0 ? undefined : this.store.listRunRounds(goalId).length + 1
+    const startedAt = round === undefined ? undefined : new Date(this.now()).toISOString()
+    this.store.transaction(() => this.store!.append([
+      ...(round === undefined ? [] : [{ type: 'GoalRunRoundStarted', goalId, payload: { round, revision: goal.revision, startedAt } }]),
+      ...ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} })),
+    ]))
     await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent, executionSignal)))
     this.store.transaction(() => {
       const events: Array<{ type: string; goalId: string; payload: Record<string, unknown> }> = []
@@ -117,6 +122,7 @@ export class Scheduler {
       const lifecycleDecided = currentState !== undefined && currentState !== 'RUNNING'
       if (latest.length > 0 && latest.every(task => task.state === 'SUCCEEDED')) events.push({ type: 'GoalSucceeded', goalId, payload: {} })
       else if (!lifecycleDecided && latest.some(task => task.state === 'FAILED') && !latest.some(task => ['PENDING', 'READY', 'RUNNING'].includes(task.state))) events.push({ type: 'GoalFailed', goalId, payload: {} })
+      if (round !== undefined) events.push({ type: 'GoalRunRoundFinished', goalId, payload: { round, finishedAt: new Date(this.now()).toISOString(), outcome: this.store!.getGoal(goalId)?.state ?? 'unknown' } })
       this.store!.append(events)
     })
     return ready.length > 0
