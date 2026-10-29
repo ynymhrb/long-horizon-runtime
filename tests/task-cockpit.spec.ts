@@ -29,6 +29,7 @@ test('驾驶舱在固定外层高度内让拓扑主体填满剩余空间', () =>
     inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
     eventListClassName: 'ltr-event-list ltr-cockpit-events',
     mainSizing: 'fill-remaining-height',
+    inspectorMode: 'collapsible-below-topology',
   })
 })
 

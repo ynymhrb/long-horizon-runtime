@@ -16,8 +16,7 @@ export function taskNodeLabelPresentation(node) {
 
 /** Prevent a folded two-node graph from being auto-enlarged to fill the SVG. */
 export function stableCanvasSize({ width, height }) {
-  void width; void height
-  return { width: 1100, height: 640 }
+  return { width: Math.max(760, width), height: Math.max(360, height) }
 }
 
 /**

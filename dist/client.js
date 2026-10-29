@@ -4036,8 +4036,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		/** Prevent a folded two-node graph from being auto-enlarged to fill the SVG. */
 		function stableCanvasSize({ width, height }) {
 			return {
-				width: 1100,
-				height: 640
+				width: Math.max(760, width),
+				height: Math.max(360, height)
 			};
 		}
 		/**
@@ -4432,7 +4432,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				mainClassName: "ltr-cockpit-main",
 				inspectorClassName: "ltr-inspector ltr-cockpit-inspector",
 				eventListClassName: "ltr-event-list ltr-cockpit-events",
-				mainSizing: "fill-remaining-height"
+				mainSizing: "fill-remaining-height",
+				inspectorMode: "collapsible-below-topology"
 			};
 		}
 		function taskStripPresentation(task) {
@@ -4975,7 +4976,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId
-			}), e$3("aside", { className: layout.inspectorClassName }, selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: layout.eventListClassName }, ...eventRows)) : e$3("p", null, "选择一个节点查看详情"))));
+			}), e$3("details", { className: `${layout.inspectorClassName} ltr-cockpit-inspector-details` }, e$3("summary", null, "节点详情"), selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: layout.eventListClassName }, ...eventRows)) : e$3("p", null, "选择一个节点查看详情"))));
 		}
 		//#endregion
 		//#region client/TaskArea.js
@@ -5327,6 +5328,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "long-task-runtime-layout";
 			tag.textContent = `.ltr-task-cockpit-panel{position:relative;display:flex;flex-direction:column;height:min(55vh,430px);overflow:hidden}.ltr-task-cockpit-panel>.ltr-close{position:absolute;z-index:1;top:20px;right:20px}.ltr-task-cockpit-panel>.ltr-cockpit{display:flex;flex:1;flex-direction:column;min-height:0}.ltr-task-cockpit-panel .ltr-cockpit-header{padding:0 52px 8px 0}.ltr-task-cockpit-panel .ltr-cockpit small{margin-top:4px}.ltr-task-cockpit-panel .ltr-cockpit-actions{padding:8px 0}.ltr-task-cockpit-panel .ltr-plan-hint{margin:6px 0}.ltr-task-cockpit-panel .ltr-cockpit-main{flex:1;min-height:0;height:auto;margin-top:8px}@media(max-width:800px){.ltr-task-cockpit-panel .ltr-cockpit-main{height:auto}}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-topology-priority\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-runtime-topology-priority";
+			tag.textContent = `.ltr-task-cockpit-panel .ltr-plan-hint{display:none}.ltr-task-cockpit-panel .ltr-cockpit-main{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;gap:8px}.ltr-task-cockpit-panel .ltr-dag-legend{padding:4px 10px;font-size:10px}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details{display:block;flex:none;max-height:92px;padding:6px 10px;overflow:auto}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details:not([open]){height:20px;min-height:20px}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary)}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details h3,.ltr-task-cockpit-panel .ltr-cockpit-inspector-details h4,.ltr-task-cockpit-panel .ltr-cockpit-inspector-details p{margin:6px 0}@media(max-width:800px){.ltr-task-cockpit-panel .ltr-cockpit-inspector-details{display:none}}`;
 			document.head.appendChild(tag);
 		}
 		let opened = false;

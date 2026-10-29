@@ -56,6 +56,7 @@ export function cockpitLayoutPresentation() {
     inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
     eventListClassName: 'ltr-event-list ltr-cockpit-events',
     mainSizing: 'fill-remaining-height',
+    inspectorMode: 'collapsible-below-topology',
   }
 }
 

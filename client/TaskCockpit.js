@@ -114,7 +114,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
     e('p', { className: 'ltr-plan-hint' }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
     e('div', { className: layout.mainClassName },
       e(TaskDag, { nodes: graph.nodes, selectedId, onSelect: setSelectedId }),
-      e('aside', { className: layout.inspectorClassName }, selected ? e(React.Fragment, null,
+      e('details', { className: `${layout.inspectorClassName} ltr-cockpit-inspector-details` }, e('summary', null, '节点详情'), selected ? e(React.Fragment, null,
         e('h3', null, selected.objective), e('p', null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e('p', null, selected.completionCriteria ?? '未声明完成条件'),
         activeAttempt ? e('section', { className: 'ltr-attempt-liveness' }, e('h4', null, '执行活动'), e('p', null, `${activeAttempt.latestProgress?.phase ?? '执行中'}：${activeAttempt.latestProgress?.message ?? '等待子会话进度'}`), activeAttempt.lastActivityAt ? e('time', null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e('time', null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null,
         e('h4', null, '近期事件'), e('ol', { className: layout.eventListClassName }, ...eventRows)) : e('p', null, '选择一个节点查看详情'))))

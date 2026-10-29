@@ -163,9 +163,9 @@ test('falls back to the task objective for historical nodes without a summary', 
   expect(taskNodeLabelPresentation({ objective: '旧计划任务说明' })).toEqual({ label: '旧计划任务说明', title: '旧计划任务说明' })
 })
 
-test('keeps a minimum SVG canvas after a branch is folded', () => {
-  expect(stableCanvasSize({ width: 472, height: 192 })).toEqual({ width: 1100, height: 640 })
-  expect(stableCanvasSize({ width: 1200, height: 720 })).toEqual({ width: 1100, height: 640 })
+test('keeps a minimum SVG canvas after a branch is folded but preserves a large graph extent', () => {
+  expect(stableCanvasSize({ width: 472, height: 192 })).toEqual({ width: 760, height: 360 })
+  expect(stableCanvasSize({ width: 1200, height: 720 })).toEqual({ width: 1200, height: 720 })
 })
 
 test('maps durable states to a closed visual vocabulary', () => {
