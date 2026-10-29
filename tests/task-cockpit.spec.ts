@@ -27,6 +27,7 @@ test('驾驶舱将身份、操作、等高主体和可滚动事件分区', () =>
     mainClassName: 'ltr-cockpit-main',
     inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
     eventListClassName: 'ltr-event-list ltr-cockpit-events',
+    mainHeight: '320px',
   })
 })
 

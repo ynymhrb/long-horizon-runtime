@@ -54,6 +54,7 @@ export function cockpitLayoutPresentation() {
     mainClassName: 'ltr-cockpit-main',
     inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
     eventListClassName: 'ltr-event-list ltr-cockpit-events',
+    mainHeight: '320px',
   }
 }
 
