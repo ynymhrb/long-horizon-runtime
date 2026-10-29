@@ -4425,6 +4425,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		}
 		/** Bounded panel geometry follows the host conversation column, never the viewport. */
 		const taskAreaPanelCss = "box-sizing:border-box;width:100%;max-width:1160px;max-height:min(55vh,430px);margin:0 auto;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:0 0 16px 16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)";
+		/** The cockpit is a task workspace, not a modal that must preserve transcript height. */
+		const cockpitPanelCss = "height:calc(100vh - 76px);max-height:none;overflow:hidden";
 		function cockpitLayoutPresentation() {
 			return {
 				identityClassName: "ltr-cockpit-identity",
@@ -5334,6 +5336,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "long-task-runtime-topology-priority";
 			tag.textContent = `.ltr-task-cockpit-panel .ltr-plan-hint{display:none}.ltr-task-cockpit-panel .ltr-cockpit-main{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;gap:8px}.ltr-task-cockpit-panel .ltr-dag-legend{padding:4px 10px;font-size:10px}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details{display:block;flex:none;max-height:92px;padding:6px 10px;overflow:auto}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details:not([open]){height:20px;min-height:20px}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary)}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details h3,.ltr-task-cockpit-panel .ltr-cockpit-inspector-details h4,.ltr-task-cockpit-panel .ltr-cockpit-inspector-details p{margin:6px 0}@media(max-width:800px){.ltr-task-cockpit-panel .ltr-cockpit-inspector-details{display:none}}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-full-height\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-runtime-full-height";
+			tag.textContent = `.ltr-task-cockpit-panel{${cockpitPanelCss}}`;
 			document.head.appendChild(tag);
 		}
 		let opened = false;

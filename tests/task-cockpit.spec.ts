@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
 import { ensureSessionTopSlot } from '../client/index.js'
-import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaPanelCss, taskAreaPresentation } from '../client/task-presentation.js'
+import { cockpitLayoutPresentation, cockpitPanelCss, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaPanelCss, taskAreaPresentation } from '../client/task-presentation.js'
 
 test('任务区挂载到原生会话流，不保留浮层容器', () => {
   expect(taskAreaPresentation()).toEqual({
@@ -33,11 +33,13 @@ test('驾驶舱在固定外层高度内让拓扑主体填满剩余空间', () =>
   })
 })
 
-test('驾驶舱面板保持原有高度上限且不通过外层滚动裁切拓扑', () => {
+test('任务驾驶舱可覆盖会话主区域而不把拓扑压缩到固定小高度', () => {
   expect(taskAreaPresentation()).toMatchObject({
     panelClassName: 'ltr-task-area-panel',
     cockpitPanelClassName: 'ltr-task-cockpit-panel',
   })
+  expect(cockpitPanelCss).toContain('height:calc(100vh - 76px)')
+  expect(cockpitPanelCss).toContain('max-height:none')
 })
 
 test('将过长任务目标标记为单行省略并可悬浮查看完整内容', () => {
