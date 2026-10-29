@@ -41,6 +41,7 @@ export function goalObjectivePresentation(objective) {
 export function taskAreaPresentation() {
   return {
     panelClassName: 'ltr-task-area-panel',
+    cockpitPanelClassName: 'ltr-task-cockpit-panel',
   }
 }
 
@@ -54,7 +55,7 @@ export function cockpitLayoutPresentation() {
     mainClassName: 'ltr-cockpit-main',
     inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
     eventListClassName: 'ltr-event-list ltr-cockpit-events',
-    mainHeight: '320px',
+    mainSizing: 'fill-remaining-height',
   }
 }
 

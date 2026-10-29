@@ -4418,7 +4418,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			};
 		}
 		function taskAreaPresentation() {
-			return { panelClassName: "ltr-task-area-panel" };
+			return {
+				panelClassName: "ltr-task-area-panel",
+				cockpitPanelClassName: "ltr-task-cockpit-panel"
+			};
 		}
 		/** Bounded panel geometry follows the host conversation column, never the viewport. */
 		const taskAreaPanelCss = "box-sizing:border-box;width:100%;max-width:1160px;max-height:min(55vh,430px);margin:0 auto;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:0 0 16px 16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)";
@@ -4429,7 +4432,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				mainClassName: "ltr-cockpit-main",
 				inspectorClassName: "ltr-inspector ltr-cockpit-inspector",
 				eventListClassName: "ltr-event-list ltr-cockpit-events",
-				mainHeight: "320px"
+				mainSizing: "fill-remaining-height"
 			};
 		}
 		function taskStripPresentation(task) {
@@ -5116,7 +5119,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1e3)} 秒`)));
 			})));
 			return e$2("section", {
-				className: presentation.panelClassName,
+				className: selectedId ? `${presentation.panelClassName} ${presentation.cockpitPanelClassName}` : presentation.panelClassName,
 				"aria-label": "任务区"
 			}, e$2("button", {
 				className: "ltr-btn ltr-close",
@@ -5318,6 +5321,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "long-task-runtime-controls";
 			tag.textContent = `.ltr-dag-legend{display:flex;flex-wrap:wrap;gap:10px;padding:7px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}.ltr-dag-legend span{display:inline-flex;gap:5px;align-items:center}.ltr-legend-swatch{width:9px;height:9px;border:2px solid currentColor;border-radius:3px}.ltr-goal-edit{display:grid;gap:8px;margin:12px 0;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px}.ltr-goal-edit label{display:grid;gap:4px;font-size:12px}.ltr-goal-edit input,.ltr-goal-edit textarea{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base);color:inherit}.ltr-goal-edit textarea{min-height:64px;resize:vertical}.ltr-event-list{display:grid;gap:8px;padding-left:18px}.ltr-event-list li{display:grid;gap:2px}.ltr-event-list small,.ltr-event-list time{font-size:11px;color:var(--dsw-alias-label-tertiary)}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-layout\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-runtime-layout";
+			tag.textContent = `.ltr-task-cockpit-panel{position:relative;display:flex;flex-direction:column;height:min(55vh,430px);overflow:hidden}.ltr-task-cockpit-panel>.ltr-close{position:absolute;z-index:1;top:20px;right:20px}.ltr-task-cockpit-panel>.ltr-cockpit{display:flex;flex:1;flex-direction:column;min-height:0}.ltr-task-cockpit-panel .ltr-cockpit-header{padding:0 52px 8px 0}.ltr-task-cockpit-panel .ltr-cockpit small{margin-top:4px}.ltr-task-cockpit-panel .ltr-cockpit-actions{padding:8px 0}.ltr-task-cockpit-panel .ltr-plan-hint{margin:6px 0}.ltr-task-cockpit-panel .ltr-cockpit-main{flex:1;min-height:0;height:auto;margin-top:8px}@media(max-width:800px){.ltr-task-cockpit-panel .ltr-cockpit-main{height:auto}}`;
 			document.head.appendChild(tag);
 		}
 		let opened = false;

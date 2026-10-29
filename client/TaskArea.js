@@ -83,7 +83,7 @@ export function TaskArea({ open, onClose, remote, initialTaskId, useSessions, op
         e('strong', null, item.objective),
         e('small', null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1000)} 秒`)))
     })))
-  return e('section', { className: presentation.panelClassName, 'aria-label': '任务区' },
+  return e('section', { className: selectedId ? `${presentation.panelClassName} ${presentation.cockpitPanelClassName}` : presentation.panelClassName, 'aria-label': '任务区' },
     e('button', { className: 'ltr-btn ltr-close', type: 'button', onClick: onClose }, '关闭'),
     error ? e('p', { className: 'ltr-error' }, error) : null,
     selectedId ? e(TaskCockpit, { task, graph, events, remote, sessionId, openSession, driveInSession, isCurrent: selectedId === currentTaskId, onCurrentChanged: setCurrentTaskId, onTaskChanged: setTask, onBack: () => setSelectedId(null) }) : overview)

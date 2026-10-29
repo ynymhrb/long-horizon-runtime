@@ -6,6 +6,7 @@ import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentat
 test('任务区挂载到原生会话流，不保留浮层容器', () => {
   expect(taskAreaPresentation()).toEqual({
     panelClassName: 'ltr-task-area-panel',
+    cockpitPanelClassName: 'ltr-task-cockpit-panel',
   })
 })
 
@@ -20,14 +21,21 @@ test('缺少会话顶部插槽时明确拒绝挂载', () => {
   expect(() => ensureSessionTopSlot({ spec: () => ({ kind: 'list', scope: 'session' }) })).not.toThrow()
 })
 
-test('驾驶舱将身份、操作、等高主体和可滚动事件分区', () => {
+test('驾驶舱在固定外层高度内让拓扑主体填满剩余空间', () => {
   expect(cockpitLayoutPresentation()).toEqual({
     identityClassName: 'ltr-cockpit-identity',
     actionsClassName: 'ltr-cockpit-actions',
     mainClassName: 'ltr-cockpit-main',
     inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
     eventListClassName: 'ltr-event-list ltr-cockpit-events',
-    mainHeight: '320px',
+    mainSizing: 'fill-remaining-height',
+  })
+})
+
+test('驾驶舱面板保持原有高度上限且不通过外层滚动裁切拓扑', () => {
+  expect(taskAreaPresentation()).toMatchObject({
+    panelClassName: 'ltr-task-area-panel',
+    cockpitPanelClassName: 'ltr-task-cockpit-panel',
   })
 })
 
