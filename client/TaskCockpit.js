@@ -88,6 +88,13 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, new Date(), latestQuotaRecovery)
   const editableOriginalGoal = canEditOriginalGoal(task)
   const runtimeMetrics = formatRuntimeMetrics(task.runtimeMetrics)
+  const eventRows = events.filter(event => !event.taskId || event.taskId === selected?.id).slice(-8).map((event, index) => {
+    const item = formatTaskEvent(event)
+    return e('li', { key: `${event.seq ?? index}-${event.type}`, className: `tone-${item.tone}` }, e('strong', null, item.label), e('small', null, item.detail), event.createdAt ? e('time', null, new Date(event.createdAt).toLocaleString()) : null)
+  })
+  const actionButtons = (task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
+    ? [e('button', { key: 'resume-retry', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]
+    : [e('button', { key: name, type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action(name) }, labels[name])])
   return e('section', { className: 'ltr-cockpit' },
     e('header', { className: 'ltr-cockpit-header' },
       e('button', { type: 'button', className: 'ltr-btn', onClick: onBack }, '← 全部任务'),
@@ -100,9 +107,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: jump }, '当前会话'),
       waitingForDriver ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: guideAfterResume }, '继续执行会话') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
-      ...(task.availableActions ?? []).filter(name => labels[name]).flatMap(name => name === 'resume' && externalResolutionRequired
-        ? [e('button', { key: 'resume-retry', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'retry') }, '重试外部操作'), e('button', { key: 'resume-confirmed', type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action('resume', 'confirmed_succeeded') }, '外部操作已完成')]
-        : [e('button', { key: name, type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => action(name) }, labels[name])])),
+      ...actionButtons,
     ),
     error ? e('p', { className: 'ltr-error', role: 'alert' }, error) : null,
     editing && editableOriginalGoal ? e('form', { className: 'ltr-goal-edit', onSubmit: event => { event.preventDefault(); if (objective.trim() && reason.trim()) edit() } }, e('label', null, '新原始目标', e('textarea', { value: objective, onChange: event => setObjective(event.target.value) })), e('label', null, '修改原因', e('input', { value: reason, onChange: event => setReason(event.target.value) })), e('button', { type: 'submit', className: 'ltr-btn', disabled: pending || !objective.trim() || !reason.trim() }, '生成重规划')) : null,
@@ -112,5 +117,5 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       e('aside', { className: layout.inspectorClassName }, selected ? e(React.Fragment, null,
         e('h3', null, selected.objective), e('p', null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e('p', null, selected.completionCriteria ?? '未声明完成条件'),
         activeAttempt ? e('section', { className: 'ltr-attempt-liveness' }, e('h4', null, '执行活动'), e('p', null, `${activeAttempt.latestProgress?.phase ?? '执行中'}：${activeAttempt.latestProgress?.message ?? '等待子会话进度'}`), activeAttempt.lastActivityAt ? e('time', null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e('time', null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null,
-        e('h4', null, '近期事件'), e('ol', { className: layout.eventListClassName }, ...events.filter(event => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => { const item = formatTaskEvent(event); return e('li', { key: `${event.seq ?? index}-${event.type}`, className: `tone-${item.tone}` }, e('strong', null, item.label), e('small', null, item.detail), event.createdAt ? e('time', null, new Date(event.createdAt).toLocaleString()) : null) }))) : e('p', null, '选择一个节点查看详情'))))
+        e('h4', null, '近期事件'), e('ol', { className: layout.eventListClassName }, ...eventRows)) : e('p', null, '选择一个节点查看详情'))))
 }

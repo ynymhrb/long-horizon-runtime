@@ -4417,6 +4417,21 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				title: objective
 			};
 		}
+		function taskAreaOverlayPresentation(open) {
+			return {
+				layerClassName: open ? "ltr-modal-layer ltr-task-area-open" : "ltr-modal-layer",
+				panelClassName: "ltr-modal ltr-task-area-panel"
+			};
+		}
+		function cockpitLayoutPresentation() {
+			return {
+				identityClassName: "ltr-cockpit-identity",
+				actionsClassName: "ltr-cockpit-actions",
+				mainClassName: "ltr-cockpit-main",
+				inspectorClassName: "ltr-inspector ltr-cockpit-inspector",
+				eventListClassName: "ltr-event-list ltr-cockpit-events"
+			};
+		}
 		function taskStripPresentation(task) {
 			const state = taskStatePresentation(task.state);
 			const waitingForDriver = task.requiresSessionDriver === true || task.requiresSessionDriver === void 0 && task.state === "RUNNING" && task.currentOrLastNode?.state !== void 0 && task.currentOrLastNode.state !== "RUNNING";
@@ -4756,6 +4771,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				remote,
 				driveInSession
 			]);
+			const layout = cockpitLayoutPresentation();
 			const dataState = cockpitDataState(task, graph);
 			if (dataState === "loading") return e$3("p", null, "正在加载任务…");
 			if (dataState === "missing") return e$3("section", { className: "ltr-cockpit" }, e$3("button", {
@@ -4767,7 +4783,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "button",
 				className: "ltr-btn",
 				onClick: onBack
-			}, "← 全部任务"), e$3("div", null, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
+			}, "← 全部任务"), e$3("div", { className: layout.identityClassName }, e$3("div", { className: "ltr-cockpit-identity-row" }, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("small", null, `${task.id} · 修订 ${task.revision}`))), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
 			const selected = graph.nodes.find((node) => node.id === selectedId);
 			const activeAttempt = selected ? task.attempts?.find((attempt) => attempt.taskId === selected.id && attempt.state === "RUNNING") : void 0;
 			const waitingForDriver = waitingForSessionDriver(task);
@@ -4854,11 +4870,40 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, /* @__PURE__ */ new Date(), latestQuotaRecovery);
 			const editableOriginalGoal = canEditOriginalGoal(task);
 			const runtimeMetrics = formatRuntimeMetrics(task.runtimeMetrics);
+			const eventRows = events.filter((event) => !event.taskId || event.taskId === selected?.id).slice(-8).map((event, index) => {
+				const item = formatTaskEvent(event);
+				return e$3("li", {
+					key: `${event.seq ?? index}-${event.type}`,
+					className: `tone-${item.tone}`
+				}, e$3("strong", null, item.label), e$3("small", null, item.detail), event.createdAt ? e$3("time", null, new Date(event.createdAt).toLocaleString()) : null);
+			});
+			const actionButtons = (task.availableActions ?? []).filter((name) => labels[name]).flatMap((name) => name === "resume" && externalResolutionRequired ? [e$3("button", {
+				key: "resume-retry",
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: () => action("resume", "retry")
+			}, "重试外部操作"), e$3("button", {
+				key: "resume-confirmed",
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: () => action("resume", "confirmed_succeeded")
+			}, "外部操作已完成")] : [e$3("button", {
+				key: name,
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: () => action(name)
+			}, labels[name])]);
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				onClick: onBack
-			}, "← 全部任务"), e$3("div", null, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label), e$3("small", { title: runtimeMetrics.detail }, runtimeMetrics.summary), sessionId ? e$3("button", {
+			}, "← 全部任务"), e$3("div", { className: layout.identityClassName }, e$3("div", { className: "ltr-cockpit-identity-row" }, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label)), e$3("small", { title: runtimeMetrics.detail }, `${task.id} · 修订 ${task.revision} · ${runtimeMetrics.summary}`))), e$3("nav", {
+				className: layout.actionsClassName,
+				"aria-label": "任务操作"
+			}, sessionId ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending || isCurrent,
@@ -4904,25 +4949,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				className: "ltr-btn",
 				disabled: pending,
 				onClick: task.archivedAt ? restore : archive
-			}, task.archivedAt ? "恢复归档任务" : "删除"), ...(task.availableActions ?? []).filter((name) => labels[name]).flatMap((name) => name === "resume" && externalResolutionRequired ? [e$3("button", {
-				key: "resume-retry",
-				type: "button",
-				className: "ltr-btn",
-				disabled: pending,
-				onClick: () => action("resume", "retry")
-			}, "重试外部操作"), e$3("button", {
-				key: "resume-confirmed",
-				type: "button",
-				className: "ltr-btn",
-				disabled: pending,
-				onClick: () => action("resume", "confirmed_succeeded")
-			}, "外部操作已完成")] : [e$3("button", {
-				key: name,
-				type: "button",
-				className: "ltr-btn",
-				disabled: pending,
-				onClick: () => action(name)
-			}, labels[name])])), error ? e$3("p", {
+			}, task.archivedAt ? "恢复归档任务" : "删除"), ...actionButtons), error ? e$3("p", {
 				className: "ltr-error",
 				role: "alert"
 			}, error) : null, editing && editableOriginalGoal ? e$3("form", {
@@ -4941,17 +4968,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "submit",
 				className: "ltr-btn",
 				disabled: pending || !objective.trim() || !reason.trim()
-			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: "ltr-cockpit-body" }, e$3(TaskDag, {
+			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: layout.mainClassName }, e$3(TaskDag, {
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId
-			}), e$3("aside", { className: "ltr-inspector" }, selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: "ltr-event-list" }, ...events.filter((event) => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => {
-				const item = formatTaskEvent(event);
-				return e$3("li", {
-					key: `${event.seq ?? index}-${event.type}`,
-					className: `tone-${item.tone}`
-				}, e$3("strong", null, item.label), e$3("small", null, item.detail), event.createdAt ? e$3("time", null, new Date(event.createdAt).toLocaleString()) : null);
-			}))) : e$3("p", null, "选择一个节点查看详情"))));
+			}), e$3("aside", { className: layout.inspectorClassName }, selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: layout.eventListClassName }, ...eventRows)) : e$3("p", null, "选择一个节点查看详情"))));
 		}
 		//#endregion
 		//#region client/TaskArea.js
@@ -5065,6 +5086,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				sessionId
 			]);
 			if (!open) return null;
+			const overlay = taskAreaOverlayPresentation(open);
 			const overview = e$2("section", null, e$2("h2", null, "任务区"), e$2("p", null, showAll ? "跨会话长任务" : "当前会话任务"), e$2("div", { className: "ltr-task-filter" }, e$2("input", {
 				value: query,
 				placeholder: "搜索任务 ID 或目标",
@@ -5093,11 +5115,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					onClick: () => setSelectedId(item.id)
 				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1e3)} 秒`)));
 			})));
-			return e$2("div", { className: "ltr-modal-layer" }, e$2("div", {
-				className: "ltr-mask",
-				onClick: onClose
-			}), e$2("section", {
-				className: "ltr-modal",
+			return e$2("div", { className: overlay.layerClassName }, e$2("section", {
+				className: overlay.panelClassName,
 				role: "dialog",
 				"aria-label": "任务区"
 			}, e$2("button", {
@@ -5271,13 +5290,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		];
 		const e = react.default.createElement;
 		const CSS = `
-.ltr-modal-layer{position:absolute;inset:0;z-index:50}.ltr-mask{position:absolute;inset:0;background:rgb(15 23 42 / .26)}
-.ltr-modal{position:relative;margin:24px auto;width:min(1160px,calc(100vw - 48px));height:calc(100vh - 48px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
+.ltr-modal-layer{position:absolute;inset:0;z-index:50;pointer-events:none}.ltr-task-area-open{display:flex;align-items:flex-start;justify-content:center}
+.ltr-modal{position:relative;width:min(1160px,calc(100vw - 48px));overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-task-area-panel{pointer-events:auto;max-height:min(55vh,430px);margin:0 auto;border-radius:0 0 16px 16px}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
 .ltr-task-filter{display:flex;align-items:center;gap:8px;margin:16px 0}.ltr-task-filter input,.ltr-task-filter select{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.ltr-task-filter input{min-width:260px}.ltr-task-filter .ltr-check{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px}.ltr-task-filter .ltr-check input{min-width:0;margin:0}
 .ltr-task-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0;border-top:1px solid var(--dsw-alias-border-l1)}.ltr-task-list button{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;align-items:center;width:100%;min-height:54px;padding:10px 4px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;text-align:left}.ltr-task-list button:hover{background:var(--dsw-alias-interactive-bg-hover)}.ltr-task-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.ltr-task-list small{overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-empty-task-list{margin:0;padding:18px 4px;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .ltr-strip{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));height:36px;margin:0 auto 8px;padding:4px 5px 4px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-specific-tip);color:var(--dsw-alias-label-primary)}.ltr-strip-glyph{color:var(--dsw-alias-label-tertiary)}.ltr-strip-label{flex:none;font-size:13px;font-weight:500}.ltr-strip-objective{flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;text-align:left;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.ltr-strip-progress{flex:0 1 auto;min-width:0;max-width:38%;overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-strip-actions{display:flex;gap:3px}.ltr-icon-button{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.ltr-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ltr-icon-button:disabled{opacity:.4;cursor:default}
-.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-header>div{flex:1;min-width:0}.ltr-goal-objective{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
-.ltr-cockpit-body{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;margin-top:16px}.ltr-dag-wrap{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;width:100%;height:570px;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-body{grid-template-columns:1fr}.ltr-modal{width:calc(100vw - 20px);height:calc(100vh - 20px);margin:10px}.ltr-dag{height:420px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
+.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-identity{flex:1;min-width:0}.ltr-cockpit-identity-row{display:flex;align-items:center;gap:8px;min-width:0}.ltr-cockpit-identity-row .ltr-goal-objective{flex:1;min-width:0}.ltr-goal-objective{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{flex:none;padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-cockpit-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
+.ltr-cockpit-main{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;height:260px;margin-top:16px}.ltr-dag-wrap{display:flex;flex-direction:column;min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;flex:1;min-height:0;width:100%;height:auto;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-cockpit-inspector{display:flex;flex-direction:column;min-height:0;overflow:hidden}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-cockpit-events{flex:1;min-height:0;overflow-y:auto}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-main{grid-template-columns:1fr;height:420px}.ltr-cockpit-inspector{display:none}.ltr-modal{width:calc(100vw - 20px);margin:0 10px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
 `;
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime\"]")) {
 			const tag = document.createElement("style");
