@@ -2,14 +2,14 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createProjectionSchema, projectEvent } from './projections.js'
-import type { GoalState, TaskNode, TaskState } from './domain.js'
+import type { GoalState, PauseOrigin, TaskNode, TaskState } from './domain.js'
 import type { BudgetLimit, BudgetUsage } from './budgets.js'
 
 /** Durable event accepted by the runtime event log. Payloads must be JSON serializable. */
 export interface RuntimeEvent { readonly type: string; readonly goalId: string; readonly taskId?: string; readonly payload: Record<string, unknown>; readonly seq?: number; readonly createdAt?: string }
 export interface TaskSessionLink { readonly sessionId: string; readonly kind: 'origin' | 'attached' | 'execution_child' }
 export interface CurrentTaskBinding { readonly sessionId: string; readonly taskId: string; readonly controlRevision: number; readonly updatedOrder: number }
-export interface GoalProjection { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly planningMode: 'auto' | 'require_confirmation'; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly pauseReason?: string; readonly archivedAt?: string }
+export interface GoalProjection { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly planningMode: 'auto' | 'require_confirmation'; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly pauseReason?: string; readonly pauseOrigin?: PauseOrigin; readonly archivedAt?: string }
 export interface GoalVersion { readonly version: number; readonly objective: string; readonly reason: string; readonly source: string; readonly createdAt: string }
 export interface AttemptProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly revision: number; readonly state: string; readonly dshSessionId?: string; readonly context: Record<string, unknown>; readonly summary?: string; readonly startedAt?: string; readonly lastActivityAt?: string; readonly leaseExpiresAt?: string; readonly maxWallExpiresAt?: string; readonly latestProgress?: { readonly phase: string; readonly message: string; readonly completed?: number; readonly total?: number } }
 export interface ArtifactProjection { readonly id: string; readonly goalId: string; readonly taskId: string; readonly attemptId: string; readonly type: string; readonly contentHash: string; readonly storage: 'inline' | 'file'; readonly content?: string; readonly path?: string; readonly mimeType?: string; readonly active: boolean; readonly validated: boolean }
@@ -52,7 +52,7 @@ export class RuntimeEventStore {
     })
   }
   getGoal(goalId: string): GoalProjection | undefined {
-    const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, archived_at FROM goals WHERE id = ?').get(goalId) as Record<string, unknown> | undefined
+    const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, pause_origin, archived_at FROM goals WHERE id = ?').get(goalId) as Record<string, unknown> | undefined
     return row === undefined ? undefined : goalProjection(row)
   }
   getQuotaRecovery(goalId: string): QuotaRecovery | undefined {
@@ -61,7 +61,7 @@ export class RuntimeEventStore {
   }
   /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */
   listGoals(options: { readonly archived?: boolean } = {}): GoalProjection[] {
-    const rows = this.db.prepare(`SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, archived_at FROM goals ${options.archived === true ? 'WHERE archived_at IS NOT NULL' : 'WHERE archived_at IS NULL'} ORDER BY rowid DESC`).all() as Array<Record<string, unknown>>
+    const rows = this.db.prepare(`SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, pause_origin, archived_at FROM goals ${options.archived === true ? 'WHERE archived_at IS NOT NULL' : 'WHERE archived_at IS NULL'} ORDER BY rowid DESC`).all() as Array<Record<string, unknown>>
     return rows.map(goalProjection)
   }
   listGoalVersions(goalId: string): GoalVersion[] {
@@ -200,7 +200,7 @@ export class RuntimeEventStore {
 function goalProjection(row: Record<string, unknown>): GoalProjection {
   return {
     id: String(row.id), objective: String(row.objective), constraints: JSON.parse(String(row.constraints_json)) as string[], planningMode: String(row.planning_mode) as GoalProjection['planningMode'], state: String(row.state) as GoalState, revision: Number(row.revision), controlRevision: Number(row.control_revision),
-    ...(row.workspace_scope == null ? {} : { workspaceScope: String(row.workspace_scope) }), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }), ...(row.archived_at == null ? {} : { archivedAt: String(row.archived_at) }),
+    ...(row.workspace_scope == null ? {} : { workspaceScope: String(row.workspace_scope) }), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }), ...(row.pause_origin == null ? {} : { pauseOrigin: String(row.pause_origin) as PauseOrigin }), ...(row.archived_at == null ? {} : { archivedAt: String(row.archived_at) }),
   }
 }
 

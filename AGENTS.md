@@ -85,6 +85,41 @@ therefore always use one shared durable database.
   chronological audit trail with timestamps, reason/impact summaries, and
   revision navigation rather than raw internal event names.
 
+### Operator pause authority
+
+- An operator pause is sticky. `GoalPaused` records `origin: 'operator' |
+  'agent' | 'system'`, projected as `goals.pause_origin`; only an
+  operator-authorized resume (`TaskInvocation.authority: 'operator'`, set by
+  the Task Area remote) may clear it.
+- Agent tools, planner/worker children, scheduler self-healing, quota
+  recovery, and restart recovery must never override an operator pause. A
+  rejected system resume records `DecisionRecorded{type:
+  'operator_pause_respected'}` instead of crashing.
+- Rejection is an explicit error, not a silent no-op: the model receives
+  "paused by the operator" and must ask the user to resume from the Task Area.
+- Legacy rows with an empty `pause_origin` are treated as `system`; do not
+  retro-lock historical tasks.
+- Client controls must surface conflicts and failures (a version-fenced
+  pause that lost the race is not a successful pause); never swallow the
+  result of a control command.
+
+### Session driver injection
+
+- Exactly one client module owns “hand this task to its bound session”:
+  `client/task-driver.js`. Every surface (Task Area Cockpit, input-dock task
+  strip) must call `driveBoundSessionOnce` instead of calling
+  `session.prompt` itself, and no component may keep its own driver dedupe
+  set; a per-component `useRef` key cannot survive a remount and cannot see
+  the other surface.
+- The dedupe key is `(sessionId, taskId, controlRevision)`. The explicit
+  resume path must claim the same key as the automatic effect by using the
+  `GoalView` returned from the control action, never a stale closure.
+- A successful injection blocks re-injection until
+  `DRIVER_REDRIVE_GRACE_MS` (60 s) elapses; a failed injection is retryable
+  immediately. Injection runs through `session.prompt(..., 'queue')`, so any
+  duplicate becomes a visible queued user message — treat a queued duplicate
+  as a driver bug, not as expected behavior.
+
 ### Compatibility and failure presentation
 
 - A historical task that fails before planning may have no plan revision or

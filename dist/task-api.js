@@ -58,18 +58,19 @@ export class TaskControlApi {
         if (request.expectedRevision !== current.controlRevision)
             return { kind: 'conflict', current };
         let task;
+        const authority = invocation.authority ?? 'agent';
         switch (request.action) {
             case 'confirm':
                 task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal);
                 break;
             case 'resume':
-                task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal);
+                task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal, authority);
                 break;
             case 'cancel':
                 task = this.runtime.cancelGoal(request.taskId);
                 break;
             case 'pause':
-                task = this.pause(request.taskId);
+                task = this.pause(request.taskId, authority);
                 break;
         }
         const bound = this.bindOnContinue(request.taskId, request.action, invocation);
@@ -153,8 +154,8 @@ export class TaskControlApi {
         const task = this.runtime.rejectReplan(taskId);
         return { kind: 'applied', task: this.advance(taskId, task.controlRevision) };
     }
-    pause(taskId) {
-        return this.runtime.pauseGoal(taskId);
+    pause(taskId, authority) {
+        return this.runtime.pauseGoal(taskId, authority);
     }
     /**
      * Idempotently ensure a session is durably linked to the task and is its

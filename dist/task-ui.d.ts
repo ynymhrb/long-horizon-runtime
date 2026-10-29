@@ -8,6 +8,7 @@ export interface TaskAreaItem {
     readonly taskCount: number;
     readonly completedCount: number;
     readonly hasPendingProposal: boolean;
+    readonly runtimeMetrics: GoalView['runtimeMetrics'];
 }
 export declare function toTaskAreaItem(task: GoalView): TaskAreaItem;
 /** The conversation dock intentionally stays absent until a chat explicitly attaches a task. */

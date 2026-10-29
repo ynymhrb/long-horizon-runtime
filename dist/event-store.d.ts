@@ -1,4 +1,4 @@
-import type { GoalState, TaskNode } from './domain.js';
+import type { GoalState, PauseOrigin, TaskNode } from './domain.js';
 import type { BudgetLimit, BudgetUsage } from './budgets.js';
 /** Durable event accepted by the runtime event log. Payloads must be JSON serializable. */
 export interface RuntimeEvent {
@@ -29,6 +29,7 @@ export interface GoalProjection {
     readonly controlRevision: number;
     readonly workspaceScope?: string;
     readonly pauseReason?: string;
+    readonly pauseOrigin?: PauseOrigin;
     readonly archivedAt?: string;
 }
 export interface GoalVersion {
@@ -155,6 +156,21 @@ export interface MemoryRecordProjection {
     readonly active: boolean;
     readonly workspaceId?: string;
 }
+export interface RunRoundProjection {
+    readonly round: number;
+    readonly revision: number;
+    readonly startedAt: string;
+    readonly finishedAt?: string;
+    readonly outcome?: string;
+}
+export interface RuntimeMetrics {
+    readonly runRoundCount: number;
+    readonly activeRunTimeMs: number;
+    readonly elapsedRunTimeMs: number;
+    readonly firstStartedAt?: string;
+    readonly lastFinishedAt?: string;
+    readonly activeRound?: Pick<RunRoundProjection, 'round' | 'revision' | 'startedAt'>;
+}
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export declare class RuntimeEventStore {
     private readonly db;
@@ -201,6 +217,8 @@ export declare class RuntimeEventStore {
     listTasks(goalId: string): TaskNode[];
     getTask(goalId: string, taskId: string): TaskNode | undefined;
     listAttempts(taskId: string, goalId?: string): AttemptProjection[];
+    listRunRounds(goalId: string): RunRoundProjection[];
+    getRuntimeMetrics(goalId: string, now?: number): RuntimeMetrics;
     listRunningAttempts(): AttemptProjection[];
     getRunningAttemptBySession(sessionId: string): AttemptProjection | undefined;
     listActiveValidatedArtifacts(goalId: string, taskIds?: readonly string[]): ArtifactProjection[];

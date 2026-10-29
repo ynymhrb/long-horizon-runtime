@@ -25,7 +25,7 @@ export function canEditOriginalGoal(task) {
  * has to type a second message.
  */
 export function resumeDriverMessage(taskId, objective) {
-  return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ''}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认。`
+  return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ''}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认；若该任务已被用户暂停（状态为 PAUSED），请不要恢复，直接告知用户。`
 }
 
 /**

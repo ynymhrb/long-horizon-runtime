@@ -79,7 +79,7 @@ export class TaskUiApi {
   }
 
   async updateTask(input: { readonly taskId: string; readonly expectedRevision: number; readonly action: 'confirm' | 'resume' | 'pause' | 'cancel'; readonly sessionId?: string; readonly workspaceScope?: string; readonly recoveryResolution?: 'retry' | 'confirmed_succeeded'; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
-    return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+    return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' })
   }
 
   /** Explicit user action: create a durable cross-session link and make it current. */
@@ -102,10 +102,10 @@ export class TaskUiApi {
     return this.control.rejectReplanAtRevision(input.taskId, input.expectedRevision)
   }
   async editTaskGoal(input: { readonly taskId: string; readonly expectedRevision: number; readonly objective: string; readonly reason: string; readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
-    return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+    return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' })
   }
   async acceptReplan(input: { readonly taskId: string; readonly expectedRevision: number; readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
-    return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+    return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' })
   }
   async archiveTask(input: { readonly taskId: string; readonly expectedRevision: number }): Promise<TaskUpdateResult> {
     const current = this.runtime.getStatus(input.taskId)

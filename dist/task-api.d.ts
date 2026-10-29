@@ -7,6 +7,7 @@ export interface TaskInvocation {
     readonly workspaceScope?: string;
     readonly parent?: unknown;
     readonly signal?: AbortSignal;
+    readonly authority?: 'operator' | 'agent';
 }
 export interface CreateTaskRequest extends CreateGoalRequest {
     readonly workspaceScope?: string;

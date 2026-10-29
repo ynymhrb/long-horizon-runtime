@@ -1,5 +1,5 @@
 import { type ExecutionAdapter, type PlannerAdapter } from './adapters.js';
-import type { GoalState, GraphMutation, InterruptionCause, RecoveryPolicyOutcome } from './domain.js';
+import type { GoalState, GraphMutation, InterruptionCause, PauseOrigin, RecoveryPolicyOutcome } from './domain.js';
 import { RuntimeEventStore, type TaskSessionLink } from './event-store.js';
 import { type RecoveryResult } from './scheduler.js';
 import type { ProfileRouter } from './execution-profiles.js';
@@ -34,6 +34,7 @@ export interface GoalView {
         readonly trigger?: Record<string, unknown>;
     };
     readonly pauseReason?: string;
+    readonly pauseOrigin?: PauseOrigin;
     readonly quotaRecovery?: import('./event-store.js').QuotaRecovery;
     readonly tasks: readonly import('./domain.js').TaskNode[];
     readonly attempts: readonly import('./event-store.js').AttemptProjection[];
@@ -45,8 +46,10 @@ export interface GoalView {
         readonly succeededTaskCount: number;
         readonly failedTaskCount: number;
     };
+    readonly runtimeMetrics: import('./event-store.js').RuntimeMetrics;
     readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[];
     readonly availableActions: readonly string[];
+    readonly requiresSessionDriver: boolean;
 }
 export interface RuntimeOptions {
     readonly store?: RuntimeEventStore;
@@ -109,10 +112,10 @@ export declare class LongTaskRuntime {
         readonly reason: string;
     }): Promise<GoalView>;
     attachSession(goalId: string, sessionId: string, kind?: TaskSessionLink['kind']): GoalView;
-    resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal): Promise<GoalView>;
+    resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal, authority?: PauseOrigin): Promise<GoalView>;
     cancelGoal(goalId: string): GoalView;
     /** Pause scheduling and terminate all currently running child attempts. */
-    pauseGoal(goalId: string): GoalView;
+    pauseGoal(goalId: string, origin?: PauseOrigin): GoalView;
     extendGoalBudget(goalId: string, limit: BudgetLimit): GoalView;
     /** Record the interruption cause before applying the caller-selected recovery policy. */
     interruptGoal(goalId: string, cause: InterruptionCause, recoveryOutcome: RecoveryPolicyOutcome): GoalView;

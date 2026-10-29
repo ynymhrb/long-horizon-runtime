@@ -5,6 +5,7 @@ import { ArtifactStore } from './artifacts.js';
 import { ProfileRouter } from './execution-profiles.js';
 import { ExecutionPolicy } from './execution-policy.js';
 import type { MemoryRetriever } from './memory-retrieval.js';
+import { AcceptanceEngine } from './acceptance.js';
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate';
 export interface SchedulerOptions {
     readonly store: RuntimeEventStore;
@@ -48,6 +49,7 @@ export interface SchedulerOptions {
     readonly executionPolicy?: ExecutionPolicy;
     readonly memoryRetriever?: MemoryRetriever;
     readonly maxMemoryItems?: number;
+    readonly acceptanceEngine?: AcceptanceEngine;
 }
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
 export declare class Scheduler {
@@ -69,6 +71,7 @@ export declare class Scheduler {
     private readonly executionPolicy;
     private readonly memoryRetriever;
     private readonly maxMemoryItems;
+    private readonly acceptanceEngine;
     private readonly aborters;
     /** Resolves an in-process dispatch when its durable lease is terminalized. */
     private readonly livenessSettlers;

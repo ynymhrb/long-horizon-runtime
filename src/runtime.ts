@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { planWithValidation, type ExecutionAdapter, type PlannerAdapter } from './adapters.js'
 import { applyMutation } from './graph.js'
-import type { GoalState, GraphMutation, InterruptionCause, RecoveryPolicyOutcome } from './domain.js'
+import type { GoalState, GraphMutation, InterruptionCause, PauseOrigin, RecoveryPolicyOutcome } from './domain.js'
 import { RuntimeEventStore, type TaskSessionLink } from './event-store.js'
 import { Scheduler, type RecoveryResult } from './scheduler.js'
 import { ArtifactStore } from './artifacts.js'
@@ -16,7 +16,7 @@ export type RecoveryResolution = 'retry' | 'confirmed_succeeded'
 export interface OriginalGoalEdit { readonly objective: string; readonly reason: string; readonly source?: 'user' | 'model' }
 
 export interface CreateGoalRequest { readonly objective: string; readonly constraints?: readonly string[]; readonly planningMode?: 'auto' | 'require_confirmation'; readonly workspaceScope?: string }
-export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly quotaRecovery?: import('./event-store.js').QuotaRecovery; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly runtimeMetrics: import('./event-store.js').RuntimeMetrics; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[]; readonly requiresSessionDriver: boolean }
+export interface GoalView { readonly id: string; readonly objective: string; readonly constraints: readonly string[]; readonly state: GoalState; readonly revision: number; readonly controlRevision: number; readonly workspaceScope?: string; readonly archivedAt?: string; readonly sessionLinks: readonly TaskSessionLink[]; readonly pendingProposal?: { readonly revision: number; readonly baseRevision: number; readonly trigger?: Record<string, unknown> }; readonly pauseReason?: string; readonly pauseOrigin?: PauseOrigin; readonly quotaRecovery?: import('./event-store.js').QuotaRecovery; readonly tasks: readonly import('./domain.js').TaskNode[]; readonly attempts: readonly import('./event-store.js').AttemptProjection[]; readonly artifacts: readonly import('./event-store.js').ArtifactProjection[]; readonly decisions: readonly import('./event-store.js').DecisionProjection[]; readonly checkpoint?: import('./event-store.js').CheckpointProjection; readonly accounting: { readonly attemptCount: number; readonly succeededTaskCount: number; readonly failedTaskCount: number }; readonly runtimeMetrics: import('./event-store.js').RuntimeMetrics; readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[]; readonly availableActions: readonly string[]; readonly requiresSessionDriver: boolean }
 export interface RuntimeOptions { readonly store?: RuntimeEventStore; readonly databasePath?: string; readonly artifactDirectory?: string; readonly artifactInlineLimitBytes?: number; readonly maxConcurrentTasks?: number; readonly defaultRetryPolicy?: { readonly maxAttempts: number }; readonly retryBackoffMs?: number; readonly maxRetryBackoffMs?: number; readonly idleTimeoutMs?: number; readonly maxWallTimeMs?: number; readonly now?: () => number; readonly recoveryValidator?: (input: { readonly goalId: string; readonly task: import('./domain.js').TaskNode; readonly attemptId: string }) => Promise<RecoveryResult>; readonly validator?: import('./scheduler.js').SchedulerOptions['validator']; readonly validators?: import('./scheduler.js').SchedulerOptions['validators']; readonly autoReplan?: boolean; readonly profileRouter?: ProfileRouter; readonly executionPolicy?: ExecutionPolicy; readonly memoryRetriever?: MemoryRetriever; readonly maxMemoryItems?: number; readonly goalBudget?: BudgetLimit }
 
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
@@ -51,7 +51,7 @@ export class LongTaskRuntime {
     catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       this.store.transaction(() => this.store.append([executionSignal?.aborted === true
-        ? { type: 'GoalPaused', goalId: id, payload: { reason: 'planning interrupted by conversation stop' } }
+        ? { type: 'GoalPaused', goalId: id, payload: { reason: 'planning interrupted by conversation stop', origin: 'operator' } }
         : { type: 'GoalFailed', goalId: id, payload: { phase: 'planning', reason } }]))
       return this.view(id)
     }
@@ -113,7 +113,7 @@ export class LongTaskRuntime {
     const nextVersion = this.store.listGoalVersions(goalId).length
     const baseRevision = goal.revision
     this.store.transaction(() => this.store.append([
-      ...(goal.state === 'RUNNING' ? [{ type: 'GoalPaused', goalId, payload: { reason: 'original_goal_edit' } }] : []),
+      ...(goal.state === 'RUNNING' ? [{ type: 'GoalPaused', goalId, payload: { reason: 'original_goal_edit', origin: 'system' } }] : []),
       { type: 'GoalObjectiveRevised', goalId, payload: { version: nextVersion, objective: input.objective, reason: input.reason, source: input.source ?? 'user', createdAt: new Date().toISOString() } },
       { type: 'DecisionRecorded', goalId, payload: { type: 'original_goal_edit', baseRevision, reason: input.reason } },
     ]))
@@ -146,7 +146,7 @@ export class LongTaskRuntime {
           : { type: 'PlanProposed', goalId, payload: { revision, baseRevision: goal.revision, tasks, trigger: { kind: 'validation_failed', taskId: trigger.task.id, reason: trigger.reason, reasons: classification.reasons } } },
       ]))
     } catch (error) {
-      this.store.transaction(() => this.store.append([{ type: 'DecisionRecorded', goalId, payload: { type: 'automatic_replan_failed', taskId: trigger.task.id, reason: error instanceof Error ? error.message : String(error) } }, { type: 'GoalPaused', goalId, payload: { reason: `automatic replan failed for ${trigger.task.id}` } }]))
+      this.store.transaction(() => this.store.append([{ type: 'DecisionRecorded', goalId, payload: { type: 'automatic_replan_failed', taskId: trigger.task.id, reason: error instanceof Error ? error.message : String(error) } }, { type: 'GoalPaused', goalId, payload: { origin: 'system', reason: `automatic replan failed for ${trigger.task.id}` } }]))
     }
     return this.view(goalId)
   }
@@ -160,8 +160,13 @@ export class LongTaskRuntime {
     ]))
     return this.view(goalId)
   }
-  async resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal): Promise<GoalView> {
+  async resumeGoal(goalId: string, executionParent?: unknown, recoveryResolution?: RecoveryResolution, executionSignal?: AbortSignal, authority: PauseOrigin = 'agent'): Promise<GoalView> {
     const goal = this.requireGoal(goalId)
+    // 操作者暂停是粘性的：代理在长 turn 里重复执行旧的继续指令时，不得静默
+    // 覆盖用户刚做出的暂停决定。只有浏览器任务区（操作者）可以解除它。
+    if (goal.state === 'PAUSED' && goal.pauseOrigin === 'operator' && authority !== 'operator') {
+      throw new Error(`goal ${goalId} was paused by the operator; ask the user to resume it from the task area`)
+    }
     // A web-side resume/confirm marks the goal RUNNING without a live parent
     // (durably eligible, nothing dispatched). A later model-side resume must
     // therefore accept an already-running goal and drive it with a live parent
@@ -175,7 +180,7 @@ export class LongTaskRuntime {
           this.store.transaction(() => this.store.append([{ type: goal.planningMode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId, payload: { revision: plan.revision, tasks: [...plan.tasks.values()] } }]))
           if (goal.planningMode === 'auto' && executionParent !== undefined) { await this.runUntilIdle(goalId, executionParent, executionSignal); this.scheduleQuotaRecovery(goalId, executionParent) }
         } catch (error) {
-          this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]))
+          this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { origin: 'system', reason: executionSignal?.aborted === true ? 'planning interrupted by conversation stop' : `planning resume failed: ${error instanceof Error ? error.message : String(error)}` } }]))
         }
         return this.view(goalId)
       }
@@ -203,12 +208,12 @@ export class LongTaskRuntime {
     return this.view(goalId)
   }
   /** Pause scheduling and terminate all currently running child attempts. */
-  pauseGoal(goalId: string): GoalView {
+  pauseGoal(goalId: string, origin: PauseOrigin = 'system'): GoalView {
     const goal = this.requireGoal(goalId)
     if (goal.state !== 'RUNNING') throw new Error(`goal ${goalId} is not running`)
     this.scheduler.pause(goalId)
     this.cancelQuotaRecovery(goalId)
-    this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: 'user_requested' } }]))
+    this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: origin === 'operator' ? 'user_requested' : origin === 'agent' ? 'agent_requested' : 'system_requested', origin } }]))
     return this.view(goalId)
   }
   extendGoalBudget(goalId: string, limit: BudgetLimit): GoalView {
@@ -303,7 +308,7 @@ export class LongTaskRuntime {
       .catch(error => {
         // A failed supervisory loop is itself durable operator information;
         // silently swallowing it used to leave a goal apparently RUNNING.
-        if (this.store.getGoal(goalId)?.state === 'RUNNING') this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: `background scheduler failed: ${error instanceof Error ? error.message : String(error)}` } }]))
+        if (this.store.getGoal(goalId)?.state === 'RUNNING') this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { origin: 'system', reason: `background scheduler failed: ${error instanceof Error ? error.message : String(error)}` } }]))
       })
       .finally(() => {
         if (watchdog !== undefined) clearInterval(watchdog)
@@ -314,7 +319,7 @@ export class LongTaskRuntime {
     watchdog = setInterval(() => {
       try { this.scheduler.reconcileLiveness(goalId) }
       catch (error) {
-        if (this.store.getGoal(goalId)?.state === 'RUNNING') this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { reason: `liveness watchdog failed: ${error instanceof Error ? error.message : String(error)}` } }]))
+        if (this.store.getGoal(goalId)?.state === 'RUNNING') this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { origin: 'system', reason: `liveness watchdog failed: ${error instanceof Error ? error.message : String(error)}` } }]))
       }
     }, this.livenessCheckIntervalMs)
   }
@@ -330,7 +335,13 @@ export class LongTaskRuntime {
       // An indeterminate external effect is a durable operator choice.  A
       // live parent is not authority to silently decide whether to replay it.
       const requiresResolution = this.store.listTasks(goal).some(task => task.state === 'BLOCKED' && task.sideEffectClass === 'external_effect')
-      if (this.store.getGoal(goal)?.state === 'PAUSED' && !requiresResolution) await this.resumeGoal(goal, executionParent)
+      if (this.store.getGoal(goal)?.state !== 'PAUSED' || requiresResolution) continue
+      try {
+        // 主机重启恢复属于系统行为：保留操作者暂停，并记录被尊重的证据。
+        await this.resumeGoal(goal, executionParent, undefined, undefined, 'system')
+      } catch (error) {
+        this.store.transaction(() => this.store.append([{ type: 'DecisionRecorded', goalId: goal, payload: { type: 'operator_pause_respected', reason: error instanceof Error ? error.message : String(error) } }]))
+      }
     }
   }
   close(): void { this.background.clear(); for (const timer of this.quotaRecoveryTimers.values()) clearTimeout(timer); this.quotaRecoveryTimers.clear(); if (this.ownsStore) this.store.close() }
@@ -343,8 +354,11 @@ export class LongTaskRuntime {
       if (this.store.getQuotaRecovery(goalId)?.attemptId !== recovery.attemptId || this.store.getGoal(goalId)?.state !== 'PAUSED') return
       void withDshParent(executionParent as import('@deepseek-ai/dsh-agent').Agent, async () => {
         this.store.transaction(() => this.store.append([{ type: 'QuotaRecoveryResumed', goalId, taskId: recovery.taskId, payload: { attemptId: recovery.attemptId, retryAt: recovery.retryAt } }]))
-        await this.resumeGoal(goalId, executionParent)
-      }).catch(() => undefined)
+        // 额度恢复是系统行为，同样不能解除操作者暂停。
+        await this.resumeGoal(goalId, executionParent, undefined, undefined, 'system')
+      }).catch(error => {
+        this.store.transaction(() => this.store.append([{ type: 'DecisionRecorded', goalId, payload: { type: 'quota_recovery_declined', reason: error instanceof Error ? error.message : String(error) } }]))
+      })
     }, delay))
   }
   private cancelQuotaRecovery(goalId: string): void {
@@ -364,7 +378,7 @@ export class LongTaskRuntime {
       && !this.background.has(goalId)
       && !tasks.some(task => task.state === 'RUNNING')
       && tasks.some(task => task.state === 'PENDING' || task.state === 'READY')
-    return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId)! }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, runtimeMetrics: this.store.getRuntimeMetrics(goalId, this.now()), recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, requiresSessionDriver, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }) }
+    return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId)! }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, runtimeMetrics: this.store.getRuntimeMetrics(goalId, this.now()), recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, requiresSessionDriver, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }), ...(goal.pauseOrigin === undefined ? {} : { pauseOrigin: goal.pauseOrigin }) }
   }
 }
 

@@ -32,6 +32,8 @@ export interface TaskSummary {
     };
     readonly reason?: string;
     readonly latestEventCursor: number;
+    readonly requiresSessionDriver: boolean;
+    readonly runtimeMetrics: GoalView['runtimeMetrics'];
 }
 export interface TaskStripView extends TaskSummary {
     readonly availableActions: readonly string[];

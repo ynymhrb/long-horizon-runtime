@@ -7,6 +7,7 @@ export function toTaskAreaItem(task) {
         taskCount: task.tasks.length,
         completedCount: task.tasks.filter(node => node.state === 'SUCCEEDED').length,
         hasPendingProposal: task.pendingProposal !== undefined,
+        runtimeMetrics: task.runtimeMetrics,
     };
 }
 /** The conversation dock intentionally stays absent until a chat explicitly attaches a task. */

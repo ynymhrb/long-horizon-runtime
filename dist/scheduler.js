@@ -22,6 +22,7 @@ export class Scheduler {
     executionPolicy;
     memoryRetriever;
     maxMemoryItems;
+    acceptanceEngine;
     aborters = new Map();
     /** Resolves an in-process dispatch when its durable lease is terminalized. */
     livenessSettlers = new Map();
@@ -49,6 +50,7 @@ export class Scheduler {
         this.executionPolicy = typeof options === 'number' ? undefined : options.executionPolicy;
         this.memoryRetriever = typeof options === 'number' ? undefined : options.memoryRetriever;
         this.maxMemoryItems = typeof options === 'number' ? undefined : options.maxMemoryItems;
+        this.acceptanceEngine = typeof options === 'number' ? undefined : options.acceptanceEngine;
         if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1)
             throw new Error('maxConcurrentTasks must be at least one');
     }
@@ -67,7 +69,12 @@ export class Scheduler {
         const tasks = this.store.listTasks(goalId);
         const ready = tasks.filter(task => task.state === 'PENDING' && !this.inBackoff(goalId, task.id) && this.dependenciesSatisfied(goalId, task, tasks))
             .sort((a, b) => b.priority - a.priority || (a.createdOrder ?? Number.MAX_SAFE_INTEGER) - (b.createdOrder ?? Number.MAX_SAFE_INTEGER)).slice(0, this.maxConcurrentTasks);
-        this.store.transaction(() => this.store.append(ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} }))));
+        const round = ready.length === 0 ? undefined : this.store.listRunRounds(goalId).length + 1;
+        const startedAt = round === undefined ? undefined : new Date(this.now()).toISOString();
+        this.store.transaction(() => this.store.append([
+            ...(round === undefined ? [] : [{ type: 'GoalRunRoundStarted', goalId, payload: { round, revision: goal.revision, startedAt } }]),
+            ...ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} })),
+        ]));
         await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent, executionSignal)));
         this.store.transaction(() => {
             const events = [];
@@ -88,6 +95,8 @@ export class Scheduler {
                 events.push({ type: 'GoalSucceeded', goalId, payload: {} });
             else if (!lifecycleDecided && latest.some(task => task.state === 'FAILED') && !latest.some(task => ['PENDING', 'READY', 'RUNNING'].includes(task.state)))
                 events.push({ type: 'GoalFailed', goalId, payload: {} });
+            if (round !== undefined)
+                events.push({ type: 'GoalRunRoundFinished', goalId, payload: { round, finishedAt: new Date(this.now()).toISOString(), outcome: this.store.getGoal(goalId)?.state ?? 'unknown' } });
             this.store.append(events);
         });
         return ready.length > 0;
@@ -405,7 +414,13 @@ export class Scheduler {
             const namedValidatorResult = task.validator !== undefined && selectedValidator === undefined
                 ? { ok: false, reason: `unknown task validator: ${task.validator}` }
                 : baseContract.ok && outputContract.ok && selectedValidator !== undefined ? await selectedValidator({ goalId, task, attemptId, result }) : undefined;
-            const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract);
+            const baseAcceptance = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract);
+            const acceptance = task.acceptanceChecks === undefined || task.acceptanceChecks.length === 0 ? undefined
+                : this.acceptanceEngine === undefined ? { verdict: 'failed', checks: [{ id: 'engine', kind: 'command', ok: false, summary: 'acceptance engine is not configured' }] }
+                    : await this.acceptanceEngine.evaluate({ attemptId, workspace: process.cwd(), checks: task.acceptanceChecks });
+            const contract = baseAcceptance.ok && (task.acceptancePolicy !== 'required' || acceptance?.verdict === 'passed')
+                ? { ok: true }
+                : { ok: false, reason: baseAcceptance.ok ? acceptance === undefined ? 'required task has no acceptance checks' : acceptance.checks.find(check => !check.ok)?.summary ?? 'acceptance failed' : baseAcceptance.reason };
             const attemptCount = this.store.listAttempts(task.id, goalId).length;
             const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts);
             const quotaRetryAt = failureKind === 'quota' ? validQuotaRetryAt(result.retryAt, this.now()) : undefined;
@@ -431,6 +446,9 @@ export class Scheduler {
                 }
                 for (const evidence of result.evidence)
                     events.push({ type: 'EvidenceRecorded', goalId, taskId: task.id, payload: { attemptId, evidence } });
+                if (acceptance !== undefined)
+                    for (const check of acceptance.checks)
+                        events.push({ type: 'AcceptanceCheckFinished', goalId, taskId: task.id, payload: { attemptId, ...check } });
                 events.push({ type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: contract.ok, validator: task.validator ?? 'result-contract', ...(contract.ok ? {} : { reason: contract.reason }), ...(failureKind === 'output' ? {} : { failureKind }) } });
                 if (contract.ok) {
                     this.retryAfter.delete(this.key(goalId, task.id));

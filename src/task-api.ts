@@ -4,7 +4,7 @@ import type { GraphMutation } from './domain.js'
 import type { RuntimeEvent } from './event-store.js'
 import type { BudgetLimit } from './budgets.js'
 
-export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }
+export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal; readonly authority?: 'operator' | 'agent' }
 export interface CreateTaskRequest extends CreateGoalRequest { readonly workspaceScope?: string }
 export type TaskUpdateAction = 'confirm' | 'resume' | 'pause' | 'cancel'
 export type TaskUpdateResult = { readonly kind: 'applied'; readonly task: GoalView } | { readonly kind: 'conflict'; readonly current: GoalView }
@@ -78,11 +78,12 @@ export class TaskControlApi {
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
     let task: GoalView
+    const authority = invocation.authority ?? 'agent'
     switch (request.action) {
       case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal); break
-      case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal); break
+      case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal, authority); break
       case 'cancel': task = this.runtime.cancelGoal(request.taskId); break
-      case 'pause': task = this.pause(request.taskId); break
+      case 'pause': task = this.pause(request.taskId, authority); break
     }
     const bound = this.bindOnContinue(request.taskId, request.action, invocation)
     return { kind: 'applied', task: this.advance(request.taskId, (bound ?? task).controlRevision) }
@@ -162,8 +163,8 @@ export class TaskControlApi {
     return { kind: 'applied', task: this.advance(taskId, task.controlRevision) }
   }
 
-  private pause(taskId: string): GoalView {
-    return this.runtime.pauseGoal(taskId)
+  private pause(taskId: string, authority: 'operator' | 'agent'): GoalView {
+    return this.runtime.pauseGoal(taskId, authority)
   }
 
   /**

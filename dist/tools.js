@@ -46,12 +46,20 @@ export function apply(ctx, input) {
     }));
     ctx.tools.register(defineTool({
         name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" execution begins immediately in the background and this call returns right away; poll long_task_status or long_task_events for progress. Use planning_mode "require_confirmation" to review the generated plan before execution.',
-        parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
+        parameters: {
+            objective: { type: 'string' },
+            // qwen3.5:4b emits a task-description shape for this tool. Accept its
+            // description field as a backwards-compatible objective alias.
+            description: { type: 'string' },
+            constraints: { type: 'array', items: { type: 'string' } },
+            planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] },
+        }, output: toolOutput,
         execute: (args, exec) => {
             const agent = requireParent(exec.agent);
             return toolValue(() => withDshParent(agent, async () => {
+                const objective = createObjective(args);
                 const task = await taskApi.create({
-                    objective: args.objective,
+                    objective,
                     ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
                     planningMode: args.planning_mode ?? config.defaultPlanningMode,
                     ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
@@ -86,7 +94,7 @@ export function apply(ctx, input) {
     ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution in the background; returns immediately with the running task, poll long_task_status for progress.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
             taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = runtime.confirmGoal(args.goal_id); runtime.startBackground(args.goal_id, exec.agent); return goal; })) }));
     ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }));
-    ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal and continue its execution in the background; returns immediately. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
+    ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal and continue its execution in the background; returns immediately. An indeterminate external effect requires an explicit resolution. A goal paused by the user must be resumed by the user from the task area; this call is rejected in that case.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
             taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = await runtime.resumeGoal(args.goal_id, undefined, args.recovery_resolution); runtime.startBackground(args.goal_id, exec.agent); return goal; })) }));
     ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }));
     ctx.tools.register(defineTool({
@@ -141,6 +149,14 @@ function requireParent(agent) {
     if (agent === undefined)
         throw new Error('long-task tools require a current parent Agent');
     return agent;
+}
+/** Normalize the canonical field and the local-model task-description alias. */
+function createObjective(args) {
+    for (const value of [args.objective, args.description]) {
+        if (typeof value === 'string' && value.trim().length > 0)
+            return value.trim();
+    }
+    throw new TypeError('long_task_create requires a non-empty objective or description');
 }
 /** Goal views contain only JSON values, but their narrow TypeScript shape lacks an index signature. */
 async function toolValue(work) { return JSON.parse(JSON.stringify(await work())); }

@@ -36,6 +36,7 @@ export function createProjectionSchema(db: DatabaseSync): void {
   if (!goalColumns.some(column => column.name === 'control_revision')) db.exec('ALTER TABLE goals ADD COLUMN control_revision INTEGER NOT NULL DEFAULT 0')
   if (!goalColumns.some(column => column.name === 'workspace_scope')) db.exec('ALTER TABLE goals ADD COLUMN workspace_scope TEXT')
   if (!goalColumns.some(column => column.name === 'archived_at')) db.exec('ALTER TABLE goals ADD COLUMN archived_at TEXT')
+  if (!goalColumns.some(column => column.name === 'pause_origin')) db.exec('ALTER TABLE goals ADD COLUMN pause_origin TEXT')
   const attemptColumns = db.prepare('PRAGMA table_info(task_attempts)').all() as Array<{ name: string }>
   for (const column of ['started_at', 'last_activity_at', 'lease_expires_at', 'max_wall_expires_at', 'latest_progress_json']) if (!attemptColumns.some(item => item.name === column)) db.exec(`ALTER TABLE task_attempts ADD COLUMN ${column} TEXT`)
 }
@@ -229,11 +230,12 @@ export function projectEvent(db: DatabaseSync, event: RuntimeEvent, seq: number)
       if (taskId !== undefined) updateCurrentTask(db, event.goalId, taskId, 'INVALIDATED')
       break
     case 'GoalPaused':
-      db.prepare('UPDATE goals SET state = ?, pause_reason = ? WHERE id = ?').run('PAUSED', String(p.reason ?? 'paused'), event.goalId)
+      // 暂停来源决定谁能恢复：操作者暂停只能由操作者解除，历史数据缺省视为 system。
+      db.prepare('UPDATE goals SET state = ?, pause_reason = ?, pause_origin = ? WHERE id = ?').run('PAUSED', String(p.reason ?? 'paused'), String(p.origin ?? 'system'), event.goalId)
       if (p.quotaRecoveryAttemptId === undefined) db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId)
       break
     case 'GoalResumed':
-      db.prepare('UPDATE goals SET state = ?, pause_reason = NULL WHERE id = ?').run('RUNNING', event.goalId)
+      db.prepare('UPDATE goals SET state = ?, pause_reason = NULL, pause_origin = NULL WHERE id = ?').run('RUNNING', event.goalId)
       db.prepare('DELETE FROM quota_recoveries WHERE goal_id = ?').run(event.goalId)
       break
     case 'GoalCancelled':

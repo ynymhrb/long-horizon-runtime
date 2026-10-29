@@ -1,6 +1,7 @@
 import React from 'react'
 import { TaskDag } from './TaskDag.js'
-import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from './task-model.js'
+import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMode, waitingForSessionDriver } from './task-model.js'
+import { canDriveSessionDriver, driveBoundSessionOnce, sessionDriverStatus } from './task-driver.js'
 import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskStatePresentation } from './task-presentation.js'
 import { remoteValue } from './remote-value.js'
 import { formatTaskEvent } from './task-events.js'
@@ -13,20 +14,21 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const [editing, setEditing] = React.useState(false)
   const [objective, setObjective] = React.useState('')
   const [reason, setReason] = React.useState('')
-  const automaticallyDriven = React.useRef(new Set())
+  // 驱动状态保存在 task-driver 模块里（跨组件共享），这里只用一个计数器在注入
+  // 结束后触发重渲染，让按钮可用性与提示立即反映真实的驱动状态。
+  const [, setDriverTick] = React.useState(0)
   React.useEffect(() => setSelectedId(previous => (previous !== undefined && graph?.nodes.some(node => node.id === previous)) ? previous : initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph])
   React.useEffect(() => {
     if (!task?.requiresSessionDriver || !sessionId || typeof driveInSession !== 'function') return
-    const key = `${task.id}:${task.controlRevision}`
-    if (automaticallyDriven.current.has(key)) return
-    automaticallyDriven.current.add(key)
     let live = true
     void Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => {
       const navigation = remoteValue(result)
-      if (resumeDriverMode(navigation, sessionId) !== 'inject') return false
-      return Promise.resolve(driveInSession(sessionId, task.id, task.objective))
-    }).then(driven => {
-      if (live && driven === false) setError('未能向绑定会话发送继续指令；请点击“继续执行会话”重试。')
+      if (resumeDriverMode(navigation, sessionId) !== 'inject') return undefined
+      return driveBoundSessionOnce({ sessionId, taskId: task.id, controlRevision: task.controlRevision, objective: task.objective, drive: driveInSession })
+    }).then(outcome => {
+      if (!live || outcome === undefined) return
+      setDriverTick(tick => tick + 1)
+      if (outcome.outcome === 'failed') setError(`未能向绑定会话发送继续指令：${outcome.status?.reason ?? '未知原因'}；请点击“继续执行会话”重试。`)
     }).catch(() => { if (live) setError('无法读取绑定会话；请点击“继续执行会话”重试。') })
     return () => { live = false }
   }, [task?.id, task?.controlRevision, task?.requiresSessionDriver, task?.objective, sessionId, remote, driveInSession])
@@ -42,6 +44,9 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const selected = graph.nodes.find(node => node.id === selectedId)
   const activeAttempt = selected ? task.attempts?.find(attempt => attempt.taskId === selected.id && attempt.state === 'RUNNING') : undefined
   const waitingForDriver = waitingForSessionDriver(task)
+  // 驱动状态来自共享模块：注入进行中或刚注入成功时按钮禁用，避免人工连点再产生一条排队消息。
+  const driverStatus = sessionId ? sessionDriverStatus(sessionId, task.id, task.controlRevision) : undefined
+  const driverAvailable = canDriveSessionDriver(driverStatus)
   const state = waitingForDriver ? { label: '等待会话继续', tone: 'warning' } : taskStatePresentation(task.state)
   const attached = sessionId && task.sessionLinks?.some(link => link.sessionId === sessionId)
   const invoke = (method, input) => {
@@ -49,33 +54,41 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
     return Promise.resolve(remote[method](input)).then(result => {
       const value = remoteValue(result)
       onTaskChanged(value.kind === 'conflict' ? value.current : value.task)
+      // 版本冲突必须显式告知：否则用户会以为暂停/继续已经生效。
+      if (value.kind === 'conflict') setError('任务已被其他操作更新，界面已刷新为最新状态；如需继续操作请再点一次。')
       const continuesInSession = method === 'attachCurrentSession' || method === 'setCurrentSession' || method === 'acceptReplan' || (method === 'updateTask' && ['confirm', 'resume'].includes(input?.action))
       if (continuesInSession) onCurrentChanged?.(task.id)
       // After a web resume the goal is durably RUNNING but nothing has been
       // dispatched: hand the task to the bound session's Agent (the live
       // parent). If that session is the current one, inject a driver message
       // so the model starts the round without any extra user input.
-      if (method === 'updateTask' && input?.action === 'resume' && value.kind === 'applied') return guideAfterResume()
+      if (method === 'updateTask' && input?.action === 'resume' && value.kind === 'applied') return guideAfterResume(value.task)
       return undefined
     }).catch(reason => setError(String(reason))).finally(() => setPending(false))
   }
-  const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => {
-    const navigation = remoteValue(result)
-    const mode = resumeDriverMode(navigation, sessionId)
-    if (mode === 'inject') {
-      if (typeof driveInSession !== 'function') { setError('任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。'); return }
-      setError(null)
-      const targetSessionId = sessionId
-      Promise.resolve(driveInSession(targetSessionId, task.id, task.objective))
-        .then(driven => {
-          setError(driven ? '已向绑定会话发送继续执行指令。' : '绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。')
-        })
-        .catch(() => setError('向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。'))
-      return
-    }
-    if (mode === 'open' && navigation.currentSessionId && typeof openSession === 'function') { openSession(navigation.currentSessionId); setError('已打开绑定会话，请在该会话继续执行。'); return }
-    setError('任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。')
-  }).catch(value => setError(String(value)))
+  // 显式恢复路径与自动驱动 effect 必须共用同一个去重键，否则同一控制版本会被
+  // 注入两次：这里始终用恢复后返回的新 GoalView 计算键。
+  const driveSession = nextTask => driveBoundSessionOnce({ sessionId, taskId: nextTask.id, controlRevision: nextTask.controlRevision, objective: nextTask.objective, drive: driveInSession }).then(outcome => {
+    setDriverTick(tick => tick + 1)
+    if (outcome.outcome === 'injected') setError('已向绑定会话发送继续执行指令。')
+    else if (outcome.outcome === 'skipped') setError('继续指令已发送，正在等待绑定会话执行；如需再次发送请稍候再点。')
+    else setError(`未能注入继续指令：${outcome.status?.reason ?? '未知原因'}；可再次点击“继续执行会话”重试。`)
+    return outcome
+  })
+  const guideAfterResume = nextTask => {
+    const target = nextTask ?? task
+    return Promise.resolve(remote.getTaskNavigation({ taskId: target.id })).then(result => {
+      const navigation = remoteValue(result)
+      const mode = resumeDriverMode(navigation, sessionId)
+      if (mode === 'inject') {
+        if (typeof driveInSession !== 'function') { setError('任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。'); return undefined }
+        return driveSession(target)
+      }
+      if (mode === 'open' && navigation.currentSessionId && typeof openSession === 'function') { openSession(navigation.currentSessionId); setError('已打开绑定会话，请在该会话继续执行。'); return undefined }
+      setError('任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。')
+      return undefined
+    }).catch(value => { setError(`无法读取绑定会话：${String(value)}`); return undefined })
+  }
   const action = (label, recoveryResolution) => invoke('updateTask', { taskId: task.id, expectedRevision: task.controlRevision, action: label, ...(sessionId ? { sessionId } : {}), ...(recoveryResolution ? { recoveryResolution } : {}) })
   const attach = () => invoke(attached ? 'setCurrentSession' : 'attachCurrentSession', { taskId: task.id, sessionId })
   const edit = () => invoke('editTaskGoal', { taskId: task.id, expectedRevision: task.controlRevision, objective, reason, ...(sessionId ? { sessionId } : {}) })
@@ -105,7 +118,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
       editableOriginalGoal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: jump }, '当前会话'),
-      waitingForDriver ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: guideAfterResume }, '继续执行会话') : null,
+      waitingForDriver ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending || !driverAvailable, title: driverAvailable ? '向绑定会话发送继续执行指令' : '继续指令已发送，正在等待绑定会话执行', onClick: () => { void guideAfterResume(task) } }, driverAvailable ? '继续执行会话' : '驱动已发送，等待执行') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...actionButtons,
     ),

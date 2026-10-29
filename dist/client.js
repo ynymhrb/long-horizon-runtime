@@ -4663,7 +4663,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		* has to type a second message.
 		*/
 		function resumeDriverMessage(taskId, objective) {
-			return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ""}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认。`;
+			return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ""}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认；若该任务已被用户暂停（状态为 PAUSED），请不要恢复，直接告知用户。`;
 		}
 		/**
 		* Decide how a web resume hands execution to a live parent session.
@@ -4684,9 +4684,111 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (typeof task?.requiresSessionDriver === "boolean") return task.requiresSessionDriver;
 			return task?.state === "RUNNING" && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
 		}
-		/** Combine the durable driver requirement with the session-routing decision. */
-		function sessionDriverMode(task, navigation, currentSessionId) {
-			return waitingForSessionDriver(task) ? resumeDriverMode(navigation, currentSessionId) : "none";
+		//#endregion
+		//#region client/task-driver.js
+		/**
+		* 单一会话驱动入口。
+		*
+		* 长任务在 Web 侧恢复后仍需要一条「请调用 long_task_resume」的驱动消息才能
+		* 真正派发节点。历史上这个动作由三处独立实现：Cockpit 的显式恢复路径、
+		* Cockpit 的自动驱动 effect、任务条的自动驱动 effect，各自持有一份组件内
+		* 去重集合，导致一次点击会注入 2~3 条完全相同的排队消息。
+		*
+		* 这里把「同一会话 + 同一任务 + 同一控制版本只自动驱动一次」收敛为一个模块级
+		* 状态机：所有入口共用同一份状态，跨组件、跨重挂载、跨轮询周期都生效；真实
+		* 注入失败允许立即重试，成功之后只在宽限期外才允许人工重发。
+		*/
+		const DRIVER_REDRIVE_GRACE_MS = 6e4;
+		const DRIVER_STATE_TTL_MS = 18e5;
+		const MAX_TRACKED_DRIVERS = 512;
+		const drivers = /* @__PURE__ */ new Map();
+		/** 去重键：同一任务的不同控制版本是不同意图，绑定到不同会话也是不同意图。 */
+		function sessionDriverKey(sessionId, taskId, controlRevision) {
+			return `${sessionId}::${taskId}::${controlRevision}`;
+		}
+		/** 读取当前驱动状态；undefined 表示从未尝试过。 */
+		function sessionDriverStatus(sessionId, taskId, controlRevision) {
+			return drivers.get(sessionDriverKey(sessionId, taskId, controlRevision));
+		}
+		/**
+		* 判断此刻是否还允许发送驱动消息。
+		* - 从未尝试：允许。
+		* - 注入进行中：禁止，避免并发重复。
+		* - 注入失败：允许重试。
+		* - 注入成功：宽限期内禁止（防止人工连点），超过宽限期允许重新发送。
+		*/
+		function canDriveSessionDriver(status, now = Date.now(), graceMs = DRIVER_REDRIVE_GRACE_MS) {
+			if (status === void 0) return true;
+			if (status.outcome === "pending") return false;
+			if (status.outcome === "failed") return true;
+			return now - status.at >= graceMs;
+		}
+		/**
+		* 向绑定会话至多注入一次驱动消息。
+		* @param input.sessionId 目标会话。
+		* @param input.taskId 任务 ID。
+		* @param input.controlRevision 该任务被推进到的控制版本。
+		* @param input.objective 任务目标，用于拼装驱动消息。
+		* @param input.drive 实际注入函数，签名 (sessionId, taskId, objective) => Promise<boolean>。
+		* @param input.now 可选时钟，便于确定性测试。
+		* @param input.graceMs 可选宽限期覆盖值。
+		* @returns 结果为 'injected' | 'failed' | 'skipped'，并附带最终状态。
+		*/
+		async function driveBoundSessionOnce(input) {
+			const graceMs = input.graceMs ?? 6e4;
+			const clock = () => input.now === void 0 ? Date.now() : input.now;
+			const key = sessionDriverKey(input.sessionId, input.taskId, input.controlRevision);
+			const existing = drivers.get(key);
+			if (!canDriveSessionDriver(existing, clock(), graceMs)) return {
+				outcome: "skipped",
+				status: existing
+			};
+			remember(key, {
+				outcome: "pending",
+				at: clock()
+			});
+			try {
+				const status = await input.drive(input.sessionId, input.taskId, input.objective) === true ? {
+					outcome: "injected",
+					at: clock()
+				} : {
+					outcome: "failed",
+					at: clock(),
+					reason: "绑定会话拒绝了驱动消息"
+				};
+				remember(key, status);
+				return {
+					outcome: status.outcome,
+					status
+				};
+			} catch (error) {
+				const status = {
+					outcome: "failed",
+					at: clock(),
+					reason: error instanceof Error ? error.message : String(error)
+				};
+				remember(key, status);
+				return {
+					outcome: status.outcome,
+					status
+				};
+			}
+		}
+		function remember(key, status) {
+			drivers.set(key, status);
+			if (drivers.size <= MAX_TRACKED_DRIVERS) return;
+			const cutoff = status.at - DRIVER_STATE_TTL_MS;
+			for (const [existingKey, existing] of drivers) if (existing.at < cutoff) drivers.delete(existingKey);
+			while (drivers.size > MAX_TRACKED_DRIVERS) {
+				let oldestKey;
+				let oldestAt = Number.POSITIVE_INFINITY;
+				for (const [existingKey, existing] of drivers) if (existing.at < oldestAt) {
+					oldestAt = existing.at;
+					oldestKey = existingKey;
+				}
+				if (oldestKey === void 0) return;
+				drivers.delete(oldestKey);
+			}
 		}
 		//#endregion
 		//#region client/remote-value.js
@@ -4749,19 +4851,24 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const [editing, setEditing] = react.default.useState(false);
 			const [objective, setObjective] = react.default.useState("");
 			const [reason, setReason] = react.default.useState("");
-			const automaticallyDriven = react.default.useRef(/* @__PURE__ */ new Set());
+			const [, setDriverTick] = react.default.useState(0);
 			react.default.useEffect(() => setSelectedId((previous) => previous !== void 0 && graph?.nodes.some((node) => node.id === previous) ? previous : initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph]);
 			react.default.useEffect(() => {
 				if (!task?.requiresSessionDriver || !sessionId || typeof driveInSession !== "function") return;
-				const key = `${task.id}:${task.controlRevision}`;
-				if (automaticallyDriven.current.has(key)) return;
-				automaticallyDriven.current.add(key);
 				let live = true;
 				Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
-					if (resumeDriverMode(remoteValue(result), sessionId) !== "inject") return false;
-					return Promise.resolve(driveInSession(sessionId, task.id, task.objective));
-				}).then((driven) => {
-					if (live && driven === false) setError("未能向绑定会话发送继续指令；请点击“继续执行会话”重试。");
+					if (resumeDriverMode(remoteValue(result), sessionId) !== "inject") return void 0;
+					return driveBoundSessionOnce({
+						sessionId,
+						taskId: task.id,
+						controlRevision: task.controlRevision,
+						objective: task.objective,
+						drive: driveInSession
+					});
+				}).then((outcome) => {
+					if (!live || outcome === void 0) return;
+					setDriverTick((tick) => tick + 1);
+					if (outcome.outcome === "failed") setError(`未能向绑定会话发送继续指令：${outcome.status?.reason ?? "未知原因"}；请点击“继续执行会话”重试。`);
 				}).catch(() => {
 					if (live) setError("无法读取绑定会话；请点击“继续执行会话”重试。");
 				});
@@ -4793,6 +4900,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const selected = graph.nodes.find((node) => node.id === selectedId);
 			const activeAttempt = selected ? task.attempts?.find((attempt) => attempt.taskId === selected.id && attempt.state === "RUNNING") : void 0;
 			const waitingForDriver = waitingForSessionDriver(task);
+			const driverAvailable = canDriveSessionDriver(sessionId ? sessionDriverStatus(sessionId, task.id, task.controlRevision) : void 0);
 			const state = waitingForDriver ? {
 				label: "等待会话继续",
 				tone: "warning"
@@ -4804,32 +4912,46 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				return Promise.resolve(remote[method](input)).then((result) => {
 					const value = remoteValue(result);
 					onTaskChanged(value.kind === "conflict" ? value.current : value.task);
+					if (value.kind === "conflict") setError("任务已被其他操作更新，界面已刷新为最新状态；如需继续操作请再点一次。");
 					if (method === "attachCurrentSession" || method === "setCurrentSession" || method === "acceptReplan" || method === "updateTask" && ["confirm", "resume"].includes(input?.action)) onCurrentChanged?.(task.id);
-					if (method === "updateTask" && input?.action === "resume" && value.kind === "applied") return guideAfterResume();
+					if (method === "updateTask" && input?.action === "resume" && value.kind === "applied") return guideAfterResume(value.task);
 				}).catch((reason) => setError(String(reason))).finally(() => setPending(false));
 			};
-			const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
-				const navigation = remoteValue(result);
-				const mode = resumeDriverMode(navigation, sessionId);
-				if (mode === "inject") {
-					if (typeof driveInSession !== "function") {
-						setError("任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。");
+			const driveSession = (nextTask) => driveBoundSessionOnce({
+				sessionId,
+				taskId: nextTask.id,
+				controlRevision: nextTask.controlRevision,
+				objective: nextTask.objective,
+				drive: driveInSession
+			}).then((outcome) => {
+				setDriverTick((tick) => tick + 1);
+				if (outcome.outcome === "injected") setError("已向绑定会话发送继续执行指令。");
+				else if (outcome.outcome === "skipped") setError("继续指令已发送，正在等待绑定会话执行；如需再次发送请稍候再点。");
+				else setError(`未能注入继续指令：${outcome.status?.reason ?? "未知原因"}；可再次点击“继续执行会话”重试。`);
+				return outcome;
+			});
+			const guideAfterResume = (nextTask) => {
+				const target = nextTask ?? task;
+				return Promise.resolve(remote.getTaskNavigation({ taskId: target.id })).then((result) => {
+					const navigation = remoteValue(result);
+					const mode = resumeDriverMode(navigation, sessionId);
+					if (mode === "inject") {
+						if (typeof driveInSession !== "function") {
+							setError("任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。");
+							return;
+						}
+						return driveSession(target);
+					}
+					if (mode === "open" && navigation.currentSessionId && typeof openSession === "function") {
+						openSession(navigation.currentSessionId);
+						setError("已打开绑定会话，请在该会话继续执行。");
 						return;
 					}
-					setError(null);
-					const targetSessionId = sessionId;
-					Promise.resolve(driveInSession(targetSessionId, task.id, task.objective)).then((driven) => {
-						setError(driven ? "已向绑定会话发送继续执行指令。" : "绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。");
-					}).catch(() => setError("向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。"));
-					return;
-				}
-				if (mode === "open" && navigation.currentSessionId && typeof openSession === "function") {
-					openSession(navigation.currentSessionId);
-					setError("已打开绑定会话，请在该会话继续执行。");
-					return;
-				}
-				setError("任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。");
-			}).catch((value) => setError(String(value)));
+					setError("任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。");
+				}).catch((value) => {
+					setError(`无法读取绑定会话：${String(value)}`);
+				});
+			};
 			const action = (label, recoveryResolution) => invoke("updateTask", {
 				taskId: task.id,
 				expectedRevision: task.controlRevision,
@@ -4948,9 +5070,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, "当前会话"), waitingForDriver ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
-				disabled: pending,
-				onClick: guideAfterResume
-			}, "继续执行会话") : null, e$3("button", {
+				disabled: pending || !driverAvailable,
+				title: driverAvailable ? "向绑定会话发送继续执行指令" : "继续指令已发送，正在等待绑定会话执行",
+				onClick: () => {
+					guideAfterResume(task);
+				}
+			}, driverAvailable ? "继续执行会话" : "驱动已发送，等待执行") : null, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
@@ -5150,7 +5275,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const [task, setTask] = react.default.useState(null);
 			const [pending, setPending] = react.default.useState(false);
 			const [driverNotice, setDriverNotice] = react.default.useState(null);
-			const automaticallyDriven = react.default.useRef(/* @__PURE__ */ new Set());
+			const [, setDriverTick] = react.default.useState(0);
 			react.default.useEffect(() => {
 				if (!sessionId) return;
 				let live = true;
@@ -5166,39 +5291,42 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					clearInterval(timer);
 				};
 			}, [sessionId, remote]);
-			const continueInBoundSession = () => {
-				if (!task) return Promise.resolve(false);
-				return Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((value) => {
-					const navigation = remoteValue(value);
-					const mode = sessionDriverMode(task, navigation, sessionId);
-					if (mode === "none") return false;
-					if (mode === "attach") {
-						setDriverNotice("任务尚未绑定可继续的会话，请先在任务区附加当前会话。");
-						return false;
-					}
-					if (mode === "open") {
-						openSession?.(navigation.currentSessionId);
-						setDriverNotice("已打开绑定会话，请在该会话继续执行。");
-						return false;
-					}
-					if (typeof driveInSession !== "function") {
-						setDriverNotice("当前页面无法向绑定会话发送继续指令。");
-						return false;
-					}
-					return Promise.resolve(driveInSession(sessionId, task.id, task.objective)).then((driven) => {
-						setDriverNotice(driven ? "已向绑定会话发送继续执行指令。" : "继续指令发送失败，可再次点击重试。");
-						return driven;
-					});
-				}).catch(() => {
-					setDriverNotice("无法读取绑定会话，可再次点击重试。");
-					return false;
+			const driveTask = (freshTask) => Promise.resolve(remote.getTaskNavigation({ taskId: freshTask.id })).then((value) => {
+				const navigation = remoteValue(value);
+				const mode = resumeDriverMode(navigation, sessionId);
+				if (mode === "attach") {
+					setDriverNotice("任务尚未绑定可继续的会话，请先在任务区附加当前会话。");
+					return { outcome: "attach" };
+				}
+				if (mode === "open") {
+					openSession?.(navigation.currentSessionId);
+					setDriverNotice("已打开绑定会话，请在该会话继续执行。");
+					return { outcome: "opened" };
+				}
+				if (typeof driveInSession !== "function") {
+					setDriverNotice("当前页面无法向绑定会话发送继续指令。");
+					return { outcome: "unsupported" };
+				}
+				return driveBoundSessionOnce({
+					sessionId,
+					taskId: freshTask.id,
+					controlRevision: freshTask.controlRevision,
+					objective: freshTask.objective,
+					drive: driveInSession
+				}).then((result) => {
+					setDriverTick((tick) => tick + 1);
+					if (result.outcome === "injected") setDriverNotice("已向绑定会话发送继续执行指令。");
+					else if (result.outcome === "skipped") setDriverNotice("继续指令已发送，正在等待绑定会话执行。");
+					else setDriverNotice(`继续指令发送失败：${result.status?.reason ?? "未知原因"}，可再次点击重试。`);
+					return result;
 				});
-			};
+			}).catch(() => {
+				setDriverNotice("无法读取绑定会话，可再次点击重试。");
+				return { outcome: "failed" };
+			});
+			const continueInBoundSession = () => task === null || task === void 0 ? Promise.resolve({ outcome: "none" }) : driveTask(task);
 			react.default.useEffect(() => {
 				if (!task?.requiresSessionDriver || !sessionId) return;
-				const key = `${task.id}:${task.controlRevision}`;
-				if (automaticallyDriven.current.has(key)) return;
-				automaticallyDriven.current.add(key);
 				continueInBoundSession();
 			}, [
 				task?.id,
@@ -5208,25 +5336,36 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			]);
 			if (!task) return null;
 			const view = taskStripPresentation(task);
+			const actionLabel = (action) => ({
+				pause: "暂停",
+				resume: "继续",
+				cancel: "取消",
+				confirm: "确认"
+			})[action] ?? action;
+			const reasonText = (reason) => String(reason?.message ?? reason ?? "未知原因");
 			const update = (action) => {
 				setPending(true);
+				setDriverNotice(null);
 				Promise.resolve(remote.updateTask({
 					taskId: task.id,
 					expectedRevision: task.controlRevision,
 					action,
 					sessionId
-				})).catch(() => void 0).then(() => remote.getCurrentTaskForSession({ sessionId })).then((value) => setTask(remoteValue(value))).then(() => action === "resume" ? remote.getTaskNavigation({ taskId: task.id }) : null).then((nav) => {
-					if (action !== "resume") return;
-					const navigation = remoteValue(nav);
-					const mode = resumeDriverMode(navigation, sessionId);
-					if (mode === "inject" && typeof driveInSession === "function") driveInSession(sessionId, task.id, task.objective);
-					else if (mode === "open" && navigation?.currentSessionId && typeof openSession === "function") openSession(navigation.currentSessionId);
-				}).catch(() => void 0).finally(() => setPending(false));
+				})).then((result) => {
+					const value = remoteValue(result);
+					if (value !== null && typeof value === "object" && value.kind === "conflict") setDriverNotice(`任务已被其他操作更新，已刷新为最新状态；如需${actionLabel(action)}请再操作一次。`);
+					return remote.getCurrentTaskForSession({ sessionId });
+				}).then((value) => {
+					const fresh = remoteValue(value);
+					setTask(fresh);
+					return fresh;
+				}).then((fresh) => action === "resume" && fresh !== null && fresh !== void 0 ? driveTask(fresh) : void 0).catch((reason) => setDriverNotice(`${actionLabel(action)}失败：${reasonText(reason)}，可重试。`)).finally(() => setPending(false));
 			};
 			const clear = () => {
 				setPending(true);
 				Promise.resolve(remote.clearCurrentSession({ sessionId })).then(() => setTask(null)).finally(() => setPending(false));
 			};
+			const driverAvailable = canDriveSessionDriver(sessionDriverStatus(sessionId, task.id, task.controlRevision));
 			return e$1("div", {
 				className: `ltr-strip tone-${view.tone}`,
 				"data-testid": "long-task-strip"
@@ -5261,12 +5400,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, "▶") : null, task.requiresSessionDriver ? e$1("button", {
 				type: "button",
 				className: "ltr-icon-button",
-				disabled: pending,
+				disabled: pending || !driverAvailable,
 				onClick: () => {
 					continueInBoundSession();
 				},
-				"aria-label": "继续执行会话",
-				title: "继续执行会话"
+				"aria-label": driverAvailable ? "继续执行会话" : "继续指令已发送",
+				title: driverAvailable ? "继续执行会话" : "继续指令已发送，等待绑定会话执行"
 			}, "▶") : null, e$1("button", {
 				type: "button",
 				className: "ltr-icon-button",

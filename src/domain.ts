@@ -6,6 +6,13 @@ export type TaskState = 'PENDING' | 'READY' | 'RUNNING' | 'BLOCKED' | 'SUCCEEDED
 
 /** How a scheduler may recover an interrupted task. */
 export type SideEffectClass = 'read_only' | 'idempotent' | 'external_effect'
+
+/**
+ * Who paused a goal. An operator pause is sticky: only an operator-authorized
+ * resume may clear it, so an in-flight agent instruction cannot silently undo
+ * the pause a user just requested.
+ */
+export type PauseOrigin = 'operator' | 'agent' | 'system'
 import type { AcceptanceCheck, AcceptancePolicy } from './acceptance-contract.js'
 
 /** Durable observation, separate from the policy chosen for what happens next. */

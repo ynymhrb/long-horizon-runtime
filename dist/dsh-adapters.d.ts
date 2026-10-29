@@ -7,6 +7,8 @@ export interface DshAdapterOptions {
     readonly providerName: string;
     readonly agentOptions?: Record<string, unknown>;
     readonly timeoutMs?: number;
+    readonly persona?: string;
+    readonly toolAllow?: readonly string[];
     readonly toolDeny?: readonly string[];
 }
 /** Build an initial-plan adapter backed by a configured DSH one-shot provider. */
