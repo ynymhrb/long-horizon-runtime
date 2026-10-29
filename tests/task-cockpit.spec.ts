@@ -1,11 +1,23 @@
 import { expect, test } from 'vitest'
 import { canEditOriginalGoal, cockpitDataState, initialSelectedNode, resumeDriverMessage, resumeDriverMode, sessionDriverMode, shouldDriveBoundSession, waitingForSessionDriver } from '../client/task-model.js'
-import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaPresentation } from '../client/task-presentation.js'
+import { ensureSessionTopSlot } from '../client/index.js'
+import { cockpitLayoutPresentation, formatRuntimeMetrics, goalObjectivePresentation, quotaRecoveryPresentation, taskAreaPanelCss, taskAreaPresentation } from '../client/task-presentation.js'
 
 test('任务区挂载到原生会话流，不保留浮层容器', () => {
   expect(taskAreaPresentation()).toEqual({
     panelClassName: 'ltr-task-area-panel',
   })
+})
+
+test('任务区面板按会话列宽度收缩，不使用视口定宽', () => {
+  expect(taskAreaPanelCss).toContain('width:100%')
+  expect(taskAreaPanelCss).toContain('max-width:1160px')
+  expect(taskAreaPanelCss).not.toContain('100vw')
+})
+
+test('缺少会话顶部插槽时明确拒绝挂载', () => {
+  expect(() => ensureSessionTopSlot({ spec: () => undefined })).toThrow(/conversation\.session\.top/)
+  expect(() => ensureSessionTopSlot({ spec: () => ({ kind: 'list', scope: 'session' }) })).not.toThrow()
 })
 
 test('驾驶舱将身份、操作、等高主体和可滚动事件分区', () => {

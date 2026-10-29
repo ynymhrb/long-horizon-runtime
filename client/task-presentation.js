@@ -44,6 +44,9 @@ export function taskAreaPresentation() {
   }
 }
 
+/** Bounded panel geometry follows the host conversation column, never the viewport. */
+export const taskAreaPanelCss = 'box-sizing:border-box;width:100%;max-width:1160px;max-height:min(55vh,430px);margin:0 auto;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:0 0 16px 16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)'
+
 export function cockpitLayoutPresentation() {
   return {
     identityClassName: 'ltr-cockpit-identity',
