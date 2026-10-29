@@ -97,12 +97,20 @@ export function apply(ctx: Context, input: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" execution begins immediately in the background and this call returns right away; poll long_task_status or long_task_events for progress. Use planning_mode "require_confirmation" to review the generated plan before execution.',
-    parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
+    parameters: {
+      objective: { type: 'string' },
+      // qwen3.5:4b emits a task-description shape for this tool. Accept its
+      // description field as a backwards-compatible objective alias.
+      description: { type: 'string' },
+      constraints: { type: 'array', items: { type: 'string' } },
+      planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] },
+    }, output: toolOutput,
     execute: (args, exec) => {
       const agent = requireParent(exec.agent)
       return toolValue(() => withDshParent(agent, async () => {
+        const objective = createObjective(args)
         const task = await taskApi.create({
-          objective: args.objective,
+          objective,
           ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
           planningMode: args.planning_mode ?? config.defaultPlanningMode,
           ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
@@ -188,6 +196,14 @@ function withParent<T>(agent: Agent | undefined, work: () => Promise<T>): Promis
 function requireParent(agent: Agent | undefined): Agent {
   if (agent === undefined) throw new Error('long-task tools require a current parent Agent')
   return agent
+}
+
+/** Normalize the canonical field and the local-model task-description alias. */
+function createObjective(args: Record<string, unknown>): string {
+  for (const value of [args.objective, args.description]) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim()
+  }
+  throw new TypeError('long_task_create requires a non-empty objective or description')
 }
 
 /** Goal views contain only JSON values, but their narrow TypeScript shape lacks an index signature. */

@@ -74,6 +74,26 @@ describe('Cordis plugin surface', () => {
     expect(runtime.store.getCurrentTaskForSession('session-tool')?.taskId).toBe(result.id)
   })
 
+  test('uses a local model description as the durable task objective', async () => {
+    const registered = new Map<string, { execute(args: Record<string, unknown>, exec: { agent?: unknown; signal: AbortSignal }): Promise<unknown> }>()
+    const ctx = {
+      tools: { register(tool: { name: string; execute(args: Record<string, unknown>, exec: { agent?: unknown; signal: AbortSignal }): Promise<unknown> }) { registered.set(tool.name, tool); return () => {} } },
+      subagents: {}, provide() {}, reflect: { provide() {} }, effect() { return () => {} }, systemPrompt: { section() { return () => {} } },
+    }
+    apply(ctx as never, {
+      databasePath: ':memory:', artifactDirectory: 'artifacts', plannerProvider: 'planner', executionProvider: 'worker',
+      runtimeFactory: (() => new LongTaskRuntime(
+        { plan: async (input: { goalId: string }) => ({ goalId: input.goalId, revision: 1, tasks: [{ id: 'plan', objective: 'plan', dependsOn: [], priority: 1, inputContract: {}, outputContract: {}, completionCriteria: 'done', retryPolicy: { maxAttempts: 1 }, sideEffectClass: 'read_only', validator: 'required' }] }) } as never,
+        { execute: async () => ({ status: 'succeeded', summary: 'no_artifact', artifacts: [], evidence: [] }) } as never,
+        { databasePath: ':memory:', artifactDirectory: 'artifacts' },
+      )) as never,
+    })
+
+    const result = await registered.get('long_task_create')!.execute({ description: '读取 package.json 的 name', planning_mode: 'require_confirmation' }, { agent: { id: 'local-model' }, signal: new AbortController().signal }) as { objective: string }
+
+    expect(result.objective).toBe('读取 package.json 的 name')
+  })
+
   test('continuing a tool task from a new session binds that session as current', async () => {
     const registered = new Map<string, { execute(args: Record<string, unknown>, exec: { agent?: unknown; signal: AbortSignal }): Promise<unknown> }>()
     const provided = new Map<string, unknown>()

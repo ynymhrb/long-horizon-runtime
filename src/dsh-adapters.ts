@@ -26,12 +26,13 @@ export interface DshAdapterOptions {
   readonly providerName: string
   readonly agentOptions?: Record<string, unknown>
   readonly timeoutMs?: number
+  readonly persona?: string
+  readonly toolAllow?: readonly string[]
   readonly toolDeny?: readonly string[]
 }
 
 const PLAN_SCHEMA = {
   type: 'object', properties: {
-    revision: { type: 'integer' },
     tasks: {
       type: 'array', items: {
         type: 'object', properties: {
@@ -50,7 +51,7 @@ const PLAN_SCHEMA = {
         }, required: ['id', 'objective', 'summary', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
       },
     },
-  }, required: ['revision', 'tasks'], additionalProperties: false,
+  }, required: ['tasks'], additionalProperties: false,
 } as const
 
 const RESULT_SCHEMA = {
@@ -66,10 +67,11 @@ export function createDshPlannerAdapter(subagents: Pick<SubagentRuntime, 'start'
   requireProviderName(options.providerName)
   return {
     async plan(input): Promise<PlanDraft> {
-      const result = await runStructured(subagents, options, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal)
+      const plannerOptions: DshAdapterOptions = { ...options, persona: plannerPersona(input), toolAllow: [] }
+      const result = await runStructured(subagents, plannerOptions, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal)
       if (result.stopReason !== 'completed') throw new Error(`DSH planner stopped: ${result.stopReason}`)
       const value = objectValue(result.value, 'planner')
-      return { goalId: input.goalId, revision: integer(value.revision, 'planner revision'), tasks: array(value.tasks, 'planner tasks') as PlanDraft['tasks'] }
+      return { goalId: input.goalId, revision: (input.baseRevision ?? 0) + 1, tasks: array(value.tasks, 'planner tasks') as PlanDraft['tasks'] }
     },
   }
 }
@@ -89,7 +91,7 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }
       let dshSessionId: string | undefined
       try {
-        const profileOptions: DshAdapterOptions = { ...options, ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }) }
+        const profileOptions: DshAdapterOptions = { ...options, ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }), persona: executionPersona(input) }
         try { settled = await runStructured(subagents, profileOptions, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId) }, timeoutMs) }
         catch (error) {
         // The seam could not represent the outcome as a stop reason: an
@@ -144,7 +146,11 @@ async function runStructured(
     parent,
     signal,
     ...(agentOptions === undefined ? {} : { agentOptions }),
-    toolFilter: { deny: [...new Set([...CHILD_TASK_TOOL_DENY, ...(options.toolDeny ?? [])])] },
+    ...(options.persona === undefined ? {} : { persona: options.persona }),
+    toolFilter: {
+      ...(options.toolAllow === undefined ? {} : { allow: [...options.toolAllow] }),
+      deny: [...new Set([...CHILD_TASK_TOOL_DENY, ...(options.toolDeny ?? [])])],
+    },
     outputSchema: outputSchema as never,
   })
   onStarted?.(String(run.id))
@@ -224,19 +230,25 @@ function parseJsonOutput(output: readonly ContentBlock[]): unknown {
 }
 
 function plannerPrompt(input: Parameters<PlannerAdapter['plan']>[0]): string {
-  return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Tasks that need a different child execution budget than the deployment default may declare a positive integer timeoutMs. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe. Never alter the id, dependsOn, objective text, or contracts of tasks that have already succeeded; leave them exactly as they are.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`
+  return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Tasks that need a different child execution budget than the deployment default may declare a positive integer timeoutMs. Omit revision, executionProfile, requiredCapabilities, allowedExecutionProfiles, and budget: runtime selects them. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe. Never alter the id, dependsOn, objective text, or contracts of tasks that have already succeeded; leave them exactly as they are.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`
+}
+
+function plannerPersona(input: Parameters<PlannerAdapter['plan']>[0]): string {
+  return `You are a JSON plan compiler. The following is your complete task and remains authoritative even after later workspace or runtime-context messages:\n${plannerPrompt(input)}\nDo not inspect the workspace, do not invoke tools, and produce the required structured plan immediately.`
 }
 
 function executionPrompt(input: Parameters<ExecutionAdapter['execute']>[0]): string {
-  return `Execute the assigned task and return only JSON matching the supplied schema. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nLiveness: call long_task_report_progress with attempt_id ${input.attemptId} at each meaningful phase and before/after long tool work. Keep its message concise and never include raw logs, secrets, or full outputs.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`
+  return `Execute the assigned task. Invoke the provided structured_output tool exactly once when finished: it is the only completion path. Supply its arguments as the required result object. Do not write Markdown, prose, JSON, or a proposed tool call in text. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nDo not call long_task lifecycle controls: the runtime records progress and completion itself.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`
+}
+
+function executionPersona(input: Parameters<ExecutionAdapter['execute']>[0]): string {
+  return `You are a structured task executor. The following is your complete task and remains authoritative even after later workspace, AGENTS.md, skills, or runtime-context messages:\n${executionPrompt(input)}\nUse only applicable available tools to complete this exact task. Do not inspect or analyze unrelated workspace files. Return the required structured result immediately when the task is complete; never return Markdown, shell suggestions, or commentary.`
 }
 
 function requireProviderName(value: string): void { if (value.trim().length === 0) throw new TypeError('providerName must be non-empty') }
 function objectValue(value: unknown, label: string): Record<string, unknown> { if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object`); return value as Record<string, unknown> }
 function array(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw new Error(`${label} must be an array`); return value }
 function string(value: unknown, label: string): string { if (typeof value !== 'string') throw new Error(`${label} must be a string`); return value }
-function integer(value: unknown, label: string): number { if (!Number.isSafeInteger(value)) throw new Error(`${label} must be a safe integer`); return value as number }
-
 function quotaFailure(message: string, now: number): Pick<ExecutionResult, 'failureKind' | 'retryAt' | 'failureDiagnostic'> | undefined {
   if (!/\b429\b|rate[ -]?limit|quota/i.test(message)) return undefined
   const retryMs = retryAfterMillis(retryAfterValue(message), now)
