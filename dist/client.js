@@ -4410,9 +4410,16 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		* so a selected pending node can not be mistaken for a running one.
 		*/
 		const dagToneCss = ".ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}";
+		function goalObjectivePresentation(objective) {
+			return {
+				className: "ltr-goal-objective",
+				maxLines: 50,
+				title: objective
+			};
+		}
 		function taskStripPresentation(task) {
 			const state = taskStatePresentation(task.state);
-			const waitingForDriver = task.state === "RUNNING" && task.currentOrLastNode?.state !== void 0 && task.currentOrLastNode.state !== "RUNNING";
+			const waitingForDriver = task.requiresSessionDriver === true || task.requiresSessionDriver === void 0 && task.state === "RUNNING" && task.currentOrLastNode?.state !== void 0 && task.currentOrLastNode.state !== "RUNNING";
 			const current = task.currentOrLastNode?.objective;
 			return {
 				...state,
@@ -4424,6 +4431,18 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const objective = node?.objective;
 			const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective;
 			return `${progress?.settled ?? progress?.succeeded ?? 0}/${progress?.total ?? 0}${compactObjective ? ` · 当前：${compactObjective}` : ""}`;
+		}
+		function formatRuntimeMetrics(metrics) {
+			const duration = (value) => {
+				const seconds = Math.floor(Math.max(0, value ?? 0) / 1e3);
+				const minutes = Math.floor(seconds / 60);
+				const remainder = seconds % 60;
+				return minutes > 0 ? `${minutes} 分 ${remainder} 秒` : `${remainder} 秒`;
+			};
+			return {
+				summary: `第 ${metrics?.runRoundCount ?? 0} 轮 · 已运行 ${duration(metrics?.activeRunTimeMs)}`,
+				detail: `自然经过 ${duration(metrics?.elapsedRunTimeMs)}`
+			};
 		}
 		//#endregion
 		//#region client/TaskDag.js
@@ -4639,13 +4658,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (bound === currentSessionId) return "inject";
 			return "open";
 		}
-		/** A durable RUNNING state still needs a live session parent before it can dispatch child work. */
+		/** Use the runtime lease signal when available; retain the old derivation only for an older host during rollout. */
 		function waitingForSessionDriver(task) {
+			if (typeof task?.requiresSessionDriver === "boolean") return task.requiresSessionDriver;
 			return task?.state === "RUNNING" && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
 		}
-		/** Both the current and a bound background session can accept a driver prompt. */
-		function shouldDriveBoundSession(mode) {
-			return mode === "inject" || mode === "open";
+		/** Combine the durable driver requirement with the session-routing decision. */
+		function sessionDriverMode(task, navigation, currentSessionId) {
+			return waitingForSessionDriver(task) ? resumeDriverMode(navigation, currentSessionId) : "none";
 		}
 		//#endregion
 		//#region client/remote-value.js
@@ -4708,7 +4728,34 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const [editing, setEditing] = react.default.useState(false);
 			const [objective, setObjective] = react.default.useState("");
 			const [reason, setReason] = react.default.useState("");
+			const automaticallyDriven = react.default.useRef(/* @__PURE__ */ new Set());
 			react.default.useEffect(() => setSelectedId((previous) => previous !== void 0 && graph?.nodes.some((node) => node.id === previous) ? previous : initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph]);
+			react.default.useEffect(() => {
+				if (!task?.requiresSessionDriver || !sessionId || typeof driveInSession !== "function") return;
+				const key = `${task.id}:${task.controlRevision}`;
+				if (automaticallyDriven.current.has(key)) return;
+				automaticallyDriven.current.add(key);
+				let live = true;
+				Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
+					if (resumeDriverMode(remoteValue(result), sessionId) !== "inject") return false;
+					return Promise.resolve(driveInSession(sessionId, task.id, task.objective));
+				}).then((driven) => {
+					if (live && driven === false) setError("未能向绑定会话发送继续指令；请点击“继续执行会话”重试。");
+				}).catch(() => {
+					if (live) setError("无法读取绑定会话；请点击“继续执行会话”重试。");
+				});
+				return () => {
+					live = false;
+				};
+			}, [
+				task?.id,
+				task?.controlRevision,
+				task?.requiresSessionDriver,
+				task?.objective,
+				sessionId,
+				remote,
+				driveInSession
+			]);
 			const dataState = cockpitDataState(task, graph);
 			if (dataState === "loading") return e$3("p", null, "正在加载任务…");
 			if (dataState === "missing") return e$3("section", { className: "ltr-cockpit" }, e$3("button", {
@@ -4720,7 +4767,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "button",
 				className: "ltr-btn",
 				onClick: onBack
-			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
+			}, "← 全部任务"), e$3("div", null, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
 			const selected = graph.nodes.find((node) => node.id === selectedId);
 			const activeAttempt = selected ? task.attempts?.find((attempt) => attempt.taskId === selected.id && attempt.state === "RUNNING") : void 0;
 			const waitingForDriver = waitingForSessionDriver(task);
@@ -4742,17 +4789,21 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
 				const navigation = remoteValue(result);
 				const mode = resumeDriverMode(navigation, sessionId);
-				if (shouldDriveBoundSession(mode)) {
+				if (mode === "inject") {
 					if (typeof driveInSession !== "function") {
 						setError("任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。");
 						return;
 					}
 					setError(null);
-					const targetSessionId = mode === "inject" ? sessionId : navigation.currentSessionId;
+					const targetSessionId = sessionId;
 					Promise.resolve(driveInSession(targetSessionId, task.id, task.objective)).then((driven) => {
-						if (mode === "open" && typeof openSession === "function") openSession(targetSessionId);
 						setError(driven ? "已向绑定会话发送继续执行指令。" : "绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。");
 					}).catch(() => setError("向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。"));
+					return;
+				}
+				if (mode === "open" && navigation.currentSessionId && typeof openSession === "function") {
+					openSession(navigation.currentSessionId);
+					setError("已打开绑定会话，请在该会话继续执行。");
 					return;
 				}
 				setError("任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。");
@@ -4802,11 +4853,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const latestQuotaRecovery = [...task.recentEvents ?? []].reverse().find((event) => event.type === "QuotaRecoveryResumed");
 			const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, /* @__PURE__ */ new Date(), latestQuotaRecovery);
 			const editableOriginalGoal = canEditOriginalGoal(task);
+			const runtimeMetrics = formatRuntimeMetrics(task.runtimeMetrics);
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				onClick: onBack
-			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label), sessionId ? e$3("button", {
+			}, "← 全部任务"), e$3("div", null, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label), e$3("small", { title: runtimeMetrics.detail }, runtimeMetrics.summary), sessionId ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending || isCurrent,
@@ -4842,7 +4894,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				className: "ltr-btn",
 				disabled: pending,
 				onClick: jump
-			}, "当前会话"), e$3("button", {
+			}, "当前会话"), waitingForDriver ? e$3("button", {
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: guideAfterResume
+			}, "继续执行会话") : null, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
@@ -5034,7 +5091,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				return e$2("li", { key: item.id }, e$2("button", {
 					type: "button",
 					onClick: () => setSelectedId(item.id)
-				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)}`)));
+				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1e3)} 秒`)));
 			})));
 			return e$2("div", { className: "ltr-modal-layer" }, e$2("div", {
 				className: "ltr-mask",
@@ -5068,6 +5125,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		function TaskStrip({ sessionId, remote, onOpen, openSession, driveInSession }) {
 			const [task, setTask] = react.default.useState(null);
 			const [pending, setPending] = react.default.useState(false);
+			const [driverNotice, setDriverNotice] = react.default.useState(null);
+			const automaticallyDriven = react.default.useRef(/* @__PURE__ */ new Set());
 			react.default.useEffect(() => {
 				if (!sessionId) return;
 				let live = true;
@@ -5083,6 +5142,46 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					clearInterval(timer);
 				};
 			}, [sessionId, remote]);
+			const continueInBoundSession = () => {
+				if (!task) return Promise.resolve(false);
+				return Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((value) => {
+					const navigation = remoteValue(value);
+					const mode = sessionDriverMode(task, navigation, sessionId);
+					if (mode === "none") return false;
+					if (mode === "attach") {
+						setDriverNotice("任务尚未绑定可继续的会话，请先在任务区附加当前会话。");
+						return false;
+					}
+					if (mode === "open") {
+						openSession?.(navigation.currentSessionId);
+						setDriverNotice("已打开绑定会话，请在该会话继续执行。");
+						return false;
+					}
+					if (typeof driveInSession !== "function") {
+						setDriverNotice("当前页面无法向绑定会话发送继续指令。");
+						return false;
+					}
+					return Promise.resolve(driveInSession(sessionId, task.id, task.objective)).then((driven) => {
+						setDriverNotice(driven ? "已向绑定会话发送继续执行指令。" : "继续指令发送失败，可再次点击重试。");
+						return driven;
+					});
+				}).catch(() => {
+					setDriverNotice("无法读取绑定会话，可再次点击重试。");
+					return false;
+				});
+			};
+			react.default.useEffect(() => {
+				if (!task?.requiresSessionDriver || !sessionId) return;
+				const key = `${task.id}:${task.controlRevision}`;
+				if (automaticallyDriven.current.has(key)) return;
+				automaticallyDriven.current.add(key);
+				continueInBoundSession();
+			}, [
+				task?.id,
+				task?.controlRevision,
+				task?.requiresSessionDriver,
+				sessionId
+			]);
 			if (!task) return null;
 			const view = taskStripPresentation(task);
 			const update = (action) => {
@@ -5118,7 +5217,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, task.objective), e$1("span", {
 				className: "ltr-strip-progress",
 				title: view.detail || task.objective
-			}, view.progress), e$1("div", { className: "ltr-strip-actions" }, (task.availableActions ?? []).includes("pause") ? e$1("button", {
+			}, `${view.progress} · ${task.runtimeMetrics ? taskStripRuntime(task.runtimeMetrics) : ""}`), driverNotice ? e$1("span", {
+				className: "ltr-strip-progress",
+				role: "status"
+			}, driverNotice) : null, e$1("div", { className: "ltr-strip-actions" }, (task.availableActions ?? []).includes("pause") ? e$1("button", {
 				type: "button",
 				className: "ltr-icon-button",
 				disabled: pending,
@@ -5132,6 +5234,15 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onClick: () => update("resume"),
 				"aria-label": "继续长任务",
 				title: "继续长任务"
+			}, "▶") : null, task.requiresSessionDriver ? e$1("button", {
+				type: "button",
+				className: "ltr-icon-button",
+				disabled: pending,
+				onClick: () => {
+					continueInBoundSession();
+				},
+				"aria-label": "继续执行会话",
+				title: "继续执行会话"
 			}, "▶") : null, e$1("button", {
 				type: "button",
 				className: "ltr-icon-button",
@@ -5148,6 +5259,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				title: "隐藏当前任务条"
 			}, "×")));
 		}
+		function taskStripRuntime(metrics) {
+			return `第 ${metrics.runRoundCount} 轮 · 已运行 ${Math.floor(metrics.activeRunTimeMs / 1e3)} 秒`;
+		}
 		//#endregion
 		//#region client/index.js
 		const inject = [
@@ -5162,7 +5276,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 .ltr-task-filter{display:flex;align-items:center;gap:8px;margin:16px 0}.ltr-task-filter input,.ltr-task-filter select{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.ltr-task-filter input{min-width:260px}.ltr-task-filter .ltr-check{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px}.ltr-task-filter .ltr-check input{min-width:0;margin:0}
 .ltr-task-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0;border-top:1px solid var(--dsw-alias-border-l1)}.ltr-task-list button{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;align-items:center;width:100%;min-height:54px;padding:10px 4px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;text-align:left}.ltr-task-list button:hover{background:var(--dsw-alias-interactive-bg-hover)}.ltr-task-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.ltr-task-list small{overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-empty-task-list{margin:0;padding:18px 4px;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .ltr-strip{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));height:36px;margin:0 auto 8px;padding:4px 5px 4px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-specific-tip);color:var(--dsw-alias-label-primary)}.ltr-strip-glyph{color:var(--dsw-alias-label-tertiary)}.ltr-strip-label{flex:none;font-size:13px;font-weight:500}.ltr-strip-objective{flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;text-align:left;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.ltr-strip-progress{flex:0 1 auto;min-width:0;max-width:38%;overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-strip-actions{display:flex;gap:3px}.ltr-icon-button{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.ltr-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ltr-icon-button:disabled{opacity:.4;cursor:default}
-.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-header>div{flex:1}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
+.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-header>div{flex:1;min-width:0}.ltr-goal-objective{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:50;line-clamp:50;cursor:help}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
 .ltr-cockpit-body{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;margin-top:16px}.ltr-dag-wrap{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;width:100%;height:570px;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-body{grid-template-columns:1fr}.ltr-modal{width:calc(100vw - 20px);height:calc(100vh - 20px);margin:10px}.ltr-dag{height:420px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
 `;
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime\"]")) {
