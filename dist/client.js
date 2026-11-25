@@ -4021,6 +4021,106 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		function superRefine(fn, params) {
 			return /* @__PURE__ */ _superRefine(fn, params);
 		}
+		//#endregion
+		//#region client/remote-contract.js
+		const owner = "@deepseek-ai/dsh-long-task-runtime";
+		const namespace = "longTasks";
+		const result = {
+			mode: "strict",
+			typeSymbol: "LongTaskRemoteResult",
+			schema: unknown()
+		};
+		function descriptor(method, schema, name = "input", acceptsUndefined = false) {
+			return {
+				id: owner + "#" + namespace + "/" + method,
+				service: namespace,
+				namespace,
+				method,
+				invocation: { kind: "direct" },
+				parameters: schema === void 0 ? [] : [{
+					name,
+					wire: name,
+					source: "json",
+					...acceptsUndefined ? { acceptsUndefined } : {},
+					codec: {
+						mode: "strict",
+						typeSymbol: method + "Input",
+						schema
+					}
+				}],
+				result
+			};
+		}
+		const taskId = string();
+		const task = object({ taskId });
+		const sessionId = string();
+		const control = {
+			taskId,
+			expectedRevision: number()
+		};
+		const workspaceScope = string().optional();
+		const link = object({
+			taskId,
+			sessionId,
+			workspaceScope
+		});
+		const longTaskRemote = {
+			package: owner,
+			descriptors: [
+				descriptor("get", taskId, "taskId"),
+				descriptor("list"),
+				descriptor("listTasks", object({
+					cursor: number().optional(),
+					filter: object({
+						state: string().optional(),
+						query: string().optional(),
+						archived: boolean().optional(),
+						sessionId: sessionId.optional()
+					}).optional()
+				}).optional(), "input", true),
+				descriptor("getTask", task),
+				descriptor("getTaskAudit", task),
+				descriptor("getTaskGraph", object({
+					taskId,
+					revision: number().optional()
+				})),
+				descriptor("listTaskEvents", object({
+					taskId,
+					cursor: number().optional(),
+					taskNodeId: string().optional()
+				})),
+				descriptor("getCurrentTaskForSession", object({ sessionId })),
+				descriptor("updateTask", object({
+					...control,
+					action: _enum([
+						"confirm",
+						"resume",
+						"pause",
+						"cancel"
+					]),
+					sessionId: sessionId.optional(),
+					workspaceScope,
+					recoveryResolution: _enum(["retry", "confirmed_succeeded"]).optional()
+				})),
+				descriptor("attachCurrentSession", link),
+				descriptor("setCurrentSession", link),
+				descriptor("clearCurrentSession", object({ sessionId })),
+				descriptor("rejectReplan", object(control)),
+				descriptor("editTaskGoal", object({
+					...control,
+					objective: string(),
+					reason: string(),
+					sessionId: sessionId.optional()
+				})),
+				descriptor("acceptReplan", object({
+					...control,
+					sessionId: sessionId.optional()
+				})),
+				descriptor("archiveTask", object(control)),
+				descriptor("restoreTask", task),
+				descriptor("getTaskNavigation", task)
+			]
+		};
 		/** Text in SVG does not naturally ellipsize, so clip labels before rendering. */
 		function truncateGraphText(value, maxCharacters) {
 			return value.length <= maxCharacters ? value : `${value.slice(0, Math.max(0, maxCharacters - 1))}…`;
@@ -5093,7 +5193,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				disabled: pending,
 				onClick: task.archivedAt ? restore : archive
 			}, task.archivedAt ? "恢复归档任务" : "删除"), ...actionButtons), orchestration ? e$3("details", {
-				className: "ltr-plan-hint",
+				className: "ltr-workflow-definition",
 				open: task.state === "AWAITING_CONFIRMATION"
 			}, e$3("summary", null, orchestration.mode === "discussion" ? "讨论流程" : "工作流定义"), orchestration.mode === "discussion" ? e$3("p", null, orchestration.rounds + " 轮 · " + orchestration.participants.map((item) => typeof item === "string" ? item : item.id).join(" → ") + " · 总结 " + (typeof orchestration.moderator === "string" ? orchestration.moderator : orchestration.moderator.id)) : e$3("ul", null, ...orchestration.stages.map((stage) => e$3("li", { key: stage.id }, stage.id + " · " + stage.profile + " · " + stage.objective + (stage.next ? " · 下一步 " + stage.next : "") + (stage.onChangesRequested ? " · 退回 " + stage.onChangesRequested : ""))))) : null, error ? e$3("p", {
 				className: "ltr-error",
@@ -5453,7 +5553,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 .ltr-task-filter{display:flex;align-items:center;gap:8px;margin:16px 0}.ltr-task-filter input,.ltr-task-filter select{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.ltr-task-filter input{min-width:260px}.ltr-task-filter .ltr-check{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px}.ltr-task-filter .ltr-check input{min-width:0;margin:0}
 .ltr-task-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0;border-top:1px solid var(--dsw-alias-border-l1)}.ltr-task-list button{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;align-items:center;width:100%;min-height:54px;padding:10px 4px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;text-align:left}.ltr-task-list button:hover{background:var(--dsw-alias-interactive-bg-hover)}.ltr-task-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.ltr-task-list small{overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-empty-task-list{margin:0;padding:18px 4px;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .ltr-strip{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));height:36px;margin:0 auto 8px;padding:4px 5px 4px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-specific-tip);color:var(--dsw-alias-label-primary)}.ltr-strip-glyph{color:var(--dsw-alias-label-tertiary)}.ltr-strip-label{flex:none;font-size:13px;font-weight:500}.ltr-strip-objective{flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;text-align:left;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.ltr-strip-progress{flex:0 1 auto;min-width:0;max-width:38%;overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-strip-actions{display:flex;gap:3px}.ltr-icon-button{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.ltr-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ltr-icon-button:disabled{opacity:.4;cursor:default}
-.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-identity{flex:1;min-width:0}.ltr-cockpit-identity-row{display:flex;align-items:center;gap:8px;min-width:0}.ltr-cockpit-identity-row .ltr-goal-objective{flex:1;min-width:0}.ltr-goal-objective{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{flex:none;padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-cockpit-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
+.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-identity{flex:1;min-width:0}.ltr-cockpit-identity-row{display:flex;align-items:center;gap:8px;min-width:0}.ltr-cockpit-identity-row .ltr-goal-objective{flex:1;min-width:0}.ltr-goal-objective{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{flex:none;padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-cockpit-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.ltr-workflow-definition{margin:8px 0;font-size:12px;color:var(--dsw-alias-label-secondary)}.ltr-workflow-definition ul{margin:6px 0;padding-inline-start:20px}
 .ltr-cockpit-main{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;height:320px;margin-top:16px}.ltr-dag-wrap{display:flex;flex-direction:column;min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;flex:1;min-height:0;width:100%;height:auto;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-cockpit-inspector{display:flex;flex-direction:column;min-height:0;overflow:hidden}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-cockpit-events{flex:1;min-height:0;overflow-y:auto}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-main{grid-template-columns:1fr;height:420px}.ltr-cockpit-inspector{display:none}.ltr-modal{width:calc(100vw - 20px);margin:0 10px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
 `;
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime\"]")) {
@@ -5551,99 +5651,6 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const spec = typeof slots?.spec === "function" ? slots.spec("conversation.session.top") : void 0;
 			if (spec?.kind !== "list" || spec.scope !== "session") throw new Error("当前 DSH 缺少会话顶部插槽 conversation.session.top；请升级 DSH 后再加载 long-task-runtime 插件。");
 		}
-		const descriptor = (method, schema) => ({
-			id: `@deepseek-ai/dsh-long-task-runtime#longTasks/${method}`,
-			service: "longTasks",
-			namespace: "longTasks",
-			method,
-			invocation: { kind: "direct" },
-			parameters: [{
-				name: "input",
-				wire: "input",
-				source: "json",
-				codec: {
-					mode: "strict",
-					typeSymbol: method,
-					schema
-				}
-			}],
-			result: {
-				mode: "strict",
-				typeSymbol: method,
-				schema: unknown()
-			}
-		});
-		const longTaskRemote = {
-			package: "@deepseek-ai/dsh-long-task-runtime",
-			descriptors: [
-				descriptor("listTasks", object({
-					cursor: number().optional(),
-					filter: object({
-						state: string().optional(),
-						query: string().optional(),
-						archived: boolean().optional(),
-						sessionId: string().optional()
-					}).optional()
-				}).optional()),
-				descriptor("getTask", object({ taskId: string() })),
-				descriptor("getTaskGraph", object({
-					taskId: string(),
-					revision: number().optional()
-				})),
-				descriptor("listTaskEvents", object({
-					taskId: string(),
-					cursor: number().optional(),
-					taskNodeId: string().optional()
-				})),
-				descriptor("getCurrentTaskForSession", object({ sessionId: string() })),
-				descriptor("updateTask", object({
-					taskId: string(),
-					expectedRevision: number(),
-					action: _enum([
-						"confirm",
-						"resume",
-						"pause",
-						"cancel"
-					]),
-					sessionId: string().optional(),
-					workspaceScope: string().optional(),
-					recoveryResolution: _enum(["retry", "confirmed_succeeded"]).optional()
-				})),
-				descriptor("attachCurrentSession", object({
-					taskId: string(),
-					sessionId: string(),
-					workspaceScope: string().optional()
-				})),
-				descriptor("setCurrentSession", object({
-					taskId: string(),
-					sessionId: string(),
-					workspaceScope: string().optional()
-				})),
-				descriptor("clearCurrentSession", object({ sessionId: string() })),
-				descriptor("rejectReplan", object({
-					taskId: string(),
-					expectedRevision: number()
-				})),
-				descriptor("editTaskGoal", object({
-					taskId: string(),
-					expectedRevision: number(),
-					objective: string(),
-					reason: string(),
-					sessionId: string().optional()
-				})),
-				descriptor("acceptReplan", object({
-					taskId: string(),
-					expectedRevision: number(),
-					sessionId: string().optional()
-				})),
-				descriptor("archiveTask", object({
-					taskId: string(),
-					expectedRevision: number()
-				})),
-				descriptor("restoreTask", object({ taskId: string() })),
-				descriptor("getTaskNavigation", object({ taskId: string() }))
-			]
-		};
 		async function apply(ctx) {
 			ensureSessionTopSlot(ctx.slots);
 			await ctx.remote.$mount(longTaskRemote);

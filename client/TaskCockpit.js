@@ -123,7 +123,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...actionButtons,
     ),
-    orchestration ? e('details', { className: 'ltr-plan-hint', open: task.state === 'AWAITING_CONFIRMATION' },
+    orchestration ? e('details', { className: 'ltr-workflow-definition', open: task.state === 'AWAITING_CONFIRMATION' },
       e('summary', null, orchestration.mode === 'discussion' ? '讨论流程' : '工作流定义'),
       orchestration.mode === 'discussion'
         ? e('p', null, orchestration.rounds + ' 轮 · ' + orchestration.participants.map(item => typeof item === 'string' ? item : item.id).join(' → ') + ' · 总结 ' + (typeof orchestration.moderator === 'string' ? orchestration.moderator : orchestration.moderator.id))

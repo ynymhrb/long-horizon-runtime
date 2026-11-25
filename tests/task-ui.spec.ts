@@ -5,7 +5,7 @@ import { LongTaskRuntime } from '../src/runtime.js'
 import { TaskControlApi } from '../src/task-api.js'
 import { TaskUiApi } from '../src/task-ui-api.js'
 import type { ExecutionAdapter, PlannerAdapter } from '../src/adapters.js'
-import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import { longTaskRemote } from '../client/remote-contract.js'
 import { LongTaskRemote } from '../src/remote.js'
 import { Context } from '@deepseek-ai/cordis'
 
@@ -134,7 +134,9 @@ test('task overview defaults to the one task current for its conversation', asyn
 })
 
 test('declares the Task UI query methods on the DSH remote service', () => {
-  const methods = remoteMethods(new LongTaskRemote(new Context(), {} as LongTaskRuntime))
+  const service = new LongTaskRemote(new Context(), {} as LongTaskRuntime)
+  const methods = longTaskRemote.descriptors
+  for (const descriptor of methods) expect(typeof Reflect.get(service, descriptor.implementation ?? descriptor.method)).toBe('function')
   expect(methods.map(method => method.method)).toEqual(expect.arrayContaining([
     'listTasks', 'getTask', 'getTaskGraph', 'listTaskEvents', 'getCurrentTaskForSession', 'updateTask', 'attachCurrentSession', 'setCurrentSession', 'clearCurrentSession', 'rejectReplan',
   ]))
