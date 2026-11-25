@@ -80,7 +80,7 @@ export class TaskControlApi {
     let task: GoalView
     const authority = invocation.authority ?? 'agent'
     switch (request.action) {
-      case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal); break
+      case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal, authority); break
       case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal, authority); break
       case 'cancel': task = this.runtime.cancelGoal(request.taskId); break
       case 'pause': task = this.pause(request.taskId, authority); break
@@ -96,11 +96,18 @@ export class TaskControlApi {
     const task = await this.runtime.editOriginalGoal(request.taskId, { objective: request.objective, reason: request.reason }, invocation.parent, invocation.signal)
     return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
   }
+  proposeWorkflow(request: { readonly taskId: string; readonly expectedRevision: number; readonly spec: unknown; readonly reason: string }, invocation: TaskInvocation): TaskUpdateResult {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    return { kind: 'applied', task: this.runtime.proposeWorkflow(request.taskId, request.spec, request.reason, request.expectedRevision) }
+  }
+
   async acceptReplan(request: { readonly taskId: string; readonly expectedRevision: number }, invocation: TaskInvocation): Promise<TaskUpdateResult> {
     const current = this.requireTask(request.taskId)
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
-    const task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal)
+    const task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal, invocation.authority ?? 'agent')
     const bound = this.bindOnContinue(request.taskId, 'confirm', invocation)
     return { kind: 'applied', task: this.advance(request.taskId, (bound ?? task).controlRevision) }
   }

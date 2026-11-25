@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -7,6 +9,15 @@ import { TaskControlApi } from './task-api.js'
 import { filterRoutingTools, routingPolicyText, type RoutingMode } from './routing-policy.js'
 import { normalizeExecutionProfiles, ProfileRouter, type ExecutionProfile, type ExecutionProfileSet } from './execution-profiles.js'
 import { ExecutionPolicy, type PolicyMode } from './execution-policy.js'
+import { CallRouter, type ModelEndpoint, type ToolConcurrency } from './call-routing.js'
+import { WorkerPool } from './worker-pool.js'
+import { createProcessWorker, type ProcessWorkerConfig } from './process-worker.js'
+import { parseWorkflow, type WorkflowSpec } from './workflow.js'
+
+export type WorkerConfig = (
+  | { readonly kind: 'dsh'; readonly modelRole?: string }
+  | ProcessWorkerConfig
+) & { readonly id: string; readonly maxConcurrent: number; readonly capabilities?: readonly string[] }
 
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
@@ -15,6 +26,11 @@ export interface Config {
   readonly plannerProvider: string
   readonly executionProvider: string
   readonly maxConcurrentTasks?: number
+  readonly workers?: readonly WorkerConfig[]
+  readonly modelEndpoints?: readonly ModelEndpoint[]
+  readonly toolConcurrency?: readonly ToolConcurrency[]
+  readonly workflowTemplates?: Readonly<Record<string, WorkflowSpec>>
+  readonly defaultWorkflow?: string
   readonly defaultPlanningMode?: 'auto' | 'require_confirmation'
   readonly executionTimeoutMs?: number
   /** Maximum no-progress interval; legacy executionTimeoutMs remains accepted for compatibility. */
@@ -36,8 +52,9 @@ export interface Config {
   readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime
 }
 
-interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes' | 'executionProfiles' | 'defaultExecutionProfile' | 'policyMode'> {
+interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes' | 'executionProfiles' | 'defaultExecutionProfile' | 'policyMode' | 'workflowTemplates'> {
   readonly maxConcurrentTasks: number
+  readonly workflowTemplates: ReadonlyMap<string, WorkflowSpec>
   readonly defaultPlanningMode: 'auto' | 'require_confirmation'
   readonly executionTimeoutMs: number
   readonly idleTimeoutMs: number
@@ -59,17 +76,33 @@ export const inject = ['tools', 'subagents', 'systemPrompt']
 /** Mount the runtime service and six stateless model-facing controls. */
 export function apply(ctx: Context, input: Config): void {
   const config = resolveConfig(input)
+  const router = (config.modelEndpoints?.length || config.toolConcurrency?.length)
+    ? new CallRouter(config.modelEndpoints ?? [], config.toolConcurrency ?? []) : undefined
   const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }
-  const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile })
-  const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.maxWallTimeMs, ...profile })
+  const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile, ...(router === undefined ? {} : { callRouter: router }) })
+  const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.maxWallTimeMs, ...profile, ...(router === undefined ? {} : { callRouter: router }) })
+  const declaredWorkers = config.workers ?? []
+  const workers = declaredWorkers.some(worker => worker.id === 'dsh')
+    ? declaredWorkers : [{ kind: 'dsh' as const, id: 'dsh', maxConcurrent: config.maxConcurrentTasks }, ...declaredWorkers]
+  const pool = new WorkerPool(config.maxConcurrentTasks, workers.map(worker => ({
+    id: worker.id, maxConcurrent: worker.maxConcurrent,
+    ...(worker.kind === 'dsh' ? { adapter: execution } : { adapter: createProcessWorker(worker), workspaceKey: processWorkspaceKey(worker.cwd) }),
+  })))
+  router?.install(ctx)
   const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
+    databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, workerPool: pool, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
   })
   ctx.provide('longTaskRuntime', runtime)
   ctx.systemPrompt.section({
     name: 'long-task:routing',
     order: 130,
-    text: assembly => routingPolicyText(assembly.agent),
+    text: assembly => {
+      const base = routingPolicyText(assembly.agent)
+      if (base === '') return base
+      const templates = [...config.workflowTemplates.keys()].join(', ') || '无'
+      const profiles = [...config.executionProfiles.profiles.keys()].join(', ')
+      return base + '\n用户指定流程、评审退回或轮流讨论时，long_task_create 接受 workflow_template 或 orchestration_json。只使用已注册的执行配置：' + profiles + '。流程模板：' + templates + '。'
+    },
   })
   if (config.routingMode === 'strict') {
     ctx.on('system-prompt/assemble', async (assembly, context, next) => {
@@ -104,13 +137,17 @@ export function apply(ctx: Context, input: Config): void {
       description: { type: 'string' },
       constraints: { type: 'array', items: { type: 'string' } },
       planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] },
+      workflow_template: { type: 'string', description: '已注册的流程模板 ID，dynamic 表示使用动态规划' },
+      orchestration_json: { type: 'string', description: '完整流程 JSON。mode=workflow 时包含 entry 与 stages（id/objective/profile/next/onChangesRequested/maxVisits/sideEffectClass）；mode=discussion 时包含 participants（执行配置 ID 或含 id/profile/instruction 的角色对象）、rounds、moderator 和可选 convergence。与 workflow_template 二选一。' },
     }, output: toolOutput,
     execute: (args, exec) => {
       const agent = requireParent(exec.agent)
       return toolValue(() => withDshParent(agent, async () => {
         const objective = createObjective(args)
+        const orchestration = resolveOrchestration(config, args.workflow_template, args.orchestration_json)
         const task = await taskApi.create({
           objective,
+          ...(orchestration === undefined ? {} : { orchestration }),
           ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
           planningMode: args.planning_mode ?? config.defaultPlanningMode,
           ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
@@ -141,6 +178,23 @@ export function apply(ctx: Context, input: Config): void {
     })),
   }))
   ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution in the background; returns immediately with the running task, poll long_task_status for progress.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined) taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = runtime.confirmGoal(args.goal_id); runtime.startBackground(args.goal_id, exec.agent); return goal })) }))
+  ctx.tools.register(defineTool({
+    name: 'long_task_propose_workflow',
+    description: '为已暂停的配置流程提出新修订，保留所有已完成阶段。请用户在任务区确认。',
+    parameters: {
+      goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true },
+      reason: { type: 'string', required: true }, workflow_template: { type: 'string' }, orchestration_json: { type: 'string' },
+    },
+    output: toolOutput,
+    execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => {
+      if (args.workflow_template === undefined && args.orchestration_json === undefined) throw new Error('请提供新流程')
+      const spec = resolveOrchestration(config, args.workflow_template, args.orchestration_json)
+      if (spec === undefined) throw new Error('流程修订需要声明式流程或讨论定义')
+      return taskApi.proposeWorkflow({ taskId: args.goal_id, expectedRevision: args.expected_revision, spec, reason: args.reason }, {
+        ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
+      })
+    })),
+  }))
   ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }))
   ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal and continue its execution in the background; returns immediately. An indeterminate external effect requires an explicit resolution. A goal paused by the user must be resumed by the user from the task area; this call is rejected in that case.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined) taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = await runtime.resumeGoal(args.goal_id, undefined, args.recovery_resolution); runtime.startBackground(args.goal_id, exec.agent); return goal })) }))
   ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }))
@@ -229,11 +283,57 @@ function resolveConfig(config: Config): ResolvedConfig {
   if (defaultPlanningMode !== 'auto' && defaultPlanningMode !== 'require_confirmation') throw new TypeError('defaultPlanningMode must be auto or require_confirmation')
   if (routingMode !== 'advisory' && routingMode !== 'strict') throw new TypeError('routingMode must be advisory or strict')
   if (policyMode !== 'fixed' && policyMode !== 'evaluated') throw new TypeError('policyMode must be fixed or evaluated')
+  const configuredProfiles: readonly ExecutionProfile[] = config.executionProfiles ?? [{
+    id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }),
+  }]
+  const workerMap = new Map((config.workers ?? []).map(worker => [worker.id, worker]))
+  for (const worker of workerMap.values()) if (!['dsh', 'codex-cli', 'claude-cli', 'custom-exec'].includes(worker.kind)) throw new Error('未知 Worker 类型：' + worker.kind)
+  const aliases = [...workerMap.values()].filter(worker => !configuredProfiles.some(profile => profile.id === worker.id))
+    .map(worker => ({ id: worker.id, providerName: config.executionProvider, workerIds: [worker.id], ...(worker.kind === 'dsh' && worker.modelRole !== undefined ? { modelRole: worker.modelRole } : {}), ...(worker.capabilities === undefined ? {} : { capabilities: worker.capabilities }) }))
   const executionProfiles = normalizeExecutionProfiles({
     ...(config.defaultExecutionProfile === undefined ? {} : { defaultProfile: config.defaultExecutionProfile }),
-    profiles: config.executionProfiles ?? [{ id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }) }],
+    profiles: [...configuredProfiles, ...aliases],
   })
-  return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode, policyMode, executionProfiles }
+  for (const profile of executionProfiles.profiles.values()) {
+    if (profile.modelRole !== undefined && !config.modelEndpoints?.some(endpoint => endpoint.roles.includes(profile.modelRole!))) {
+      throw new Error('执行配置引用未注册的模型角色：' + profile.modelRole)
+    }
+    for (const id of profile.workerIds ?? ['dsh']) {
+      const worker = workerMap.get(id)
+      if (worker === undefined && id !== 'dsh') throw new Error('执行配置引用未知 Worker：' + id)
+      if (worker === undefined || worker.kind === 'dsh') continue
+      if (profile.modelRole !== undefined) throw new Error('外部 Worker 不支持插件的模型角色路由：' + id)
+      if ((profile.toolDeny?.length ?? 0) > 0) throw new Error('外部 Worker 无法应用 DSH 工具拒绝列表：' + id)
+      if (profile.capabilities?.some(capability => !worker.capabilities?.includes(capability)) === true) throw new Error('Worker 缺少执行配置声明的能力：' + id)
+    }
+  }
+  const profileIds = [...executionProfiles.profiles.keys()]
+  const workflowTemplates = new Map(Object.entries(config.workflowTemplates ?? {}).map(([id, value]) => {
+    if (id.trim() === '' || id === 'dynamic') throw new Error('无效的流程模板 ID：' + id)
+    return [id, parseWorkflow(value, profileIds)] as const
+  }))
+  if (config.defaultWorkflow !== undefined && config.defaultWorkflow !== 'dynamic' && !workflowTemplates.has(config.defaultWorkflow)) throw new Error('未知默认流程模板：' + config.defaultWorkflow)
+  return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode, policyMode, executionProfiles, workflowTemplates }
+}
+
+function resolveOrchestration(config: ResolvedConfig, requested?: string, json?: string): WorkflowSpec | undefined {
+  if (requested !== undefined && json !== undefined) throw new Error('workflow_template 和 orchestration_json 只能使用一个')
+  if (json !== undefined) {
+    if (json.length > 100_000) throw new Error('流程配置过长')
+    return parseWorkflow(JSON.parse(json), [...config.executionProfiles.profiles.keys()])
+  }
+  const id = requested ?? config.defaultWorkflow
+  if (id === undefined || id === 'dynamic') return undefined
+  const workflow = config.workflowTemplates.get(id)
+  if (workflow === undefined) throw new Error('未知流程模板：' + id)
+  return workflow
+}
+
+function processWorkspaceKey(cwd: string): string {
+  let path: string
+  try { path = realpathSync.native(cwd) }
+  catch { path = resolve(cwd) }
+  return process.platform === 'win32' ? path.toLowerCase() : path
 }
 
 function requiredText(value: string, name: string): void { if (value.trim().length === 0) throw new TypeError(`${name} must be non-empty`) }

@@ -14,7 +14,7 @@ Use exactly one goal system for one user objective. Never create a DSH native go
 export const CHILD_TASK_TOOL_DENY = [
   'long_task_create', 'long_task_get', 'long_task_update', 'long_task_confirm',
   'long_task_status', 'long_task_resume', 'long_task_cancel', 'long_task_events',
-  'long_task_attempt_sessions', 'long_task_invalidate', 'long_task_edit_goal',
+  'long_task_attempt_sessions', 'long_task_invalidate', 'long_task_edit_goal', 'long_task_propose_workflow',
   'long_task_accept_replan', 'create_goal', 'get_goal', 'update_goal',
 ] as const
 

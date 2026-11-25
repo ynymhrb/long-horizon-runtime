@@ -15,7 +15,7 @@ export function cockpitDataState(task, graph) {
 
 /** Original-goal revisions require a live, non-terminal task. */
 export function canEditOriginalGoal(task) {
-  return task !== undefined && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.state)
+  return task != null && task.orchestration === undefined && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.state)
 }
 
 /**

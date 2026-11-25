@@ -1,11 +1,13 @@
 import { type ExecutionAdapter, type PlannerAdapter } from './adapters.js';
 import type { GoalState, GraphMutation, InterruptionCause, PauseOrigin, RecoveryPolicyOutcome } from './domain.js';
 import { RuntimeEventStore, type TaskSessionLink } from './event-store.js';
+import type { WorkerPool } from './worker-pool.js';
 import { type RecoveryResult } from './scheduler.js';
 import type { ProfileRouter } from './execution-profiles.js';
 import type { ExecutionPolicy } from './execution-policy.js';
 import type { MemoryRetriever } from './memory-retrieval.js';
 import type { BudgetLimit } from './budgets.js';
+import { type WorkflowSpec } from './workflow.js';
 export type RecoveryResolution = 'retry' | 'confirmed_succeeded';
 export interface OriginalGoalEdit {
     readonly objective: string;
@@ -14,6 +16,7 @@ export interface OriginalGoalEdit {
 }
 export interface CreateGoalRequest {
     readonly objective: string;
+    readonly orchestration?: WorkflowSpec;
     readonly constraints?: readonly string[];
     readonly planningMode?: 'auto' | 'require_confirmation';
     readonly workspaceScope?: string;
@@ -50,9 +53,12 @@ export interface GoalView {
     readonly recentEvents: readonly import('./event-store.js').RuntimeEvent[];
     readonly availableActions: readonly string[];
     readonly requiresSessionDriver: boolean;
+    readonly orchestration?: WorkflowSpec;
+    readonly proposedOrchestration?: WorkflowSpec;
 }
 export interface RuntimeOptions {
     readonly store?: RuntimeEventStore;
+    readonly workerPool?: WorkerPool;
     readonly databasePath?: string;
     readonly artifactDirectory?: string;
     readonly artifactInlineLimitBytes?: number;
@@ -83,15 +89,17 @@ export interface RuntimeOptions {
 export declare class LongTaskRuntime {
     private readonly planner;
     readonly store: RuntimeEventStore;
+    private closed;
     private readonly ownsStore;
     private readonly artifactStore;
     private readonly scheduler;
     private readonly livenessCheckIntervalMs;
     private readonly now;
     private readonly goalBudget;
+    private readonly profileRouter;
     constructor(planner: PlannerAdapter, execution: ExecutionAdapter, options?: number | RuntimeOptions);
     createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
-    confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
+    confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal, authority?: PauseOrigin): Promise<GoalView>;
     getStatus(goalId: string): GoalView | undefined;
     reportAttemptProgress(sessionId: string, attemptId: string, phase: string, message: string, completed?: number, total?: number): void;
     /** Profile-local task inventory for the cross-session Task Area. */
@@ -124,6 +132,13 @@ export declare class LongTaskRuntime {
     mutatePlan(goalId: string, mutation: GraphMutation): GoalView;
     proposeReplan(goalId: string, mutation: GraphMutation): GoalView;
     rejectReplan(goalId: string): GoalView;
+    proposeWorkflow(goalId: string, requested: unknown, reason: string, expectedRevision: number): GoalView;
+    private workflow;
+    private proposedWorkflow;
+    private workflowVerdict;
+    private reconcileFinishedWorkflow;
+    /** Called inside the scheduler's end-of-round transaction. */
+    private advanceWorkflow;
     /** Advance at most one round repeatedly, used by non-DSH callers and tests with a live parent. */
     runUntilIdle(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal): Promise<void>;
     private readonly background;
@@ -141,6 +156,7 @@ export declare class LongTaskRuntime {
     close(): void;
     private scheduleQuotaRecovery;
     private cancelQuotaRecovery;
+    private assertPlannerManaged;
     private requireGoal;
     private view;
 }

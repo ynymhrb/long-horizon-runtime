@@ -1,3 +1,4 @@
+import type { WorkerPool } from './worker-pool.js';
 import { type ExecutionAdapter } from './adapters.js';
 import { type TaskNode } from './domain.js';
 import { RuntimeEventStore } from './event-store.js';
@@ -50,6 +51,8 @@ export interface SchedulerOptions {
     readonly memoryRetriever?: MemoryRetriever;
     readonly maxMemoryItems?: number;
     readonly acceptanceEngine?: AcceptanceEngine;
+    readonly workerPool?: WorkerPool;
+    readonly advanceWorkflow?: (goalId: string) => boolean;
 }
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
 export declare class Scheduler {
@@ -71,7 +74,11 @@ export declare class Scheduler {
     private readonly executionPolicy;
     private readonly memoryRetriever;
     private readonly maxMemoryItems;
+    private readonly workerPool;
+    private readonly advanceWorkflow;
     private readonly acceptanceEngine;
+    private closed;
+    private readonly queued;
     private readonly aborters;
     /** Resolves an in-process dispatch when its durable lease is terminalized. */
     private readonly livenessSettlers;
@@ -80,6 +87,7 @@ export declare class Scheduler {
     constructor(adapter: ExecutionAdapter, options: number | SchedulerOptions);
     /** Dispatch one bounded ready set. Legacy map mode is retained for a narrow unit-test boundary. */
     runRound(goalId: string, legacyTasks?: Map<string, TaskNode>, executionParent?: unknown, executionSignal?: AbortSignal): Promise<boolean>;
+    close(): void;
     /** Reconcile durable leases even when a provider promise or host process is lost. */
     reconcileLiveness(goalId?: string): void;
     /** Accept a bounded heartbeat only from the child session that owns the running attempt. */
@@ -93,6 +101,9 @@ export declare class Scheduler {
     pause(goalId: string): void;
     /** Milliseconds until the earliest pending retry for this goal, or undefined when none is waiting. */
     nextRetryDelayMs(goalId: string): number | undefined;
+    private interruptedAttempt;
+    private cancelAttempt;
+    private abortQueued;
     private key;
     private inBackoff;
     private backoffMs;
@@ -100,6 +111,7 @@ export declare class Scheduler {
     private dependenciesSatisfied;
     private context;
     private executeOne;
+    private executeAssigned;
     private terminalFailure;
     private runLegacyRound;
     private setState;

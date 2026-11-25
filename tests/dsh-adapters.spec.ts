@@ -374,3 +374,21 @@ describe('DSH adapters', () => {
     expect(disposed).toBe(true)
   }, 1_000)
 })
+
+test('DSH 节点的写权限提示匹配副作用类别', async () => {
+  const personas: string[] = []
+  const adapter = createDshExecutionAdapter({
+    async start(_provider: string, request: { persona: string }) {
+      personas.push(request.persona)
+      return { id: 'child', result: Promise.resolve({ stopReason: 'completed', output: [], structured: { summary: 'done', artifacts: [], evidence: [] } }), async dispose() {} }
+    },
+  } as never, { providerName: 'worker' })
+  const base = { attemptId: 'a', taskId: 't', signal: new AbortController().signal, context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] } }
+  await withDshParent({ id: 'parent' } as never, async () => {
+    await adapter.execute({ ...base, sideEffectClass: 'read_only' })
+    await adapter.execute({ ...base, sideEffectClass: 'idempotent' })
+  })
+  expect(personas[0]).toContain('never modify tracked source')
+  expect(personas[1]).toContain('may edit workspace files explicitly required')
+  expect(personas[1]).not.toContain('never modify tracked source')
+})

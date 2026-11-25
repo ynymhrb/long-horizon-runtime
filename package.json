@@ -45,6 +45,7 @@
     "dist",
     "client",
     "cordis.patch.yml",
+    "examples/orchestration.cordis.example.yml",
     "README.md"
   ],
   "engines": {

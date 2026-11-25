@@ -61,6 +61,8 @@ export interface ExecutionAdapter {
         readonly timeoutMs?: number;
         readonly profile?: import('./execution-profiles.js').ResolvedExecutionProfile; /** Called as soon as a child session exists, before its result settles. */
         readonly onSessionId?: (dshSessionId: string) => void;
+        readonly onExternalSessionId?: (sessionId: string) => void;
+        readonly onProgress?: (message: string) => void;
     }): Promise<ExecutionResult>;
     cancel?(attemptId: string): void;
     /** Whether this process still owns a published, unsettled child session. */

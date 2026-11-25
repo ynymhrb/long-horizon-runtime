@@ -6,6 +6,7 @@ import type { SubagentRun, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 import { V1_ARTIFACT_TYPES } from './domain.js'
 import { CHILD_TASK_TOOL_DENY } from './routing-policy.js'
 import type { ExecutionAdapter, ExecutionResult, PlannerAdapter } from './adapters.js'
+import type { CallRouter, ModelRole } from './call-routing.js'
 import type { PlanDraft } from './domain.js'
 
 const parents = new AsyncLocalStorage<Agent>()
@@ -24,6 +25,8 @@ function currentParent(): Agent {
 
 export interface DshAdapterOptions {
   readonly providerName: string
+  readonly callRouter?: CallRouter
+  readonly modelRole?: ModelRole
   readonly agentOptions?: Record<string, unknown>
   readonly timeoutMs?: number
   readonly persona?: string
@@ -67,7 +70,7 @@ export function createDshPlannerAdapter(subagents: Pick<SubagentRuntime, 'start'
   requireProviderName(options.providerName)
   return {
     async plan(input): Promise<PlanDraft> {
-      const plannerOptions: DshAdapterOptions = { ...options, persona: plannerPersona(input), toolAllow: [] }
+      const plannerOptions: DshAdapterOptions = { ...options, modelRole: 'planner', persona: plannerPersona(input), toolAllow: [] }
       const result = await runStructured(subagents, plannerOptions, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal)
       if (result.stopReason !== 'completed') throw new Error(`DSH planner stopped: ${result.stopReason}`)
       const value = objectValue(result.value, 'planner')
@@ -91,7 +94,7 @@ export function createDshExecutionAdapter(subagents: Pick<SubagentRuntime, 'star
       let settled: { readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }
       let dshSessionId: string | undefined
       try {
-        const profileOptions: DshAdapterOptions = { ...options, ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }), persona: executionPersona(input) }
+        const profileOptions: DshAdapterOptions = { ...options, modelRole: input.profile?.modelRole ?? 'execution', ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }), persona: executionPersona(input) }
         try { settled = await runStructured(subagents, profileOptions, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId) }, timeoutMs) }
         catch (error) {
         // The seam could not represent the outcome as a stop reason: an
@@ -139,6 +142,15 @@ async function runStructured(
   hardTimeoutMs?: number,
 ): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }> {
   const parent = currentParent()
+  const execute = () => startStructured(subagents, options, parent, label, prompt, outputSchema, signal, onStarted, hardTimeoutMs)
+  return options.callRouter === undefined || options.modelRole === undefined ? execute() : options.callRouter.run(options.modelRole, String(parent.id), execute)
+}
+
+async function startStructured(
+  subagents: Pick<SubagentRuntime, 'start'>, options: DshAdapterOptions, parent: Agent,
+  label: string, prompt: string, outputSchema: Record<string, unknown>, signal: AbortSignal,
+  onStarted?: (dshSessionId: string) => void, hardTimeoutMs?: number,
+): Promise<{ readonly stopReason: string; readonly value: unknown; readonly dshSessionId: string; readonly failureDiagnostic?: string }> {
   const agentOptions = mergeChildAgentOptions(parent, options.agentOptions)
   const run = await subagents.start(options.providerName, {
     label,
@@ -238,7 +250,11 @@ function plannerPersona(input: Parameters<PlannerAdapter['plan']>[0]): string {
 }
 
 function executionPrompt(input: Parameters<ExecutionAdapter['execute']>[0]): string {
-  return `Execute the assigned task. Invoke the provided structured_output tool exactly once when finished: it is the only completion path. Supply its arguments as the required result object. Do not write Markdown, prose, JSON, or a proposed tool call in text. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nDo not call long_task lifecycle controls: the runtime records progress and completion itself.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`
+  const writes = input.sideEffectClass !== undefined && input.sideEffectClass !== 'read_only'
+  const workspaceDiscipline = writes
+    ? 'You may edit workspace files explicitly required by the assigned task. Keep every change within the task scope and the active sandbox. Do not change host policy or credentials.'
+    : 'Write task outputs only under the session workspace or a disposable temporary directory you create. For a read-only task, never modify tracked source, configuration, dependency manifests, or files outside the task scope.'
+  return `Execute the assigned task. Invoke the provided structured_output tool exactly once when finished: it is the only completion path. Supply its arguments as the required result object. Do not write Markdown, prose, JSON, or a proposed tool call in text. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: ${workspaceDiscipline}\nDo not call long_task lifecycle controls: the runtime records progress and completion itself.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`
 }
 
 function executionPersona(input: Parameters<ExecutionAdapter['execute']>[0]): string {

@@ -1,6 +1,8 @@
 export interface ExecutionProfile {
     readonly id: string;
     readonly providerName: string;
+    readonly workerIds?: readonly string[];
+    readonly modelRole?: string;
     readonly capabilities?: readonly string[];
     readonly toolDeny?: readonly string[];
     readonly timeoutMs?: number;
@@ -9,6 +11,8 @@ export interface ExecutionProfile {
 export interface ResolvedExecutionProfile {
     readonly id: string;
     readonly providerName: string;
+    readonly workerIds?: readonly string[];
+    readonly modelRole?: string;
     readonly capabilities: readonly string[];
     readonly toolDeny: readonly string[];
     readonly timeoutMs: number;

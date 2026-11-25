@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { apply } from '../src/tools.js'
-import { LongTaskRuntime } from '../src/runtime.js'
+import { LongTaskRuntime, type GoalView } from '../src/runtime.js'
 import { filterRoutingTools, routingPolicyText } from '../src/routing-policy.js'
 
 describe('long-task routing policy', () => {
@@ -51,8 +51,8 @@ describe('Cordis plugin surface', () => {
     expect([...registered.keys()].sort()).toEqual([
       'long_task_accept_replan', 'long_task_attempt_sessions', 'long_task_cancel', 'long_task_confirm', 'long_task_create',
       'long_task_edit_goal',
-      'long_task_events', 'long_task_extend_budget', 'long_task_get', 'long_task_invalidate', 'long_task_record_memory_feedback',
-      'long_task_report_progress', 'long_task_resume', 'long_task_status', 'long_task_update',
+      'long_task_events', 'long_task_extend_budget', 'long_task_get', 'long_task_invalidate', 'long_task_propose_workflow',
+      'long_task_record_memory_feedback', 'long_task_report_progress', 'long_task_resume', 'long_task_status', 'long_task_update',
     ])
     await expect(registered.get('long_task_create')!.execute({ objective: 'ship' }, { signal: new AbortController().signal }))
       .rejects.toThrow('current parent Agent')
@@ -116,4 +116,30 @@ describe('Cordis plugin surface', () => {
     expect(runtime.store.getCurrentTaskForSession('next')?.taskId).toBe(created.id)
     expect(runtime.getStatus(created.id)?.sessionLinks).toContainEqual({ sessionId: 'next', kind: 'attached' })
   })
+})
+
+test('聊天工具接受已注册模板和内联讨论配置', async () => {
+  const registered = new Map<string, { execute(args: Record<string, unknown>, exec: { agent: { id: string }; signal: AbortSignal }): Promise<GoalView> }>()
+  let runtime: LongTaskRuntime
+  const ctx = {
+    tools: { register(tool: { name: string; execute: never }) { registered.set(tool.name, tool); return () => {} } },
+    subagents: {},
+    provide(_name: string, value: LongTaskRuntime) { runtime = value },
+    effect() {},
+    systemPrompt: { section() {} },
+  }
+  apply(ctx as never, {
+    databasePath: ':memory:', artifactDirectory: 'artifacts', plannerProvider: 'spawn', executionProvider: 'spawn',
+    defaultPlanningMode: 'require_confirmation',
+    workflowTemplates: { single: { mode: 'workflow', entry: 'review', stages: [{ id: 'review', objective: '分析', profile: 'default' }] } },
+  })
+  try {
+    const create = registered.get('long_task_create')!
+    const exec = { agent: { id: 'root' }, signal: new AbortController().signal }
+    const first = await create.execute({ objective: '结果', workflow_template: 'single' }, exec)
+    expect(first.orchestration?.mode).toBe('workflow')
+    expect(first.state).toBe('AWAITING_CONFIRMATION')
+    const second = await create.execute({ objective: '讨论', orchestration_json: JSON.stringify({ mode: 'discussion', rounds: 2, participants: ['default', 'default'], moderator: 'default' }) }, exec)
+    expect(second.orchestration?.mode).toBe('discussion')
+  } finally { runtime!.close() }
 })

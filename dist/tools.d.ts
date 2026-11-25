@@ -4,6 +4,17 @@ import { LongTaskRuntime } from './runtime.js';
 import { type RoutingMode } from './routing-policy.js';
 import { type ExecutionProfile, type ExecutionProfileSet } from './execution-profiles.js';
 import { type PolicyMode } from './execution-policy.js';
+import { type ModelEndpoint, type ToolConcurrency } from './call-routing.js';
+import { type ProcessWorkerConfig } from './process-worker.js';
+import { type WorkflowSpec } from './workflow.js';
+export type WorkerConfig = ({
+    readonly kind: 'dsh';
+    readonly modelRole?: string;
+} | ProcessWorkerConfig) & {
+    readonly id: string;
+    readonly maxConcurrent: number;
+    readonly capabilities?: readonly string[];
+};
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
     readonly databasePath: string;
@@ -11,6 +22,11 @@ export interface Config {
     readonly plannerProvider: string;
     readonly executionProvider: string;
     readonly maxConcurrentTasks?: number;
+    readonly workers?: readonly WorkerConfig[];
+    readonly modelEndpoints?: readonly ModelEndpoint[];
+    readonly toolConcurrency?: readonly ToolConcurrency[];
+    readonly workflowTemplates?: Readonly<Record<string, WorkflowSpec>>;
+    readonly defaultWorkflow?: string;
     readonly defaultPlanningMode?: 'auto' | 'require_confirmation';
     readonly executionTimeoutMs?: number;
     /** Maximum no-progress interval; legacy executionTimeoutMs remains accepted for compatibility. */
@@ -33,8 +49,9 @@ export interface Config {
     /** Test/composition seam; normal deployments use the configured DSH adapters. */
     readonly runtimeFactory?: (planner: ReturnType<typeof createDshPlannerAdapter>, execution: ReturnType<typeof createDshExecutionAdapter>, config: ResolvedConfig) => LongTaskRuntime;
 }
-interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes' | 'executionProfiles' | 'defaultExecutionProfile' | 'policyMode'> {
+interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPlanningMode' | 'executionTimeoutMs' | 'idleTimeoutMs' | 'maxWallTimeMs' | 'retryPolicy' | 'artifactInlineLimitBytes' | 'executionProfiles' | 'defaultExecutionProfile' | 'policyMode' | 'workflowTemplates'> {
     readonly maxConcurrentTasks: number;
+    readonly workflowTemplates: ReadonlyMap<string, WorkflowSpec>;
     readonly defaultPlanningMode: 'auto' | 'require_confirmation';
     readonly executionTimeoutMs: number;
     readonly idleTimeoutMs: number;

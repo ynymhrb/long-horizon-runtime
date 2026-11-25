@@ -39,6 +39,14 @@ export class RuntimeEventStore {
                 projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) }, row.seq);
         });
     }
+    nextPlanRevision(goalId) {
+        const row = this.db.prepare('SELECT COALESCE(MAX(revision), 0) AS revision FROM plan_revisions WHERE goal_id = ?').get(goalId);
+        return row.revision + 1;
+    }
+    latestEventPayload(goalId, type) {
+        const row = this.db.prepare('SELECT payload_json FROM runtime_events WHERE goal_id = ? AND type = ? ORDER BY seq DESC LIMIT 1').get(goalId, type);
+        return row === undefined ? undefined : JSON.parse(row.payload_json);
+    }
     getGoal(goalId) {
         const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, pause_origin, archived_at FROM goals WHERE id = ?').get(goalId);
         return row === undefined ? undefined : goalProjection(row);

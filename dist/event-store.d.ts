@@ -181,6 +181,8 @@ export declare class RuntimeEventStore {
     transaction<T>(work: () => T): T;
     /** Rebuild every owned projection from ordered append-only events. */
     rebuild(): void;
+    nextPlanRevision(goalId: string): number;
+    latestEventPayload(goalId: string, type: string): Record<string, unknown> | undefined;
     getGoal(goalId: string): GoalProjection | undefined;
     getQuotaRecovery(goalId: string): QuotaRecovery | undefined;
     /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */

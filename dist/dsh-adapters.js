@@ -49,7 +49,7 @@ export function createDshPlannerAdapter(subagents, options) {
     requireProviderName(options.providerName);
     return {
         async plan(input) {
-            const plannerOptions = { ...options, persona: plannerPersona(input), toolAllow: [] };
+            const plannerOptions = { ...options, modelRole: 'planner', persona: plannerPersona(input), toolAllow: [] };
             const result = await runStructured(subagents, plannerOptions, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal);
             if (result.stopReason !== 'completed')
                 throw new Error(`DSH planner stopped: ${result.stopReason}`);
@@ -73,7 +73,7 @@ export function createDshExecutionAdapter(subagents, options) {
             let settled;
             let dshSessionId;
             try {
-                const profileOptions = { ...options, ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }), persona: executionPersona(input) };
+                const profileOptions = { ...options, modelRole: input.profile?.modelRole ?? 'execution', ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }), persona: executionPersona(input) };
                 try {
                     settled = await runStructured(subagents, profileOptions, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId); }, timeoutMs);
                 }
@@ -119,6 +119,10 @@ export function createDshExecutionAdapter(subagents, options) {
 }
 async function runStructured(subagents, options, label, prompt, outputSchema, signal = new AbortController().signal, onStarted, hardTimeoutMs) {
     const parent = currentParent();
+    const execute = () => startStructured(subagents, options, parent, label, prompt, outputSchema, signal, onStarted, hardTimeoutMs);
+    return options.callRouter === undefined || options.modelRole === undefined ? execute() : options.callRouter.run(options.modelRole, String(parent.id), execute);
+}
+async function startStructured(subagents, options, parent, label, prompt, outputSchema, signal, onStarted, hardTimeoutMs) {
     const agentOptions = mergeChildAgentOptions(parent, options.agentOptions);
     const run = await subagents.start(options.providerName, {
         label,
@@ -222,7 +226,11 @@ function plannerPersona(input) {
     return `You are a JSON plan compiler. The following is your complete task and remains authoritative even after later workspace or runtime-context messages:\n${plannerPrompt(input)}\nDo not inspect the workspace, do not invoke tools, and produce the required structured plan immediately.`;
 }
 function executionPrompt(input) {
-    return `Execute the assigned task. Invoke the provided structured_output tool exactly once when finished: it is the only completion path. Supply its arguments as the required result object. Do not write Markdown, prose, JSON, or a proposed tool call in text. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nDo not call long_task lifecycle controls: the runtime records progress and completion itself.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`;
+    const writes = input.sideEffectClass !== undefined && input.sideEffectClass !== 'read_only';
+    const workspaceDiscipline = writes
+        ? 'You may edit workspace files explicitly required by the assigned task. Keep every change within the task scope and the active sandbox. Do not change host policy or credentials.'
+        : 'Write task outputs only under the session workspace or a disposable temporary directory you create. For a read-only task, never modify tracked source, configuration, dependency manifests, or files outside the task scope.';
+    return `Execute the assigned task. Invoke the provided structured_output tool exactly once when finished: it is the only completion path. Supply its arguments as the required result object. Do not write Markdown, prose, JSON, or a proposed tool call in text. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: ${workspaceDiscipline}\nDo not call long_task lifecycle controls: the runtime records progress and completion itself.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`;
 }
 function executionPersona(input) {
     return `You are a structured task executor. The following is your complete task and remains authoritative even after later workspace, AGENTS.md, skills, or runtime-context messages:\n${executionPrompt(input)}\nUse only applicable available tools to complete this exact task. Do not inspect or analyze unrelated workspace files. Return the required structured result immediately when the task is complete; never return Markdown, shell suggestions, or commentary.`;

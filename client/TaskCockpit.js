@@ -95,6 +95,7 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
   const archive = () => { if (window.confirm('删除任务会先取消正在进行的工作，并归档 30 天。是否继续？')) invoke('archiveTask', { taskId: task.id, expectedRevision: task.controlRevision }) }
   const restore = () => { setPending(true); setError(null); Promise.resolve(remote.restoreTask({ taskId: task.id })).then(result => onTaskChanged(remoteValue(result))).catch(value => setError(String(value))).finally(() => setPending(false)) }
   const jump = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then(result => { const target = remoteValue(result)?.currentSessionId; if (target && target === sessionId) setError('该任务绑定的会话就是当前会话，无需跳转。'); else if (target && typeof openSession === 'function') openSession(target); else setError(target ? '当前 DSH 槽未提供会话跳转能力。' : '此任务尚未关联可跳转的会话：先点击“附加到当前会话”绑定本会话，或从创建它的会话继续运行。') }).catch(value => setError(String(value)))
+  const orchestration = task.proposedOrchestration ?? task.orchestration
   const labels = { confirm: '确认执行', pause: '暂停任务', resume: '继续任务', cancel: '取消任务' }
   const externalResolutionRequired = task.state === 'PAUSED' && task.tasks?.some(node => node.state === 'BLOCKED' && node.sideEffectClass === 'external_effect')
   const latestQuotaRecovery = [...(task.recentEvents ?? [])].reverse().find(event => event.type === 'QuotaRecoveryResumed')
@@ -115,16 +116,24 @@ export function TaskCockpit({ task, graph, events, onBack, remote, sessionId, op
     e('nav', { className: layout.actionsClassName, 'aria-label': '任务操作' },
       sessionId ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending || isCurrent, onClick: attach }, isCurrent ? '当前会话任务' : attached ? '设为当前任务' : '附加到当前会话') : null,
       task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('rejectReplan', { taskId: task.id, expectedRevision: task.controlRevision }) }, '拒绝改计划') : null,
-      task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, '接受重规划') : null,
+      task.pendingProposal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => invoke('acceptReplan', { taskId: task.id, expectedRevision: task.controlRevision, ...(sessionId ? { sessionId } : {}) }) }, task.proposedOrchestration ? '确认流程变更' : '接受重规划') : null,
       editableOriginalGoal ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: () => { setEditing(value => !value); setObjective(task.objective); setReason('') } }, '修改原始目标') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: jump }, '当前会话'),
       waitingForDriver ? e('button', { type: 'button', className: 'ltr-btn', disabled: pending || !driverAvailable, title: driverAvailable ? '向绑定会话发送继续执行指令' : '继续指令已发送，正在等待绑定会话执行', onClick: () => { void guideAfterResume(task) } }, driverAvailable ? '继续执行会话' : '驱动已发送，等待执行') : null,
       e('button', { type: 'button', className: 'ltr-btn', disabled: pending, onClick: task.archivedAt ? restore : archive }, task.archivedAt ? '恢复归档任务' : '删除'),
       ...actionButtons,
     ),
+    orchestration ? e('details', { className: 'ltr-plan-hint', open: task.state === 'AWAITING_CONFIRMATION' },
+      e('summary', null, orchestration.mode === 'discussion' ? '讨论流程' : '工作流定义'),
+      orchestration.mode === 'discussion'
+        ? e('p', null, orchestration.rounds + ' 轮 · ' + orchestration.participants.map(item => typeof item === 'string' ? item : item.id).join(' → ') + ' · 总结 ' + (typeof orchestration.moderator === 'string' ? orchestration.moderator : orchestration.moderator.id))
+        : e('ul', null, ...orchestration.stages.map(stage => e('li', { key: stage.id },
+          stage.id + ' · ' + stage.profile + ' · ' + stage.objective
+          + (stage.next ? ' · 下一步 ' + stage.next : '')
+          + (stage.onChangesRequested ? ' · 退回 ' + stage.onChangesRequested : ''))))) : null,
     error ? e('p', { className: 'ltr-error', role: 'alert' }, error) : null,
     editing && editableOriginalGoal ? e('form', { className: 'ltr-goal-edit', onSubmit: event => { event.preventDefault(); if (objective.trim() && reason.trim()) edit() } }, e('label', null, '新原始目标', e('textarea', { value: objective, onChange: event => setObjective(event.target.value) })), e('label', null, '修改原因', e('input', { value: reason, onChange: event => setReason(event.target.value) })), e('button', { type: 'submit', className: 'ltr-btn', disabled: pending || !objective.trim() || !reason.trim() }, '生成重规划')) : null,
-    e('p', { className: 'ltr-plan-hint' }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
+    e('p', { className: 'ltr-plan-hint' }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? '任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。' : orchestration ? '流程按已保存定义执行。暂停后可以在会话中提出流程修订。' : '修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。'),
     e('div', { className: layout.mainClassName },
       e(TaskDag, { nodes: graph.nodes, selectedId, onSelect: setSelectedId }),
       e('details', { className: `${layout.inspectorClassName} ltr-cockpit-inspector-details` }, e('summary', null, '节点详情'), selected ? e(React.Fragment, null,

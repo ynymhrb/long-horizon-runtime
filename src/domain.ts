@@ -41,6 +41,7 @@ export interface TaskDraft {
   readonly completionCriteria?: string
   readonly retryPolicy?: RetryPolicy
   readonly validator?: string
+  readonly workflowReview?: true
   readonly acceptanceChecks?: readonly AcceptanceCheck[]
   readonly acceptancePolicy?: AcceptancePolicy
   /** Per-task child execution budget in milliseconds; overrides the deployment default when set. */

@@ -61,6 +61,12 @@ export declare class TaskControlApi {
         readonly objective: string;
         readonly reason: string;
     }, invocation: TaskInvocation): Promise<TaskUpdateResult>;
+    proposeWorkflow(request: {
+        readonly taskId: string;
+        readonly expectedRevision: number;
+        readonly spec: unknown;
+        readonly reason: string;
+    }, invocation: TaskInvocation): TaskUpdateResult;
     acceptReplan(request: {
         readonly taskId: string;
         readonly expectedRevision: number;

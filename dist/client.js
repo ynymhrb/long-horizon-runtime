@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
 		//#endregion
 		let react = require("react");
 		react = __toESM(react, 1);
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
 		var _a$1;
 		function $constructor(name, initializer, params) {
 			function init(inst, def) {
@@ -87,7 +87,7 @@ window.__ModuleLoader__.load({
 			return globalConfig;
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
 		function getEnumValues(entries) {
 			const numericValues = Object.values(entries).filter((v) => typeof v === "number");
 			return Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -401,7 +401,7 @@ window.__ModuleLoader__.load({
 			return { ...iss };
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
 		const initializer$1 = (inst, def) => {
 			inst.name = "$ZodError";
 			Object.defineProperty(inst, "_zod", {
@@ -461,7 +461,7 @@ window.__ModuleLoader__.load({
 			return fieldErrors;
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
 		const _parse = (_Err) => (schema, value, _ctx, _params) => {
 			const ctx = _ctx ? {
 				..._ctx,
@@ -575,7 +575,7 @@ window.__ModuleLoader__.load({
 			return _safeParseAsync(_Err)(schema, value, _ctx);
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
 		/**
 		* @deprecated CUID v1 is deprecated by its authors due to information leakage
 		* (timestamps embedded in the id). Use {@link cuid2} instead.
@@ -639,7 +639,7 @@ window.__ModuleLoader__.load({
 		const lowercase = /^[^A-Z]*$/;
 		const uppercase = /^[^a-z]*$/;
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
 		const $ZodCheck = /*@__PURE__*/ $constructor("$ZodCheck", (inst, def) => {
 			var _a;
 			inst._zod ?? (inst._zod = {});
@@ -1001,7 +1001,7 @@ window.__ModuleLoader__.load({
 			};
 		});
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
 		var Doc = class {
 			constructor(args = []) {
 				this.content = [];
@@ -1032,14 +1032,14 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
 		const version = {
 			major: 4,
 			minor: 4,
 			patch: 3
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
 		const $ZodType = /*@__PURE__*/ $constructor("$ZodType", (inst, def) => {
 			var _a;
 			inst ?? (inst = {});
@@ -2142,7 +2142,7 @@ window.__ModuleLoader__.load({
 			}
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
 		var _a;
 		var $ZodRegistry = class {
 			constructor() {
@@ -2189,7 +2189,7 @@ window.__ModuleLoader__.load({
 		(_a = globalThis).__zod_globalRegistry ?? (_a.__zod_globalRegistry = registry());
 		const globalRegistry = globalThis.__zod_globalRegistry;
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
 		// @__NO_SIDE_EFFECTS__
 		function _string(Class, params) {
 			return new Class({
@@ -2694,7 +2694,7 @@ window.__ModuleLoader__.load({
 			return ch;
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
 		function initializeContext(params) {
 			let target = params?.target ?? "draft-2020-12";
 			if (target === "draft-4") target = "draft-04";
@@ -2989,7 +2989,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			return finalize(ctx, schema);
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
 		const formatMap = {
 			guid: "uuid",
 			url: "uri",
@@ -3199,7 +3199,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			seen.ref = def.innerType;
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
 		const ZodISODateTime = /*@__PURE__*/ $constructor("ZodISODateTime", (inst, def) => {
 			$ZodISODateTime.init(inst, def);
 			ZodStringFormat.init(inst, def);
@@ -3229,7 +3229,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			return /* @__PURE__ */ _isoDuration(ZodISODuration, params);
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
 		const initializer = (inst, issues) => {
 			$ZodError.init(inst, issues);
 			inst.name = "ZodError";
@@ -3251,7 +3251,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		};
 		const ZodRealError = /*@__PURE__*/ $constructor("ZodError", initializer, { Parent: Error });
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
 		const parse = /* @__PURE__ */ _parse(ZodRealError);
 		const parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 		const safeParse = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -3265,7 +3265,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		const safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 		const safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
 		const _installedGroups = /* @__PURE__ */ new WeakMap();
 		function _installLazyMethods(inst, group, methods) {
 			const proto = Object.getPrototypeOf(inst);
@@ -4650,7 +4650,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		}
 		/** Original-goal revisions require a live, non-terminal task. */
 		function canEditOriginalGoal(task) {
-			return task !== void 0 && ![
+			return task != null && task.orchestration === void 0 && ![
 				"SUCCEEDED",
 				"FAILED",
 				"CANCELLED"
@@ -4799,6 +4799,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		//#endregion
 		//#region client/task-events.js
 		const labels = {
+			WorkflowConfigured: "已保存编排流程",
+			WorkflowAdvanced: "已展开下一流程步骤",
+			WorkflowChangeProposed: "等待确认的流程变更",
+			WorkflowLimitReached: "已达到流程轮次上限",
+			WorkerAssigned: "已分配 Worker",
+			WorkerSessionLinked: "已记录外部会话",
 			GoalCreated: "已创建任务",
 			GoalObjectiveRevised: "已修改原始目标",
 			PlanProposed: "等待确认的重规划",
@@ -4835,9 +4841,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const payload = event.payload ?? {};
 			const revision = typeof payload.revision === "number" ? `修订 ${payload.revision}` : "";
 			const reason = typeof payload.reason === "string" ? payload.reason : typeof payload.retryAfter === "string" ? `预计 ${payload.retryAfter} 后重试` : typeof payload.trigger?.reason === "string" ? payload.trigger.reason : "";
+			const worker = typeof payload.workerId === "string" ? payload.workerId : "";
 			return {
 				label: labels[event.type] ?? event.type,
-				detail: [revision, reason].filter(Boolean).join(" · ") || "已记录",
+				detail: [
+					revision,
+					reason,
+					worker
+				].filter(Boolean).join(" · ") || "已记录",
 				tone: event.type.includes("Failed") ? "error" : event.type.includes("Paused") || event.type.includes("Proposed") ? "warning" : "neutral"
 			};
 		}
@@ -4987,6 +4998,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				else if (target && typeof openSession === "function") openSession(target);
 				else setError(target ? "当前 DSH 槽未提供会话跳转能力。" : "此任务尚未关联可跳转的会话：先点击“附加到当前会话”绑定本会话，或从创建它的会话继续运行。");
 			}).catch((value) => setError(String(value)));
+			const orchestration = task.proposedOrchestration ?? task.orchestration;
 			const labels = {
 				confirm: "确认执行",
 				pause: "暂停任务",
@@ -5053,7 +5065,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					expectedRevision: task.controlRevision,
 					...sessionId ? { sessionId } : {}
 				})
-			}, "接受重规划") : null, editableOriginalGoal ? e$3("button", {
+			}, task.proposedOrchestration ? "确认流程变更" : "接受重规划") : null, editableOriginalGoal ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
@@ -5080,7 +5092,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				className: "ltr-btn",
 				disabled: pending,
 				onClick: task.archivedAt ? restore : archive
-			}, task.archivedAt ? "恢复归档任务" : "删除"), ...actionButtons), error ? e$3("p", {
+			}, task.archivedAt ? "恢复归档任务" : "删除"), ...actionButtons), orchestration ? e$3("details", {
+				className: "ltr-plan-hint",
+				open: task.state === "AWAITING_CONFIRMATION"
+			}, e$3("summary", null, orchestration.mode === "discussion" ? "讨论流程" : "工作流定义"), orchestration.mode === "discussion" ? e$3("p", null, orchestration.rounds + " 轮 · " + orchestration.participants.map((item) => typeof item === "string" ? item : item.id).join(" → ") + " · 总结 " + (typeof orchestration.moderator === "string" ? orchestration.moderator : orchestration.moderator.id)) : e$3("ul", null, ...orchestration.stages.map((stage) => e$3("li", { key: stage.id }, stage.id + " · " + stage.profile + " · " + stage.objective + (stage.next ? " · 下一步 " + stage.next : "") + (stage.onChangesRequested ? " · 退回 " + stage.onChangesRequested : ""))))) : null, error ? e$3("p", {
 				className: "ltr-error",
 				role: "alert"
 			}, error) : null, editing && editableOriginalGoal ? e$3("form", {
@@ -5099,7 +5114,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "submit",
 				className: "ltr-btn",
 				disabled: pending || !objective.trim() || !reason.trim()
-			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: layout.mainClassName }, e$3(TaskDag, {
+			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : orchestration ? "流程按已保存定义执行。暂停后可以在会话中提出流程修订。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: layout.mainClassName }, e$3(TaskDag, {
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId

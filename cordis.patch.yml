@@ -15,6 +15,7 @@
         autoReplan: true
         routingMode: advisory
         defaultPlanningMode: require_confirmation
+        defaultWorkflow: dynamic
         executionTimeoutMs: 300000
         # Five-minute inactivity lease; attempts may run up to five hours.
         idleTimeoutMs: 300000

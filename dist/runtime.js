@@ -1,21 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { planWithValidation } from './adapters.js';
-import { applyMutation } from './graph.js';
+import { applyMutation, validatePlan } from './graph.js';
 import { RuntimeEventStore } from './event-store.js';
 import { Scheduler } from './scheduler.js';
 import { ArtifactStore } from './artifacts.js';
 import { withDshParent } from './dsh-adapters.js';
 import { classifyAutomaticReplan } from './replan-policy.js';
+import { parseWorkflow, readWorkflowVerdict, workflowStep, WorkflowVisitLimit } from './workflow.js';
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
 export class LongTaskRuntime {
     planner;
     store;
+    closed = false;
     ownsStore;
     artifactStore;
     scheduler;
     livenessCheckIntervalMs;
     now;
     goalBudget;
+    profileRouter;
     constructor(planner, execution, options = {}) {
         this.planner = planner;
         const normalized = typeof options === 'number' ? { maxConcurrentTasks: options } : options;
@@ -25,17 +28,31 @@ export class LongTaskRuntime {
         this.livenessCheckIntervalMs = Math.max(10, Math.min(normalized.idleTimeoutMs ?? 300_000, 30_000));
         this.now = normalized.now ?? Date.now;
         this.goalBudget = normalized.goalBudget;
-        this.scheduler = new Scheduler(execution, { store: this.store, maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(normalized.profileRouter === undefined ? {} : { profileRouter: normalized.profileRouter }), ...(normalized.executionPolicy === undefined ? {} : { executionPolicy: normalized.executionPolicy }), ...(normalized.memoryRetriever === undefined ? {} : { memoryRetriever: normalized.memoryRetriever }), ...(normalized.maxMemoryItems === undefined ? {} : { maxMemoryItems: normalized.maxMemoryItems }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
+        this.profileRouter = normalized.profileRouter;
+        this.scheduler = new Scheduler(execution, { store: this.store, ...(normalized.workerPool === undefined ? {} : { workerPool: normalized.workerPool }), advanceWorkflow: goalId => this.advanceWorkflow(goalId), maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(normalized.profileRouter === undefined ? {} : { profileRouter: normalized.profileRouter }), ...(normalized.executionPolicy === undefined ? {} : { executionPolicy: normalized.executionPolicy }), ...(normalized.memoryRetriever === undefined ? {} : { memoryRetriever: normalized.memoryRetriever }), ...(normalized.maxMemoryItems === undefined ? {} : { maxMemoryItems: normalized.maxMemoryItems }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
     }
     async createGoal(request, executionParent, executionSignal) {
         if (request.objective.trim().length === 0)
             throw new Error('goal objective must not be empty');
+        const orchestration = request.orchestration === undefined ? undefined : parseWorkflow(request.orchestration, this.profileRouter?.profileIds());
         const id = `lt_${randomUUID()}`;
         const mode = request.planningMode ?? 'auto';
+        const workflowPlan = orchestration === undefined ? undefined : validatePlan({ goalId: id, revision: 1, tasks: [workflowStep(orchestration, request.objective, [])] });
         this.store.transaction(() => this.store.append([
             { type: 'GoalCreated', goalId: id, payload: { objective: request.objective, constraints: request.constraints ?? [], planningMode: mode, workspaceScope: request.workspaceScope } },
             ...(normalizedGoalBudget(this.goalBudget) === undefined ? [] : [{ type: 'BudgetConfigured', goalId: id, payload: { scope: 'goal', limit: this.goalBudget } }]),
+            ...(workflowPlan === undefined ? [] : [
+                { type: 'WorkflowConfigured', goalId: id, payload: { revision: 1, spec: orchestration } },
+                { type: mode === 'auto' ? 'PlanRevisionApplied' : 'PlanProposed', goalId: id, payload: { revision: workflowPlan.revision, tasks: [...workflowPlan.tasks.values()] } },
+            ]),
         ]));
+        if (workflowPlan !== undefined) {
+            if (mode === 'auto' && executionParent !== undefined) {
+                await this.runUntilIdle(id, executionParent, executionSignal);
+                this.scheduleQuotaRecovery(id, executionParent);
+            }
+            return this.view(id);
+        }
         let plan;
         try {
             plan = await planWithValidation(this.planner, { goalId: id, objective: request.objective, constraints: request.constraints ?? [], ...(executionSignal === undefined ? {} : { signal: executionSignal }) });
@@ -54,7 +71,7 @@ export class LongTaskRuntime {
         }
         return this.view(id);
     }
-    async confirmGoal(goalId, executionParent, executionSignal) {
+    async confirmGoal(goalId, executionParent, executionSignal, authority = 'agent') {
         const goal = this.requireGoal(goalId);
         if (goal.state !== 'AWAITING_CONFIRMATION')
             throw new Error(`goal ${goalId} is not awaiting confirmation`);
@@ -62,7 +79,17 @@ export class LongTaskRuntime {
         if (plan === undefined)
             throw new Error(`goal ${goalId} has no proposed plan`);
         const invalidatedTaskIds = plan.invalidatedTaskIds.length > 0 ? plan.invalidatedTaskIds : plan.tasks.filter(task => task.state === 'INVALIDATED').map(task => task.id);
-        this.store.transaction(() => this.store.append([{ type: 'PlanConfirmed', goalId, payload: { revision: plan.revision, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }, { type: 'PlanRevisionApplied', goalId, payload: { revision: plan.revision, tasks: plan.tasks, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } }]));
+        const workflow = this.proposedWorkflow(goalId, plan.revision);
+        if (workflow !== undefined && authority !== 'operator')
+            throw new Error('请从任务区确认流程变更');
+        this.store.transaction(() => {
+            this.store.append([
+                ...(workflow === undefined ? [] : [{ type: 'WorkflowConfigured', goalId, payload: { revision: plan.revision, spec: workflow } }]),
+                { type: 'PlanConfirmed', goalId, payload: { revision: plan.revision, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } },
+                { type: 'PlanRevisionApplied', goalId, payload: { revision: plan.revision, tasks: plan.tasks, invalidatedTaskIds, staleTaskIds: plan.staleTaskIds } },
+            ]);
+            this.reconcileFinishedWorkflow(goalId);
+        });
         if (executionParent !== undefined) {
             await this.runUntilIdle(goalId, executionParent, executionSignal);
             this.scheduleQuotaRecovery(goalId, executionParent);
@@ -110,6 +137,7 @@ export class LongTaskRuntime {
     }
     /** Revise the durable user objective and create a confirmation-fenced replacement plan. */
     async editOriginalGoal(goalId, input, executionParent, executionSignal) {
+        this.assertPlannerManaged(goalId);
         const goal = this.requireGoal(goalId);
         if (goal.archivedAt !== undefined)
             throw new Error(`goal ${goalId} is archived`);
@@ -141,6 +169,8 @@ export class LongTaskRuntime {
     }
     /** Replan only after a terminal failure has already been durably recorded. */
     async requestAutomaticReplan(goalId, trigger) {
+        if (this.store.latestEventPayload(goalId, 'WorkflowConfigured') !== undefined)
+            return this.view(goalId);
         const goal = this.requireGoal(goalId);
         if (goal.archivedAt !== undefined || goal.state !== 'RUNNING')
             return this.view(goalId);
@@ -209,16 +239,22 @@ export class LongTaskRuntime {
             if (blockedExternalTask !== undefined) {
                 if (recoveryResolution === undefined)
                     throw new Error(`goal ${goalId} requires an explicit recovery resolution for external task ${blockedExternalTask.id}`);
-                this.store.transaction(() => this.store.append([
-                    { type: 'DecisionRecorded', goalId, payload: { type: 'external_recovery_resolution', taskId: blockedExternalTask.id, resolution: recoveryResolution } },
-                    { type: 'TaskRecoveryResolved', goalId, taskId: blockedExternalTask.id, payload: { resolution: recoveryResolution } },
-                    { type: 'GoalResumed', goalId, payload: { recoveryResolution, taskId: blockedExternalTask.id } },
-                ]));
+                this.store.transaction(() => {
+                    this.store.append([
+                        { type: 'DecisionRecorded', goalId, payload: { type: 'external_recovery_resolution', taskId: blockedExternalTask.id, resolution: recoveryResolution } },
+                        { type: 'TaskRecoveryResolved', goalId, taskId: blockedExternalTask.id, payload: { resolution: recoveryResolution } },
+                        { type: 'GoalResumed', goalId, payload: { recoveryResolution, taskId: blockedExternalTask.id } },
+                    ]);
+                    this.reconcileFinishedWorkflow(goalId);
+                });
             }
             else {
                 if (recoveryResolution !== undefined)
                     throw new Error(`goal ${goalId} has no indeterminate external effect to resolve`);
-                this.store.transaction(() => this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]));
+                this.store.transaction(() => {
+                    this.store.append([{ type: 'GoalResumed', goalId, payload: {} }]);
+                    this.reconcileFinishedWorkflow(goalId);
+                });
             }
         }
         if (executionParent !== undefined) {
@@ -275,6 +311,7 @@ export class LongTaskRuntime {
     }
     /** Apply one of the constrained V1 graph mutations, preserving every prior revision. */
     mutatePlan(goalId, mutation) {
+        this.assertPlannerManaged(goalId);
         const goal = this.requireGoal(goalId);
         if (!['RUNNING', 'PAUSED'].includes(goal.state))
             throw new Error(`goal ${goalId} cannot be changed while ${goal.state}`);
@@ -294,6 +331,7 @@ export class LongTaskRuntime {
         return this.view(goalId);
     }
     proposeReplan(goalId, mutation) {
+        this.assertPlannerManaged(goalId);
         const goal = this.requireGoal(goalId);
         if (!['RUNNING', 'PAUSED'].includes(goal.state))
             throw new Error(`goal ${goalId} cannot be replanned while ${goal.state}`);
@@ -310,13 +348,119 @@ export class LongTaskRuntime {
         const proposal = this.store.getPlan(goalId);
         if (goal.state !== 'AWAITING_CONFIRMATION' || proposal?.state !== 'PROPOSED' || proposal.baseRevision === undefined)
             throw new Error(`goal ${goalId} has no replan proposal`);
-        this.store.transaction(() => this.store.append([{ type: 'PlanRejected', goalId, payload: { revision: proposal.revision, restoreState: 'RUNNING' } }]));
+        const restoreState = this.proposedWorkflow(goalId, proposal.revision) === undefined ? 'RUNNING' : 'PAUSED';
+        this.store.transaction(() => this.store.append([{ type: 'PlanRejected', goalId, payload: { revision: proposal.revision, restoreState } }]));
         return this.view(goalId);
+    }
+    proposeWorkflow(goalId, requested, reason, expectedRevision) {
+        const goal = this.requireGoal(goalId);
+        if (goal.controlRevision !== expectedRevision)
+            throw new Error('流程变更的控制修订已过期');
+        if (reason.trim() === '')
+            throw new Error('流程变更需要原因');
+        if (goal.state !== 'PAUSED' || this.workflow(goalId) === undefined)
+            throw new Error('只能为已暂停的配置流程提出新修订');
+        const spec = parseWorkflow(requested, this.profileRouter?.profileIds());
+        const current = this.store.listTasks(goalId);
+        const completed = [];
+        let verdict;
+        for (const task of current) {
+            if (task.state !== 'SUCCEEDED') {
+                if (task.state === 'RUNNING' || (task.sideEffectClass === 'external_effect' && this.store.listAttempts(task.id, goalId).length > 0)) {
+                    throw new Error('仍有执行中的尝试或需要人工判定的外部操作');
+                }
+                continue;
+            }
+            const candidate = workflowStep(spec, goal.objective, completed.map(node => node.id), verdict);
+            if (candidate === undefined || candidate.id !== task.id || candidate.objective !== task.objective
+                || candidate.executionProfile !== task.executionProfile || candidate.sideEffectClass !== task.sideEffectClass
+                || JSON.stringify(candidate.dependsOn) !== JSON.stringify(task.dependsOn)) {
+                throw new Error('新流程会改动已完成阶段：' + task.id);
+            }
+            completed.push(task);
+            verdict = this.workflowVerdict(goalId, task);
+        }
+        const next = workflowStep(spec, goal.objective, completed.map(node => node.id), verdict);
+        const revision = this.store.nextPlanRevision(goalId);
+        const plan = validatePlan({ goalId, revision, tasks: [...completed, ...(next === undefined ? [] : [next])] });
+        const completedIds = new Set(completed.map(node => node.id));
+        this.store.transaction(() => this.store.append([
+            { type: 'WorkflowChangeProposed', goalId, payload: { revision, spec, reason } },
+            { type: 'PlanProposed', goalId, payload: {
+                    baseRevision: goal.revision, revision, trigger: { kind: 'workflow_change', reason },
+                    tasks: [...plan.tasks.values()].map(task => ({ ...task, state: completedIds.has(task.id) ? 'SUCCEEDED' : task.state })),
+                } },
+            { type: 'TaskControlRevisionAdvanced', goalId, payload: { controlRevision: expectedRevision + 1 } },
+        ]));
+        return this.view(goalId);
+    }
+    workflow(goalId) {
+        return this.store.latestEventPayload(goalId, 'WorkflowConfigured')?.spec;
+    }
+    proposedWorkflow(goalId, revision) {
+        const event = this.store.latestEventPayload(goalId, 'WorkflowChangeProposed');
+        return event?.revision === revision ? event.spec : undefined;
+    }
+    workflowVerdict(goalId, task) {
+        if (task.workflowReview !== true)
+            return undefined;
+        const verdict = readWorkflowVerdict(this.store.listActiveValidatedArtifacts(goalId, [task.id]).map(artifact => ({
+            type: artifact.type, content: artifact.content ?? this.artifactStore?.read(artifact) ?? '',
+        })));
+        if (verdict === undefined)
+            throw new Error('已完成的评审缺少已验证结论');
+        return verdict;
+    }
+    reconcileFinishedWorkflow(goalId) {
+        if (this.store.getGoal(goalId)?.state !== 'RUNNING' || this.workflow(goalId) === undefined)
+            return;
+        const tasks = this.store.listTasks(goalId);
+        if (tasks.length === 0 || !tasks.every(task => task.state === 'SUCCEEDED'))
+            return;
+        if (!this.advanceWorkflow(goalId))
+            this.store.append([{ type: 'GoalSucceeded', goalId, payload: {} }]);
+    }
+    /** Called inside the scheduler's end-of-round transaction. */
+    advanceWorkflow(goalId) {
+        const spec = this.workflow(goalId);
+        if (spec === undefined)
+            return false;
+        const goal = this.requireGoal(goalId);
+        const tasks = this.store.listTasks(goalId);
+        const last = tasks.at(-1);
+        if (last === undefined || last.state !== 'SUCCEEDED')
+            return false;
+        const verdict = this.workflowVerdict(goalId, last);
+        let next;
+        try {
+            next = workflowStep(spec, goal.objective, tasks.map(task => task.id), verdict);
+        }
+        catch (error) {
+            if (!(error instanceof WorkflowVisitLimit))
+                throw error;
+            this.store.append([
+                { type: 'WorkflowLimitReached', goalId, taskId: last.id, payload: { reason: error.message } },
+                { type: 'GoalFailed', goalId, payload: { phase: 'workflow', reason: error.message } },
+            ]);
+            return true;
+        }
+        if (next === undefined)
+            return false;
+        const revision = this.store.nextPlanRevision(goalId);
+        const validated = validatePlan({ goalId, revision, tasks: [...tasks, next] });
+        const states = new Map(tasks.map(task => [task.id, task.state]));
+        this.store.append([
+            { type: 'WorkflowAdvanced', goalId, taskId: last.id, payload: { revision, nextTaskId: next.id, ...(verdict === undefined ? {} : verdict) } },
+            { type: 'PlanRevisionApplied', goalId, payload: { revision, tasks: [...validated.tasks.values()].map(task => ({ ...task, state: states.get(task.id) ?? task.state })) } },
+        ]);
+        return true;
     }
     /** Advance at most one round repeatedly, used by non-DSH callers and tests with a live parent. */
     async runUntilIdle(goalId, executionParent, executionSignal) {
-        for (;;) {
+        while (!this.closed) {
             const dispatched = await this.scheduler.runRound(goalId, undefined, executionParent, executionSignal);
+            if (this.closed)
+                return;
             const state = this.requireGoal(goalId).state;
             if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'PAUSED'].includes(state))
                 return;
@@ -340,21 +484,22 @@ export class LongTaskRuntime {
      * paused, or terminal. Idempotent per goal.
      */
     startBackground(goalId, executionParent) {
-        if (this.background.has(goalId) || executionParent === undefined)
+        if (this.closed || this.background.has(goalId) || executionParent === undefined)
             return;
         let watchdog;
         const promise = withDshParent(executionParent, () => this.runUntilIdle(goalId, executionParent))
             .catch(error => {
             // A failed supervisory loop is itself durable operator information;
             // silently swallowing it used to leave a goal apparently RUNNING.
-            if (this.store.getGoal(goalId)?.state === 'RUNNING')
+            if (!this.closed && this.store.getGoal(goalId)?.state === 'RUNNING')
                 this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { origin: 'system', reason: `background scheduler failed: ${error instanceof Error ? error.message : String(error)}` } }]));
         })
             .finally(() => {
             if (watchdog !== undefined)
                 clearInterval(watchdog);
             this.background.delete(goalId);
-            this.scheduleQuotaRecovery(goalId, executionParent);
+            if (!this.closed)
+                this.scheduleQuotaRecovery(goalId, executionParent);
         });
         this.background.set(goalId, promise);
         watchdog = setInterval(() => {
@@ -362,7 +507,7 @@ export class LongTaskRuntime {
                 this.scheduler.reconcileLiveness(goalId);
             }
             catch (error) {
-                if (this.store.getGoal(goalId)?.state === 'RUNNING')
+                if (!this.closed && this.store.getGoal(goalId)?.state === 'RUNNING')
                     this.store.transaction(() => this.store.append([{ type: 'GoalPaused', goalId, payload: { origin: 'system', reason: `liveness watchdog failed: ${error instanceof Error ? error.message : String(error)}` } }]));
             }
         }, this.livenessCheckIntervalMs);
@@ -374,6 +519,14 @@ export class LongTaskRuntime {
         // generic interruption recovery examines the same running attempt.
         this.scheduler.reconcileLiveness();
         const recoveredGoals = await this.scheduler.recover();
+        if (this.closed)
+            return;
+        // A crash can occur after TaskCompleted but before the end-of-round flow expansion.
+        for (const goal of this.store.listGoals()) {
+            if (goal.state !== 'RUNNING' || this.workflow(goal.id) === undefined)
+                continue;
+            this.store.transaction(() => this.reconcileFinishedWorkflow(goal.id));
+        }
         if (executionParent !== undefined)
             for (const goal of recoveredGoals) {
                 // An indeterminate external effect is a durable operator choice.  A
@@ -390,7 +543,8 @@ export class LongTaskRuntime {
                 }
             }
     }
-    close() { this.background.clear(); for (const timer of this.quotaRecoveryTimers.values())
+    close() { if (this.closed)
+        return; this.closed = true; this.scheduler.close(); this.background.clear(); for (const timer of this.quotaRecoveryTimers.values())
         clearTimeout(timer); this.quotaRecoveryTimers.clear(); if (this.ownsStore)
         this.store.close(); }
     scheduleQuotaRecovery(goalId, executionParent) {
@@ -417,6 +571,10 @@ export class LongTaskRuntime {
             clearTimeout(timer);
         this.quotaRecoveryTimers.delete(goalId);
     }
+    assertPlannerManaged(goalId) {
+        if (this.store.latestEventPayload(goalId, 'WorkflowConfigured') !== undefined)
+            throw new Error('该目标由已保存的流程定义编排');
+    }
     requireGoal(goalId) { const goal = this.store.getGoal(goalId); if (goal === undefined)
         throw new Error(`unknown goal ${goalId}`); return goal; }
     view(goalId) {
@@ -426,11 +584,13 @@ export class LongTaskRuntime {
         const attempts = tasks.flatMap(task => this.store.listAttempts(task.id, goalId));
         const plan = this.store.getPlan(goalId);
         const quotaRecovery = this.store.getQuotaRecovery(goalId);
+        const orchestration = this.workflow(goalId);
+        const proposedOrchestration = plan?.state === 'PROPOSED' ? this.proposedWorkflow(goalId, plan.revision) : undefined;
         const requiresSessionDriver = goal.state === 'RUNNING'
             && !this.background.has(goalId)
             && !tasks.some(task => task.state === 'RUNNING')
             && tasks.some(task => task.state === 'PENDING' || task.state === 'READY');
-        return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId) }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, runtimeMetrics: this.store.getRuntimeMetrics(goalId, this.now()), recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, requiresSessionDriver, ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }), ...(goal.pauseOrigin === undefined ? {} : { pauseOrigin: goal.pauseOrigin }) };
+        return { id: goal.id, objective: goal.objective, constraints: goal.constraints, state: goal.state, revision: goal.revision, controlRevision: goal.controlRevision, ...(goal.workspaceScope === undefined ? {} : { workspaceScope: goal.workspaceScope }), ...(goal.archivedAt === undefined ? {} : { archivedAt: goal.archivedAt }), sessionLinks: this.store.listSessionLinks(goalId), ...(plan?.state === 'PROPOSED' && plan.baseRevision !== undefined ? { pendingProposal: { revision: plan.revision, baseRevision: plan.baseRevision, ...(plan.trigger === undefined ? {} : { trigger: plan.trigger }) } } : {}), ...(quotaRecovery === undefined ? {} : { quotaRecovery }), tasks, attempts, artifacts: this.store.listActiveValidatedArtifacts(goalId), decisions: this.store.listDecisions(goalId), ...(this.store.latestCheckpoint(goalId) === undefined ? {} : { checkpoint: this.store.latestCheckpoint(goalId) }), accounting: { attemptCount: attempts.length, succeededTaskCount: tasks.filter(task => task.state === 'SUCCEEDED').length, failedTaskCount: tasks.filter(task => task.state === 'FAILED').length }, runtimeMetrics: this.store.getRuntimeMetrics(goalId, this.now()), recentEvents: this.store.listRecentEvents(goalId), availableActions: actions, requiresSessionDriver, ...(orchestration === undefined ? {} : { orchestration }), ...(proposedOrchestration === undefined ? {} : { proposedOrchestration }), ...(goal.pauseReason === undefined ? {} : { pauseReason: goal.pauseReason }), ...(goal.pauseOrigin === undefined ? {} : { pauseOrigin: goal.pauseOrigin }) };
     }
 }
 function preserveCompletedTasks(previous, candidate) {
