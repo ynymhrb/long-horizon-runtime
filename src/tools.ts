@@ -13,6 +13,7 @@ import { CallRouter, type ModelEndpoint, type ToolConcurrency } from './call-rou
 import { WorkerPool } from './worker-pool.js'
 import { createProcessWorker, type ProcessWorkerConfig } from './process-worker.js'
 import { parseWorkflow, type WorkflowSpec } from './workflow.js'
+import { applySettingsPreferences, LongTaskSettings, type SettingsOverride } from './settings.js'
 
 export type WorkerConfig = (
   | { readonly kind: 'dsh'; readonly modelRole?: string }
@@ -22,6 +23,7 @@ export type WorkerConfig = (
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
   readonly databasePath: string
+  readonly settingsPatchPath?: string
   readonly artifactDirectory: string
   readonly plannerProvider: string
   readonly executionProvider: string
@@ -67,7 +69,7 @@ interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPla
 }
 
 declare module '@deepseek-ai/cordis' {
-  interface Context { longTaskRuntime: LongTaskRuntime }
+  interface Context { longTaskRuntime: LongTaskRuntime; longTaskSettings: LongTaskSettings; longTaskSettingsOverlay: SettingsOverride; longTaskWebPreferences: { readonly draft?: unknown } }
 }
 
 export const name = 'long-task-runtime'
@@ -75,7 +77,20 @@ export const inject = ['tools', 'subagents', 'systemPrompt']
 
 /** Mount the runtime service and six stateless model-facing controls. */
 export function apply(ctx: Context, input: Config): void {
-  const config = resolveConfig(input)
+  const host = { ...input, ...ctx.get?.('longTaskSettingsOverlay') }
+  const preferences = ctx.get?.('longTaskWebPreferences')
+  let effective = host
+  let warning: string | undefined
+  if (preferences?.draft !== undefined) {
+    try {
+      const candidate = { ...host, ...applySettingsPreferences(host, preferences.draft) }
+      resolveConfig(candidate)
+      effective = candidate
+    } catch {
+      warning = '保存的设置与当前宿主配置不一致。请核对后重新保存。'
+    }
+  }
+  const config = resolveConfig(effective)
   const router = (config.modelEndpoints?.length || config.toolConcurrency?.length)
     ? new CallRouter(config.modelEndpoints ?? [], config.toolConcurrency ?? []) : undefined
   const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }
@@ -93,6 +108,12 @@ export function apply(ctx: Context, input: Config): void {
     databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, workerPool: pool, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
   })
   ctx.provide('longTaskRuntime', runtime)
+  ctx.provide('longTaskSettings', new LongTaskSettings(effective, () => runtime.settingsBusy(), () => runtime.holdSettingsReload(), override => {
+    const candidate = resolveConfig({ ...host, ...override })
+    for (const id of runtime.settingsReferencedProfiles()) {
+      if (!candidate.executionProfiles.profiles.has(id)) throw new Error('仍有未完成任务使用执行组：' + id)
+    }
+  }, host, warning))
   ctx.systemPrompt.section({
     name: 'long-task:routing',
     order: 130,
@@ -286,7 +307,9 @@ function resolveConfig(config: Config): ResolvedConfig {
   const configuredProfiles: readonly ExecutionProfile[] = config.executionProfiles ?? [{
     id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }),
   }]
-  const workerMap = new Map((config.workers ?? []).map(worker => [worker.id, worker]))
+  const declaredWorkers = config.workers ?? []
+  const workerMap = new Map(declaredWorkers.map(worker => [worker.id, worker]))
+  if (workerMap.size !== declaredWorkers.length) throw new Error('Worker ID 重复')
   for (const worker of workerMap.values()) if (!['dsh', 'codex-cli', 'claude-cli', 'custom-exec'].includes(worker.kind)) throw new Error('未知 Worker 类型：' + worker.kind)
   const aliases = [...workerMap.values()].filter(worker => !configuredProfiles.some(profile => profile.id === worker.id))
     .map(worker => ({ id: worker.id, providerName: config.executionProvider, workerIds: [worker.id], ...(worker.kind === 'dsh' && worker.modelRole !== undefined ? { modelRole: worker.modelRole } : {}), ...(worker.capabilities === undefined ? {} : { capabilities: worker.capabilities }) }))

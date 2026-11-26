@@ -15,7 +15,7 @@ test('任务区在宿主 Typert 注册表显式贡献路由和参数契约', () 
   try {
     apply(ctx)
     expect(ctx.get('longTasks')).toBeDefined()
-    expect(registered).toHaveLength(18)
+    expect(registered).toHaveLength(20)
     const list = registered.find(item => item.method === 'listTasks')
     expect(list).toMatchObject({ service: 'longTasks', namespace: 'longTasks', parameters: [{ wire: 'input', codec: { mode: 'strict' } }] })
     const codec = registered.find(item => item.method === 'updateTask')!.parameters[0]!.codec

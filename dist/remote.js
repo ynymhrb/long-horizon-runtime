@@ -4,12 +4,20 @@ import { TaskUiApi } from './task-ui-api.js';
 import { longTaskRemote } from '../client/remote-contract.js';
 /** Browser-safe host query surface; payloads deliberately remain JSON values. */
 export class LongTaskRemote extends TypertRemoteService {
+    settings;
     runtime;
     ui;
-    constructor(ctx, runtime) {
+    constructor(ctx, runtime, settings) {
         super(ctx, 'longTasks');
+        this.settings = settings;
         this.runtime = runtime;
         this.ui = new TaskUiApi(runtime, new TaskControlApi(runtime));
+    }
+    getLongTaskSettings() { return this.settings?.read() ?? null; }
+    saveLongTaskSettings(input) {
+        if (this.settings === undefined)
+            throw new Error('当前运行时不可编辑设置');
+        return this.settings.save(input.expectedRevision, input.draft);
     }
     get(taskId) { return this.runtime.getStatus(taskId) ?? null; }
     list() { return this.runtime.listGoals(); }
@@ -40,7 +48,7 @@ export function apply(ctx) {
     const registry = ctx.get('typert');
     if (registry === undefined)
         throw new Error('Typert registry is unavailable');
-    new LongTaskRemote(ctx, runtime);
+    new LongTaskRemote(ctx, runtime, ctx.get('longTaskSettings'));
     registry.register({
         package: longTaskRemote.package, face: 'host', schemas: [],
         model: { services: [], events: [], objects: [] }, invocations: longTaskRemote.descriptors,

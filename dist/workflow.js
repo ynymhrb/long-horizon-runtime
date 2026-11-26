@@ -21,7 +21,7 @@ const verdictSchema = z.strictObject({
 });
 export function parseWorkflow(value, profileIds) {
     const spec = specSchema.parse(value);
-    const profiles = spec.mode === 'workflow' ? spec.stages.map(step => step.profile) : [...spec.participants, spec.moderator].map(item => typeof item === 'string' ? item : item.profile);
+    const profiles = workflowProfiles(spec);
     if (profileIds !== undefined) {
         for (const id of profiles)
             if (!profileIds.includes(id))
@@ -53,6 +53,10 @@ export function parseWorkflow(value, profileIds) {
     if (reachable.size !== stages.size)
         throw new Error('流程存在不可达阶段');
     return spec;
+}
+export function workflowProfiles(spec) {
+    return spec.mode === 'workflow' ? spec.stages.map(step => step.profile)
+        : [...spec.participants, spec.moderator].map(item => typeof item === 'string' ? item : item.profile);
 }
 export function readWorkflowVerdict(artifacts) {
     const candidates = artifacts.filter(artifact => artifact.type === 'review');

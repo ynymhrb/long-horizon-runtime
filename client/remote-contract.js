@@ -29,6 +29,8 @@ const link = z.object({ taskId, sessionId, workspaceScope })
 export const longTaskRemote = {
   package: owner,
   descriptors: [
+    descriptor('getLongTaskSettings'),
+    descriptor('saveLongTaskSettings', z.object({ expectedRevision: z.string().length(64), draft: z.unknown() })),
     descriptor('get', taskId, 'taskId'),
     descriptor('list'),
     descriptor('listTasks', z.object({

@@ -85,6 +85,10 @@ Web 侧点击「确认执行」「继续任务」只会推进一次任务控制�
 
 ## 本地多 Worker 与可配置编排
 
+在 DSH Web 打开 **设置 → 长任务**，可以调整执行器和执行组、模型与工具额度，以及编排模板。
+保存写入当前 Web 用户 patch 的长任务设置覆盖，任务规划或执行期间需等到空闲再保存。
+Codex、Claude Code 与自定义命令由宿主配置登记，API 密钥由 DSH 的「模型」管理。
+
 默认模式 `dynamic` 沿用 Planner 动态子图和 DSH 子 Agent 的节点内执行循环。
 可在配置中注册工作流和讨论模板，或在 DSH 聊天中为当前目标指定流程。
 配置和路径的完整示例见 [orchestration.cordis.example.yml](examples/orchestration.cordis.example.yml)。

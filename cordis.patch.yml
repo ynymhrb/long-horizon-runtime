@@ -1,7 +1,15 @@
 - insert:
+    - id: long-task-settings-overlay
+      name: '@deepseek-ai/dsh-long-task-runtime/settings-overlay'
+      config: {}
+    - id: long-task-web-preferences
+      name: '@deepseek-ai/dsh-long-task-runtime/web-preferences'
+      config: {}
     - id: long-task-runtime
       name: '@deepseek-ai/dsh-long-task-runtime'
+      inject: [tools, subagents, systemPrompt, longTaskSettingsOverlay, longTaskWebPreferences]
       config:
+        settingsPatchPath: !!js dshHomePath('profiles', 'web', 'cordis.patch.yml')
         databasePath: !!js dshHomePath('long-task-runtime', 'long-task-runtime.sqlite')
         artifactDirectory: !!js dshHomePath('long-task-runtime', 'artifacts')
         plannerProvider: spawn

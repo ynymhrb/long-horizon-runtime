@@ -1,11 +1,18 @@
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { Context } from '@deepseek-ai/cordis';
 import type { LongTaskRuntime } from './runtime.js';
+import type { LongTaskSettings } from './settings.js';
 /** Browser-safe host query surface; payloads deliberately remain JSON values. */
 export declare class LongTaskRemote extends TypertRemoteService {
+    private readonly settings?;
     private readonly runtime;
     private readonly ui;
-    constructor(ctx: Context, runtime: LongTaskRuntime);
+    constructor(ctx: Context, runtime: LongTaskRuntime, settings?: LongTaskSettings | undefined);
+    getLongTaskSettings(): unknown;
+    saveLongTaskSettings(input: {
+        expectedRevision: string;
+        draft: unknown;
+    }): unknown;
     get(taskId: string): unknown;
     list(): unknown;
     listTasks(input: {

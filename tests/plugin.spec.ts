@@ -124,7 +124,7 @@ test('聊天工具接受已注册模板和内联讨论配置', async () => {
   const ctx = {
     tools: { register(tool: { name: string; execute: never }) { registered.set(tool.name, tool); return () => {} } },
     subagents: {},
-    provide(_name: string, value: LongTaskRuntime) { runtime = value },
+    provide(name: string, value: LongTaskRuntime) { if (name === 'longTaskRuntime') runtime = value },
     effect() {},
     systemPrompt: { section() {} },
   }

@@ -1,6 +1,6 @@
-# 配置示例。将 config 内的字段合入加载运行时工具的插件配置。
+# 配置示例。将该设置覆盖条目加入 Web 用户配置。
 # 路径、DSH provider 名称和 model 名称应替换为本机实际值。
-- id: long-task-runtime
+- id: long-task-settings-overlay
   config:
     maxConcurrentTasks: 4
     defaultWorkflow: dynamic

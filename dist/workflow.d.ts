@@ -45,6 +45,7 @@ export interface WorkflowTask extends TaskDraft {
     readonly workflowReview?: true;
 }
 export declare function parseWorkflow(value: unknown, profileIds?: readonly string[]): WorkflowSpec;
+export declare function workflowProfiles(spec: WorkflowSpec): readonly string[];
 export declare function readWorkflowVerdict(artifacts: readonly Pick<ExecutionResult['artifacts'][number], 'type' | 'content'>[]): WorkflowVerdict | undefined;
 export declare class WorkflowVisitLimit extends Error {
 }

@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LongTaskRuntime } from './runtime.js'
 import { TaskControlApi } from './task-api.js'
 import { TaskUiApi } from './task-ui-api.js'
+import type { LongTaskSettings } from './settings.js'
 import { longTaskRemote } from '../client/remote-contract.js'
 
 /** Browser-safe host query surface; payloads deliberately remain JSON values. */
@@ -10,10 +11,16 @@ export class LongTaskRemote extends TypertRemoteService {
   private readonly runtime: LongTaskRuntime
   private readonly ui: TaskUiApi
 
-  constructor(ctx: Context, runtime: LongTaskRuntime) {
+  constructor(ctx: Context, runtime: LongTaskRuntime, private readonly settings?: LongTaskSettings) {
     super(ctx, 'longTasks')
     this.runtime = runtime
     this.ui = new TaskUiApi(runtime, new TaskControlApi(runtime))
+  }
+
+  getLongTaskSettings(): unknown { return this.settings?.read() ?? null }
+  saveLongTaskSettings(input: { expectedRevision: string; draft: unknown }): unknown {
+    if (this.settings === undefined) throw new Error('当前运行时不可编辑设置')
+    return this.settings.save(input.expectedRevision, input.draft)
   }
 
   get(taskId: string): unknown { return this.runtime.getStatus(taskId) ?? null }
@@ -44,7 +51,7 @@ export function apply(ctx: Context): void {
   if (runtime === undefined) throw new Error('longTaskRuntime service is unavailable')
   const registry = ctx.get('typert') as TypertHostRegistry | undefined
   if (registry === undefined) throw new Error('Typert registry is unavailable')
-  new LongTaskRemote(ctx, runtime)
+  new LongTaskRemote(ctx, runtime, ctx.get('longTaskSettings') as LongTaskSettings | undefined)
   registry.register({
     package: longTaskRemote.package, face: 'host', schemas: [],
     model: { services: [], events: [], objects: [] }, invocations: longTaskRemote.descriptors,

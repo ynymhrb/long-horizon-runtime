@@ -6,12 +6,13 @@ import { Scheduler } from './scheduler.js';
 import { ArtifactStore } from './artifacts.js';
 import { withDshParent } from './dsh-adapters.js';
 import { classifyAutomaticReplan } from './replan-policy.js';
-import { parseWorkflow, readWorkflowVerdict, workflowStep, WorkflowVisitLimit } from './workflow.js';
+import { parseWorkflow, readWorkflowVerdict, workflowProfiles, workflowStep, WorkflowVisitLimit } from './workflow.js';
 /** Durable command service. Agent/session objects may be supplied at activation time but are never persisted. */
 export class LongTaskRuntime {
     planner;
     store;
     closed = false;
+    settingsReloadUntil = 0;
     ownsStore;
     artifactStore;
     scheduler;
@@ -31,7 +32,48 @@ export class LongTaskRuntime {
         this.profileRouter = normalized.profileRouter;
         this.scheduler = new Scheduler(execution, { store: this.store, ...(normalized.workerPool === undefined ? {} : { workerPool: normalized.workerPool }), advanceWorkflow: goalId => this.advanceWorkflow(goalId), maxConcurrentTasks: normalized.maxConcurrentTasks ?? 1, ...(normalized.defaultRetryPolicy === undefined ? {} : { defaultRetryPolicy: normalized.defaultRetryPolicy }), ...(normalized.retryBackoffMs === undefined ? {} : { retryBackoffMs: normalized.retryBackoffMs }), ...(normalized.maxRetryBackoffMs === undefined ? {} : { maxRetryBackoffMs: normalized.maxRetryBackoffMs }), ...(normalized.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: normalized.idleTimeoutMs }), ...(normalized.maxWallTimeMs === undefined ? {} : { maxWallTimeMs: normalized.maxWallTimeMs }), ...(normalized.now === undefined ? {} : { now: normalized.now }), ...(normalized.recoveryValidator === undefined ? {} : { recoveryValidator: normalized.recoveryValidator }), ...(normalized.validator === undefined ? {} : { validator: normalized.validator }), ...(normalized.validators === undefined ? {} : { validators: normalized.validators }), ...(normalized.profileRouter === undefined ? {} : { profileRouter: normalized.profileRouter }), ...(normalized.executionPolicy === undefined ? {} : { executionPolicy: normalized.executionPolicy }), ...(normalized.memoryRetriever === undefined ? {} : { memoryRetriever: normalized.memoryRetriever }), ...(normalized.maxMemoryItems === undefined ? {} : { maxMemoryItems: normalized.maxMemoryItems }), ...(this.artifactStore === undefined ? {} : { artifactStore: this.artifactStore }), ...(normalized.autoReplan === true ? { onTerminalFailure: async (input) => { await this.requestAutomaticReplan(input.goalId, input); } } : {}) });
     }
+    settingsBusy() {
+        return this.settingsReloadUntil > Date.now() || this.background.size > 0 || this.store.listRunningAttempts().length > 0
+            || this.store.listGoals().some(goal => goal.state === 'RUNNING' || goal.state === 'DRAFT');
+    }
+    settingsReferencedProfiles() {
+        const profiles = new Set();
+        for (const goal of this.store.listGoals()) {
+            if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(goal.state))
+                continue;
+            const plan = this.store.getPlan(goal.id);
+            for (const task of [...this.store.listTasks(goal.id), ...(plan?.state === 'PROPOSED' ? plan.tasks : [])]) {
+                if (task.state === 'SUCCEEDED')
+                    continue;
+                if (task.executionProfile !== undefined)
+                    profiles.add(task.executionProfile);
+                for (const id of task.allowedExecutionProfiles ?? [])
+                    profiles.add(id);
+            }
+            const active = this.workflow(goal.id);
+            const proposal = plan?.state === 'PROPOSED' ? this.proposedWorkflow(goal.id, plan.revision) : undefined;
+            for (const spec of [active, proposal]) {
+                if (spec !== undefined)
+                    for (const id of workflowProfiles(spec))
+                        profiles.add(id);
+            }
+        }
+        return [...profiles];
+    }
+    holdSettingsReload() {
+        if (this.settingsBusy())
+            throw new Error('长任务尚未空闲');
+        const deadline = Date.now() + 120_000;
+        this.settingsReloadUntil = deadline;
+        return () => { if (this.settingsReloadUntil === deadline)
+            this.settingsReloadUntil = 0; };
+    }
+    assertSettingsReloadComplete() {
+        if (this.settingsReloadUntil > Date.now())
+            throw new Error('长任务配置正在重新加载，请稍候');
+    }
     async createGoal(request, executionParent, executionSignal) {
+        this.assertSettingsReloadComplete();
         if (request.objective.trim().length === 0)
             throw new Error('goal objective must not be empty');
         const orchestration = request.orchestration === undefined ? undefined : parseWorkflow(request.orchestration, this.profileRouter?.profileIds());
@@ -72,6 +114,7 @@ export class LongTaskRuntime {
         return this.view(id);
     }
     async confirmGoal(goalId, executionParent, executionSignal, authority = 'agent') {
+        this.assertSettingsReloadComplete();
         const goal = this.requireGoal(goalId);
         if (goal.state !== 'AWAITING_CONFIRMATION')
             throw new Error(`goal ${goalId} is not awaiting confirmation`);
@@ -137,6 +180,7 @@ export class LongTaskRuntime {
     }
     /** Revise the durable user objective and create a confirmation-fenced replacement plan. */
     async editOriginalGoal(goalId, input, executionParent, executionSignal) {
+        this.assertSettingsReloadComplete();
         this.assertPlannerManaged(goalId);
         const goal = this.requireGoal(goalId);
         if (goal.archivedAt !== undefined)
@@ -207,6 +251,7 @@ export class LongTaskRuntime {
         return this.view(goalId);
     }
     async resumeGoal(goalId, executionParent, recoveryResolution, executionSignal, authority = 'agent') {
+        this.assertSettingsReloadComplete();
         const goal = this.requireGoal(goalId);
         // 操作者暂停是粘性的：代理在长 turn 里重复执行旧的继续指令时，不得静默
         // 覆盖用户刚做出的暂停决定。只有浏览器任务区（操作者）可以解除它。
@@ -457,6 +502,7 @@ export class LongTaskRuntime {
     }
     /** Advance at most one round repeatedly, used by non-DSH callers and tests with a live parent. */
     async runUntilIdle(goalId, executionParent, executionSignal) {
+        this.assertSettingsReloadComplete();
         while (!this.closed) {
             const dispatched = await this.scheduler.runRound(goalId, undefined, executionParent, executionSignal);
             if (this.closed)
@@ -486,6 +532,7 @@ export class LongTaskRuntime {
     startBackground(goalId, executionParent) {
         if (this.closed || this.background.has(goalId) || executionParent === undefined)
             return;
+        this.assertSettingsReloadComplete();
         let watchdog;
         const promise = withDshParent(executionParent, () => this.runUntilIdle(goalId, executionParent))
             .catch(error => {

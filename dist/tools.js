@@ -11,11 +11,26 @@ import { CallRouter } from './call-routing.js';
 import { WorkerPool } from './worker-pool.js';
 import { createProcessWorker } from './process-worker.js';
 import { parseWorkflow } from './workflow.js';
+import { applySettingsPreferences, LongTaskSettings } from './settings.js';
 export const name = 'long-task-runtime';
 export const inject = ['tools', 'subagents', 'systemPrompt'];
 /** Mount the runtime service and six stateless model-facing controls. */
 export function apply(ctx, input) {
-    const config = resolveConfig(input);
+    const host = { ...input, ...ctx.get?.('longTaskSettingsOverlay') };
+    const preferences = ctx.get?.('longTaskWebPreferences');
+    let effective = host;
+    let warning;
+    if (preferences?.draft !== undefined) {
+        try {
+            const candidate = { ...host, ...applySettingsPreferences(host, preferences.draft) };
+            resolveConfig(candidate);
+            effective = candidate;
+        }
+        catch {
+            warning = '保存的设置与当前宿主配置不一致。请核对后重新保存。';
+        }
+    }
+    const config = resolveConfig(effective);
     const router = (config.modelEndpoints?.length || config.toolConcurrency?.length)
         ? new CallRouter(config.modelEndpoints ?? [], config.toolConcurrency ?? []) : undefined;
     const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile };
@@ -33,6 +48,13 @@ export function apply(ctx, input) {
         databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, workerPool: pool, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
     });
     ctx.provide('longTaskRuntime', runtime);
+    ctx.provide('longTaskSettings', new LongTaskSettings(effective, () => runtime.settingsBusy(), () => runtime.holdSettingsReload(), override => {
+        const candidate = resolveConfig({ ...host, ...override });
+        for (const id of runtime.settingsReferencedProfiles()) {
+            if (!candidate.executionProfiles.profiles.has(id))
+                throw new Error('仍有未完成任务使用执行组：' + id);
+        }
+    }, host, warning));
     ctx.systemPrompt.section({
         name: 'long-task:routing',
         order: 130,
@@ -241,7 +263,10 @@ function resolveConfig(config) {
     const configuredProfiles = config.executionProfiles ?? [{
             id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }),
         }];
-    const workerMap = new Map((config.workers ?? []).map(worker => [worker.id, worker]));
+    const declaredWorkers = config.workers ?? [];
+    const workerMap = new Map(declaredWorkers.map(worker => [worker.id, worker]));
+    if (workerMap.size !== declaredWorkers.length)
+        throw new Error('Worker ID 重复');
     for (const worker of workerMap.values())
         if (!['dsh', 'codex-cli', 'claude-cli', 'custom-exec'].includes(worker.kind))
             throw new Error('未知 Worker 类型：' + worker.kind);

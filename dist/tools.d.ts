@@ -7,6 +7,7 @@ import { type PolicyMode } from './execution-policy.js';
 import { type ModelEndpoint, type ToolConcurrency } from './call-routing.js';
 import { type ProcessWorkerConfig } from './process-worker.js';
 import { type WorkflowSpec } from './workflow.js';
+import { LongTaskSettings, type SettingsOverride } from './settings.js';
 export type WorkerConfig = ({
     readonly kind: 'dsh';
     readonly modelRole?: string;
@@ -18,6 +19,7 @@ export type WorkerConfig = ({
 /** Deployment configuration supplied from cordis.yml. Every operational knob is validated at activation. */
 export interface Config {
     readonly databasePath: string;
+    readonly settingsPatchPath?: string;
     readonly artifactDirectory: string;
     readonly plannerProvider: string;
     readonly executionProvider: string;
@@ -67,6 +69,11 @@ interface ResolvedConfig extends Omit<Config, 'maxConcurrentTasks' | 'defaultPla
 declare module '@deepseek-ai/cordis' {
     interface Context {
         longTaskRuntime: LongTaskRuntime;
+        longTaskSettings: LongTaskSettings;
+        longTaskSettingsOverlay: SettingsOverride;
+        longTaskWebPreferences: {
+            readonly draft?: unknown;
+        };
     }
 }
 export declare const name = "long-task-runtime";

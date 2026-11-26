@@ -31,7 +31,7 @@ export interface WorkflowTask extends TaskDraft {
 
 export function parseWorkflow(value: unknown, profileIds?: readonly string[]): WorkflowSpec {
   const spec = specSchema.parse(value)
-  const profiles = spec.mode === 'workflow' ? spec.stages.map(step => step.profile) : [...spec.participants, spec.moderator].map(item => typeof item === 'string' ? item : item.profile)
+  const profiles = workflowProfiles(spec)
   if (profileIds !== undefined) {
     for (const id of profiles) if (!profileIds.includes(id)) throw new Error('未知执行配置 ' + id)
   }
@@ -53,6 +53,11 @@ export function parseWorkflow(value: unknown, profileIds?: readonly string[]): W
   visit(spec.entry)
   if (reachable.size !== stages.size) throw new Error('流程存在不可达阶段')
   return spec
+}
+
+export function workflowProfiles(spec: WorkflowSpec): readonly string[] {
+  return spec.mode === 'workflow' ? spec.stages.map(step => step.profile)
+    : [...spec.participants, spec.moderator].map(item => typeof item === 'string' ? item : item.profile)
 }
 
 export function readWorkflowVerdict(artifacts: readonly Pick<ExecutionResult['artifacts'][number], 'type' | 'content'>[]): WorkflowVerdict | undefined {

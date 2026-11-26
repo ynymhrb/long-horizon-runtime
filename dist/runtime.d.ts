@@ -90,6 +90,7 @@ export declare class LongTaskRuntime {
     private readonly planner;
     readonly store: RuntimeEventStore;
     private closed;
+    private settingsReloadUntil;
     private readonly ownsStore;
     private readonly artifactStore;
     private readonly scheduler;
@@ -98,6 +99,10 @@ export declare class LongTaskRuntime {
     private readonly goalBudget;
     private readonly profileRouter;
     constructor(planner: PlannerAdapter, execution: ExecutionAdapter, options?: number | RuntimeOptions);
+    settingsBusy(): boolean;
+    settingsReferencedProfiles(): readonly string[];
+    holdSettingsReload(): () => void;
+    private assertSettingsReloadComplete;
     createGoal(request: CreateGoalRequest, executionParent?: unknown, executionSignal?: AbortSignal): Promise<GoalView>;
     confirmGoal(goalId: string, executionParent?: unknown, executionSignal?: AbortSignal, authority?: PauseOrigin): Promise<GoalView>;
     getStatus(goalId: string): GoalView | undefined;

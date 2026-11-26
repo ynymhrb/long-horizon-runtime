@@ -20,6 +20,16 @@
     "./client": {
       "default": "./dist/client.js"
     },
+    "./web-preferences": {
+      "types": "./dist/web-preferences.d.ts",
+      "import": "./dist/web-preferences.js",
+      "default": "./dist/web-preferences.js"
+    },
+    "./settings-overlay": {
+      "types": "./dist/settings-overlay.d.ts",
+      "import": "./dist/settings-overlay.js",
+      "default": "./dist/settings-overlay.js"
+    },
     "./remote": {
       "types": "./dist/remote.d.ts",
       "import": "./dist/remote.js",
@@ -36,7 +46,8 @@
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-layout",
+      "@deepseek-ai/dsh-client-ui-settings-general"
       ],
       "platform": "web"
     }
