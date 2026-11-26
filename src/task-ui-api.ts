@@ -18,6 +18,8 @@ export interface TaskSummary {
   readonly currentOrLastNode?: { readonly id: string; readonly objective: string; readonly state: string }
   readonly reason?: string
   readonly latestEventCursor: number
+  readonly requiresSessionDriver: boolean
+  readonly runtimeMetrics: GoalView['runtimeMetrics']
 }
 export interface TaskStripView extends TaskSummary { readonly availableActions: readonly string[] }
 export interface TaskGraphView { readonly taskId: string; readonly revision: number; readonly nodes: readonly TaskNode[]; readonly edges: readonly { readonly from: string; readonly to: string }[] }
@@ -42,6 +44,19 @@ export class TaskUiApi {
 
   getTask(input: { readonly taskId: string }): GoalView | null { return this.runtime.getStatus(input.taskId) ?? null }
 
+  /** Safe V5–V7 audit summaries; raw profile options and memory text stay host-private. */
+  getTaskAudit(input: { readonly taskId: string }): { readonly profiles: readonly import('./event-store.js').ExecutionProfileResolutionProjection[]; readonly budget: import('./event-store.js').BudgetSummaryProjection | null; readonly policy: readonly import('./event-store.js').ExecutionPolicyDecisionProjection[]; readonly evaluations: readonly import('./event-store.js').ExecutionEvaluationProjection[]; readonly memories: readonly { readonly memoryId: string; readonly sourceRef: string; readonly active: boolean; readonly workspaceId?: string }[]; readonly retrievals: readonly { readonly attemptId: string; readonly taskId: string; readonly retrieval: unknown }[] } | null {
+    if (this.runtime.getStatus(input.taskId) === undefined) return null
+    return {
+      profiles: this.runtime.store.listExecutionProfileResolutions(input.taskId),
+      budget: this.runtime.store.getBudgetSummary(input.taskId) ?? null,
+      policy: this.runtime.store.listExecutionPolicyDecisions(input.taskId),
+      evaluations: this.runtime.store.listExecutionEvaluations(input.taskId),
+      memories: this.runtime.store.listMemoryRecords(input.taskId).map(record => ({ memoryId: record.memoryId, sourceRef: record.sourceRef, active: record.active, ...(record.workspaceId === undefined ? {} : { workspaceId: record.workspaceId }) })),
+      retrievals: this.runtime.store.listContextManifests(input.taskId).flatMap(manifest => manifest.context.retrieval === undefined ? [] : [{ attemptId: manifest.attemptId, taskId: manifest.taskId, retrieval: manifest.context.retrieval }]),
+    }
+  }
+
   getTaskGraph(input: { readonly taskId: string; readonly revision?: number }): TaskGraphView | null {
     const task = this.runtime.getStatus(input.taskId)
     if (task === undefined) return null
@@ -64,7 +79,7 @@ export class TaskUiApi {
   }
 
   async updateTask(input: { readonly taskId: string; readonly expectedRevision: number; readonly action: 'confirm' | 'resume' | 'pause' | 'cancel'; readonly sessionId?: string; readonly workspaceScope?: string; readonly recoveryResolution?: 'retry' | 'confirmed_succeeded'; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
-    return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+    return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' })
   }
 
   /** Explicit user action: create a durable cross-session link and make it current. */
@@ -87,10 +102,10 @@ export class TaskUiApi {
     return this.control.rejectReplanAtRevision(input.taskId, input.expectedRevision)
   }
   async editTaskGoal(input: { readonly taskId: string; readonly expectedRevision: number; readonly objective: string; readonly reason: string; readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
-    return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+    return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' })
   }
   async acceptReplan(input: { readonly taskId: string; readonly expectedRevision: number; readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }): Promise<TaskUpdateResult> {
-    return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) })
+    return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' })
   }
   async archiveTask(input: { readonly taskId: string; readonly expectedRevision: number }): Promise<TaskUpdateResult> {
     const current = this.runtime.getStatus(input.taskId)
@@ -126,6 +141,8 @@ export class TaskUiApi {
       ...(current === undefined ? {} : { currentOrLastNode: { id: current.id, objective: current.objective, state: current.state } }),
       ...(task.pauseReason === undefined ? {} : { reason: task.pauseReason }),
       latestEventCursor: this.runtime.store.latestSeq(task.id),
+      runtimeMetrics: task.runtimeMetrics,
+      requiresSessionDriver: task.requiresSessionDriver,
     }
   }
 }

@@ -1,5 +1,15 @@
 # Project Rules
 
+## 根因分析与缺陷修复
+
+- 任何故障分析必须追溯到错误状态、错误输入或错误权限最初被写入、传播或错误解释的具体边界；只复述最终报错、界面现象或最近一层函数行为，不得称为根因。
+- 在提出修复前，必须用可复现证据验证完整链路：触发条件、状态写入点、跨组件传递、消费/判定点，以及相邻生命周期转换。每一层应明确记录实际观察值与预期值。
+- 修复必须覆盖同一根因的所有已知入口，而非只绕开当前报错；若某个入口暂不能安全修复，必须记录其证据、影响和验证路径。
+- 只有在根因、修复后的不变量及其回归验证均成立时，才可宣称问题已修复；“已找到表面原因”“已加重试”“已绕过错误”均不构成修复完成。
+- 默认不得为当前样例、任务名称、业务对象、固定输入或已知路径硬编码实现。所有代码在设计时必须先识别可变维度，并以参数、数据模型、注册表、策略或明确接口表达；运行时仅依赖这些通用抽象。只有用户明确要求一次性且固定范围的实现时，才允许硬编码，并须在代码和交付说明中写明范围与不可复用性。新增第二个同类场景前，必须验证无需新增按名称的条件分支。
+- 只要一项修复跨越两个或以上模块，或涉及持久状态、并发、会话恢复、权限边界、任务生命周期中的任一项，必须先使用 `superpowers:writing-plans` 写出实施计划，再使用 `superpowers:executing-plans` 建立持续进度账本并逐项执行；不得将其误判为连续的小修复而跳过计划。
+- 这类计划执行期间，只有全部计划任务达到各自验证条件，或出现规则允许的真实阻塞，才能发送最终回复。阶段性编码、单项测试通过或已部署均不得作为结束本次会话执行的理由。
+
 ## Long-task runtime configuration and deployment
 
 The plugin bundle owns its default host configuration. When developing or
@@ -74,6 +84,41 @@ therefore always use one shared durable database.
   legend. Color is never the only state signal. The event panel is a readable
   chronological audit trail with timestamps, reason/impact summaries, and
   revision navigation rather than raw internal event names.
+
+### Operator pause authority
+
+- An operator pause is sticky. `GoalPaused` records `origin: 'operator' |
+  'agent' | 'system'`, projected as `goals.pause_origin`; only an
+  operator-authorized resume (`TaskInvocation.authority: 'operator'`, set by
+  the Task Area remote) may clear it.
+- Agent tools, planner/worker children, scheduler self-healing, quota
+  recovery, and restart recovery must never override an operator pause. A
+  rejected system resume records `DecisionRecorded{type:
+  'operator_pause_respected'}` instead of crashing.
+- Rejection is an explicit error, not a silent no-op: the model receives
+  "paused by the operator" and must ask the user to resume from the Task Area.
+- Legacy rows with an empty `pause_origin` are treated as `system`; do not
+  retro-lock historical tasks.
+- Client controls must surface conflicts and failures (a version-fenced
+  pause that lost the race is not a successful pause); never swallow the
+  result of a control command.
+
+### Session driver injection
+
+- Exactly one client module owns “hand this task to its bound session”:
+  `client/task-driver.js`. Every surface (Task Area Cockpit, input-dock task
+  strip) must call `driveBoundSessionOnce` instead of calling
+  `session.prompt` itself, and no component may keep its own driver dedupe
+  set; a per-component `useRef` key cannot survive a remount and cannot see
+  the other surface.
+- The dedupe key is `(sessionId, taskId, controlRevision)`. The explicit
+  resume path must claim the same key as the automatic effect by using the
+  `GoalView` returned from the control action, never a stale closure.
+- A successful injection blocks re-injection until
+  `DRIVER_REDRIVE_GRACE_MS` (60 s) elapses; a failed injection is retryable
+  immediately. Injection runs through `session.prompt(..., 'queue')`, so any
+  duplicate becomes a visible queued user message — treat a queued duplicate
+  as a driver bug, not as expected behavior.
 
 ### Compatibility and failure presentation
 

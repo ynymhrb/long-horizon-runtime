@@ -1,9 +1,16 @@
+import type { WorkerLease, WorkerPool } from './worker-pool.js'
+import { readWorkflowVerdict } from './workflow.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { validateExecutionResult, type ExecutionAdapter, type ExecutionResult } from './adapters.js'
 import type { ContextView } from './context.js'
 import { V1_ARTIFACT_TYPES, type TaskNode, type TaskState } from './domain.js'
 import { RuntimeEventStore } from './event-store.js'
 import { ArtifactStore } from './artifacts.js'
+import { ProfileRouter, type ResolvedExecutionProfile } from './execution-profiles.js'
+import { ExecutionPolicy } from './execution-policy.js'
+import { BudgetLedger, type BudgetReservation } from './budgets.js'
+import type { MemoryRetriever } from './memory-retrieval.js'
+import { AcceptanceEngine } from './acceptance.js'
 
 type MutableTask = { -readonly [Key in keyof TaskNode]: TaskNode[Key] }
 export type RecoveryResult = 'succeeded' | 'retry' | 'indeterminate'
@@ -27,6 +34,13 @@ export interface SchedulerOptions {
   readonly validators?: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   readonly artifactStore?: ArtifactStore
   readonly onTerminalFailure?: (input: { readonly goalId: string; readonly task: TaskNode; readonly reason: string }) => Promise<void>
+  readonly profileRouter?: ProfileRouter
+  readonly executionPolicy?: ExecutionPolicy
+  readonly memoryRetriever?: MemoryRetriever
+  readonly maxMemoryItems?: number
+  readonly acceptanceEngine?: AcceptanceEngine
+  readonly workerPool?: WorkerPool
+  readonly advanceWorkflow?: (goalId: string) => boolean
 }
 
 /** Deterministic super-step scheduler. With a store, all state transitions are durable. */
@@ -44,6 +58,15 @@ export class Scheduler {
   private readonly validators: Readonly<Record<string, NonNullable<SchedulerOptions['validator']>>>
   private readonly artifactStore: ArtifactStore | undefined
   private readonly onTerminalFailure?: SchedulerOptions['onTerminalFailure']
+  private readonly profileRouter: ProfileRouter | undefined
+  private readonly executionPolicy: ExecutionPolicy | undefined
+  private readonly memoryRetriever: MemoryRetriever | undefined
+  private readonly maxMemoryItems: number | undefined
+  private readonly workerPool: WorkerPool | undefined
+  private readonly advanceWorkflow: SchedulerOptions['advanceWorkflow']
+  private readonly acceptanceEngine: AcceptanceEngine | undefined
+  private closed = false
+  private readonly queued = new Map<string, { goalId: string; controller: AbortController }>()
   private readonly aborters = new Map<string, { readonly goalId: string; readonly taskId: string; readonly controller: AbortController }>()
   /** Resolves an in-process dispatch when its durable lease is terminalized. */
   private readonly livenessSettlers = new Map<string, () => void>()
@@ -67,20 +90,35 @@ export class Scheduler {
     this.validators = { required: async () => ({ ok: true }), ...(typeof options === 'number' ? {} : options.validators ?? {}) }
     this.artifactStore = typeof options === 'number' ? undefined : options.artifactStore
     this.onTerminalFailure = typeof options === 'number' ? undefined : options.onTerminalFailure
+    this.profileRouter = typeof options === 'number' ? undefined : options.profileRouter
+    this.executionPolicy = typeof options === 'number' ? undefined : options.executionPolicy
+    this.memoryRetriever = typeof options === 'number' ? undefined : options.memoryRetriever
+    this.maxMemoryItems = typeof options === 'number' ? undefined : options.maxMemoryItems
+    this.workerPool = typeof options === 'number' ? undefined : options.workerPool
+    this.advanceWorkflow = typeof options === 'number' ? undefined : options.advanceWorkflow
+    this.acceptanceEngine = typeof options === 'number' ? undefined : options.acceptanceEngine
     if (!Number.isSafeInteger(this.maxConcurrentTasks) || this.maxConcurrentTasks < 1) throw new Error('maxConcurrentTasks must be at least one')
   }
 
   /** Dispatch one bounded ready set. Legacy map mode is retained for a narrow unit-test boundary. */
   async runRound(goalId: string, legacyTasks?: Map<string, TaskNode>, executionParent?: unknown, executionSignal?: AbortSignal): Promise<boolean> {
     if (this.store === undefined) { if (legacyTasks === undefined) throw new Error('legacy scheduler requires tasks'); await this.runLegacyRound(goalId, legacyTasks); return true }
+    if (this.closed) return false
     this.reconcileLiveness(goalId)
     const goal = this.store.getGoal(goalId)
     if (goal?.state !== 'RUNNING') return false
     const tasks = this.store.listTasks(goalId)
-    const ready = tasks.filter(task => task.state === 'PENDING' && !this.inBackoff(goalId, task.id) && this.dependenciesSatisfied(goalId, task, tasks))
+    const ready = tasks.filter(task => task.state === 'PENDING' && !this.queued.has(this.key(goalId, task.id)) && !this.inBackoff(goalId, task.id) && this.dependenciesSatisfied(goalId, task, tasks))
       .sort((a, b) => b.priority - a.priority || (a.createdOrder ?? Number.MAX_SAFE_INTEGER) - (b.createdOrder ?? Number.MAX_SAFE_INTEGER)).slice(0, this.maxConcurrentTasks)
-    this.store.transaction(() => this.store!.append(ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} }))))
+    const round = ready.length === 0 ? undefined : this.store.listRunRounds(goalId).length + 1
+    const startedAt = round === undefined ? undefined : new Date(this.now()).toISOString()
+    this.store.transaction(() => this.store!.append([
+      ...(round === undefined ? [] : [{ type: 'GoalRunRoundStarted', goalId, payload: { round, revision: goal.revision, startedAt } }]),
+      ...ready.map(task => ({ type: 'TaskReady', goalId, taskId: task.id, payload: {} })),
+    ]))
     await Promise.all(ready.map(task => this.executeOne(goalId, task, executionParent, executionSignal)))
+    if (this.closed) return false
+    let advanced = false
     this.store.transaction(() => {
       const events: Array<{ type: string; goalId: string; payload: Record<string, unknown> }> = []
       // A replan proposal or pause recorded during this round already moved the
@@ -95,16 +133,30 @@ export class Scheduler {
       // planner pauses it. Appending GoalFailed here would overwrite either
       // decision and orphan the proposal or the pause.
       const lifecycleDecided = currentState !== undefined && currentState !== 'RUNNING'
-      if (latest.length > 0 && latest.every(task => task.state === 'SUCCEEDED')) events.push({ type: 'GoalSucceeded', goalId, payload: {} })
+      if (!lifecycleDecided && latest.length > 0 && latest.every(task => task.state === 'SUCCEEDED')) {
+        advanced = this.advanceWorkflow?.(goalId) ?? false
+        if (!advanced) events.push({ type: 'GoalSucceeded', goalId, payload: {} })
+      }
       else if (!lifecycleDecided && latest.some(task => task.state === 'FAILED') && !latest.some(task => ['PENDING', 'READY', 'RUNNING'].includes(task.state))) events.push({ type: 'GoalFailed', goalId, payload: {} })
+      if (round !== undefined) events.push({ type: 'GoalRunRoundFinished', goalId, payload: { round, finishedAt: new Date(this.now()).toISOString(), outcome: this.store!.getGoal(goalId)?.state ?? 'unknown' } })
       this.store!.append(events)
     })
-    return ready.length > 0
+    return ready.length > 0 || advanced
+  }
+
+  close(): void {
+    this.closed = true
+    for (const { controller } of this.queued.values()) controller.abort()
+    for (const [attemptId, { controller }] of this.aborters) {
+      controller.abort()
+      this.cancelAttempt(attemptId)
+      this.livenessSettlers.get(attemptId)?.()
+    }
   }
 
   /** Reconcile durable leases even when a provider promise or host process is lost. */
   reconcileLiveness(goalId?: string): void {
-    if (this.store === undefined) return
+    if (this.store === undefined || this.closed) return
     const now = this.now()
     for (const attempt of this.store.listRunningAttempts()) {
       if (goalId !== undefined && attempt.goalId !== goalId) continue
@@ -118,7 +170,7 @@ export class Scheduler {
       // Keep the durable lease current, but retain the wall-time ceiling so a
       // genuinely stuck child cannot run forever.  After a host restart no
       // adapter-owned handle exists, so the normal recovery path still wins.
-      if (idleExpired && !wallExpired && this.adapter.isAttemptAlive?.(attempt.id) === true) {
+      if (idleExpired && !wallExpired && (this.workerPool ?? this.adapter).isAttemptAlive?.(attempt.id) === true) {
         this.store.transaction(() => this.store!.append([{
           type: 'AttemptProgressRecorded', goalId: attempt.goalId, taskId: attempt.taskId,
           payload: { attemptId: attempt.id, at: new Date(now).toISOString(), leaseExpiresAt: new Date(now + this.idleTimeoutMs).toISOString(), phase: 'transport_liveness', message: 'child session remains live' },
@@ -131,7 +183,7 @@ export class Scheduler {
       const retryIdle = idleExpired && !wallExpired && task.sideEffectClass !== 'external_effect' && attemptCount < maxAttempts
       const active = this.aborters.get(attempt.id)
       active?.controller.abort()
-      this.adapter.cancel?.(attempt.id)
+      this.cancelAttempt(attempt.id)
       this.store.transaction(() => {
         const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = [
           { type: 'TaskAttemptTimedOut', goalId: attempt.goalId, taskId: attempt.taskId, payload: { attemptId: attempt.id, kind: wallExpired ? 'wall' : 'idle', reason } },
@@ -189,32 +241,35 @@ export class Scheduler {
     }
     for (const goalId of recoveredGoals) {
       const tasks = this.store.listTasks(goalId)
-      if (tasks.length > 0 && tasks.every(task => task.state === 'SUCCEEDED')) this.store.transaction(() => this.store!.append([{ type: 'GoalSucceeded', goalId, payload: { recovered: true } }]))
+      if (tasks.length > 0 && tasks.every(task => task.state === 'SUCCEEDED') && this.store.latestEventPayload(goalId, 'WorkflowConfigured') === undefined) this.store.transaction(() => this.store!.append([{ type: 'GoalSucceeded', goalId, payload: { recovered: true } }]))
     }
     return [...recoveredGoals]
   }
 
   cancel(goalId: string): void {
     this.clearRetryAfter(goalId)
-    for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); this.adapter.cancel?.(attemptId) }
+    this.abortQueued(goalId)
+    for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); (this.workerPool ?? this.adapter).cancel?.(attemptId) }
     if (this.store?.getGoal(goalId)?.state !== 'CANCELLED') this.store?.transaction(() => this.store!.append([{ type: 'GoalCancelled', goalId, payload: {} }]))
   }
 
   /** Stop in-flight child work without choosing a durable lifecycle transition. */
   interrupt(goalId: string): void {
     this.clearRetryAfter(goalId)
-    for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); this.adapter.cancel?.(attemptId) }
+    this.abortQueued(goalId)
+    for (const [attemptId, active] of this.aborters) if (active.goalId === goalId) { active.controller.abort(); (this.workerPool ?? this.adapter).cancel?.(attemptId) }
   }
 
   /** Stop active child work and durably return its logical nodes to PENDING. */
   pause(goalId: string): void {
     this.clearRetryAfter(goalId)
+    this.abortQueued(goalId)
     const events: Array<{ type: string; goalId: string; taskId: string; payload: Record<string, unknown> }> = []
     for (const [attemptId, active] of this.aborters) {
       if (active.goalId !== goalId) continue
       active.controller.abort()
-      this.adapter.cancel?.(attemptId)
-      events.push({ type: 'TaskInterrupted', goalId, taskId: active.taskId, payload: { attemptId, reason: 'user_requested_pause' } })
+      this.cancelAttempt(attemptId)
+      events.push(...this.interruptedAttempt(goalId, active.taskId, attemptId, 'user_requested_pause'))
     }
     if (events.length > 0) this.store?.transaction(() => this.store!.append(events))
   }
@@ -228,6 +283,20 @@ export class Scheduler {
       if (earliest === undefined || remaining < earliest) earliest = remaining
     }
     return earliest === undefined ? undefined : Math.max(0, earliest)
+  }
+
+  private interruptedAttempt(goalId: string, taskId: string, attemptId: string, reason: string): Array<{ type: string; goalId: string; taskId: string; payload: Record<string, unknown> }> {
+    const events = [{ type: 'TaskInterrupted', goalId, taskId, payload: { attemptId, reason } }]
+    if (this.store!.getTask(goalId, taskId)?.sideEffectClass === 'external_effect') {
+      events.push({ type: 'TaskRecoveryBlocked', goalId, taskId, payload: { attemptId, reason: 'interrupted external effect requires operator resolution' } })
+    }
+    return events
+  }
+
+  private cancelAttempt(attemptId: string): void { (this.workerPool ?? this.adapter).cancel?.(attemptId) }
+
+  private abortQueued(goalId: string): void {
+    for (const entry of this.queued.values()) if (entry.goalId === goalId) entry.controller.abort()
   }
 
   private key(goalId: string, taskId: string): string { return `${goalId}\u0000${taskId}` }
@@ -262,7 +331,8 @@ export class Scheduler {
       const summary = this.store!.listAttempts(dependencyId, goalId).filter(attempt => attempt.state === 'SUCCEEDED').at(-1)?.summary
       return { taskId: dependencyId, objective: dependency?.objective ?? dependencyId, ...(summary === undefined ? {} : { summary }) }
     })
-    return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store!.listDecisions(goalId), evidence: this.store!.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }) }
+    const retrieval = this.memoryRetriever === undefined || this.maxMemoryItems === undefined ? undefined : this.memoryRetriever.retrieve({ query: `${goal?.objective ?? goalId} ${task.objective} ${dependencySummaries.map(item => item.summary ?? '').join(' ')}`, maxItems: this.maxMemoryItems, memories: this.store!.listMemoryRecords(goalId).map(record => ({ id: record.memoryId, content: record.text, active: record.active, sourceRef: record.sourceRef })) })
+    return { objective: goal?.objective ?? goalId, ...(goal === undefined ? {} : { constraints: goal.constraints, revision: goal.revision }), task: { id: task.id, objective: task.objective, ...(task.inputContract === undefined ? {} : { inputContract: task.inputContract }), ...(task.outputContract === undefined ? {} : { outputContract: task.outputContract }), ...(task.completionCriteria === undefined ? {} : { completionCriteria: task.completionCriteria }) }, artifacts, l1DependencySummaries: dependencySummaries, l2ProjectContext: { constraints: goal?.constraints ?? [], decisions: this.store!.listDecisions(goalId), evidence: this.store!.listEvidence(goalId) }, ...(priorFailure === undefined ? {} : { priorFailureSummary: priorFailure }), ...(retrieval === undefined ? {} : { retrieval }) }
   }
   private async executeOne(goalId: string, task: TaskNode, executionParent: unknown, executionSignal?: AbortSignal): Promise<void> {
     const attemptId = randomUUID()
@@ -272,7 +342,63 @@ export class Scheduler {
     else executionSignal?.addEventListener('abort', relayAbort, { once: true })
     const attemptRevision = this.store!.getGoal(goalId)?.revision ?? 1
     const idempotencyKey = `${goalId}:${task.id}:${attemptRevision}`
-    this.aborters.set(attemptId, { goalId, taskId: task.id, controller })
+    let profile: ResolvedExecutionProfile | undefined
+    let policyDecision: ReturnType<ExecutionPolicy['choose']> | undefined
+    try {
+      const requestedProfileId = task.executionProfile ?? task.allowedExecutionProfiles?.[0] ?? this.profileRouter?.profileIds()[0]
+      if (this.executionPolicy !== undefined && requestedProfileId !== undefined && task.allowedExecutionProfiles !== undefined) {
+        policyDecision = this.executionPolicy.choose({ requestedProfileId, candidates: task.allowedExecutionProfiles.map(profileId => ({ profileId, enabled: this.profileRouter!.profileIds().includes(profileId), compatible: true })) })
+        profile = this.profileRouter!.resolve({ task: { ...task, executionProfile: policyDecision.selectedProfileId }, defaultTimeoutMs: task.timeoutMs ?? this.maxWallTimeMs })
+      } else profile = this.profileRouter?.resolve({ task, defaultTimeoutMs: task.timeoutMs ?? this.maxWallTimeMs })
+    } catch (error) {
+      this.aborters.delete(attemptId); executionSignal?.removeEventListener('abort', relayAbort)
+      const reason = failureMessage(error)
+      this.store!.transaction(() => this.store!.append([{ type: 'ExecutionProfileRejected', goalId, taskId: task.id, payload: { attemptId, reason, requestedProfile: task.executionProfile ?? null } }, { type: 'GoalPaused', goalId, payload: { reason: `execution profile rejected for ${task.id}: ${reason}` } }]))
+      return
+    }
+    let lease: WorkerLease | undefined
+    const queueKey = this.key(goalId, task.id)
+    try {
+      if (this.workerPool !== undefined) {
+        if (this.queued.has(queueKey)) return
+        this.queued.set(queueKey, { goalId, controller })
+        try {
+          lease = await this.workerPool.admit(profile?.workerIds ?? ['dsh'], controller.signal, task.sideEffectClass)
+        } catch (error) {
+          if (!controller.signal.aborted) throw error
+          if (!this.closed && executionSignal?.aborted && this.store!.getGoal(goalId)?.state === 'RUNNING') {
+            this.store!.transaction(() => this.store!.append([{ type: 'GoalPaused', goalId, payload: { reason: 'conversation stopped before Worker dispatch', origin: 'operator' } }]))
+          }
+          return
+        } finally { this.queued.delete(queueKey) }
+        if (this.closed) return
+        const current = this.store!.getGoal(goalId)
+        const status = this.store!.getTask(goalId, task.id)?.state
+        if (controller.signal.aborted || current?.state !== 'RUNNING' || current.revision !== attemptRevision || (status !== 'READY' && status !== 'PENDING')) return
+      }
+      this.aborters.set(attemptId, { goalId, taskId: task.id, controller })
+      await this.executeAssigned(goalId, task, executionParent, executionSignal, controller, relayAbort, attemptId, attemptRevision, idempotencyKey, profile, policyDecision, lease)
+    } finally {
+      this.aborters.delete(attemptId)
+      executionSignal?.removeEventListener('abort', relayAbort)
+      lease?.release()
+    }
+  }
+
+  private async executeAssigned(
+    goalId: string, task: TaskNode, executionParent: unknown, executionSignal: AbortSignal | undefined,
+    controller: AbortController, relayAbort: () => void, attemptId: string, attemptRevision: number,
+    idempotencyKey: string, profile: ResolvedExecutionProfile | undefined,
+    policyDecision: ReturnType<ExecutionPolicy['choose']> | undefined, lease: WorkerLease | undefined,
+  ): Promise<void> {
+    const reservation: BudgetReservation = { attempts: 1, wallTimeMs: profile?.timeoutMs ?? task.timeoutMs ?? this.maxWallTimeMs, estimatedTokens: 0, estimatedCostMicros: 0 }
+    const budgetSummary = this.store!.getBudgetSummary(goalId)
+    const budgetActive = budgetSummary !== undefined || task.budget !== undefined
+    if (budgetActive && !new BudgetLedger(budgetSummary?.usage).reserve({ ...(budgetSummary === undefined ? {} : { goal: budgetSummary.goal }), ...(task.budget === undefined ? {} : { task: task.budget }), estimate: reservation }).ok) {
+      this.aborters.delete(attemptId); executionSignal?.removeEventListener('abort', relayAbort)
+      this.store!.transaction(() => this.store!.append([{ type: 'BudgetExhausted', goalId, taskId: task.id, payload: { attemptId, estimate: reservation } }, { type: 'GoalPaused', goalId, payload: { reason: `budget exhausted for ${task.id}` } }]))
+      return
+    }
     let context: ContextView
     try { context = this.context(goalId, task) }
     catch (error) {
@@ -284,39 +410,68 @@ export class Scheduler {
         { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined } },
       ]))
       this.aborters.delete(attemptId)
-      this.terminalFailure(goalId, task, attemptId, failureMessage(error))
+      this.terminalFailure(goalId, task, attemptId, failureMessage(error), undefined, false, budgetActive)
       return
     }
     this.store!.transaction(() => this.store!.append([
+      ...(lease === undefined ? [] : [{ type: 'WorkerAssigned', goalId, taskId: task.id, payload: { attemptId, workerId: lease.workerId } }]),
+      ...(profile === undefined ? [] : [{ type: 'ExecutionProfileResolved', goalId, taskId: task.id, payload: { attemptId, profileId: profile.id, providerName: profile.providerName, agentOptionsHash: profile.agentOptionsHash, capabilities: profile.capabilities, toolDeny: profile.toolDeny, timeoutMs: profile.timeoutMs, selectionReason: profile.selectionReason } }]),
+      ...(policyDecision === undefined ? [] : [{ type: 'ExecutionPolicyDecided', goalId, taskId: task.id, payload: { attemptId, ...policyDecision } }]),
+      ...(budgetActive ? [{ type: 'BudgetReserved', goalId, taskId: task.id, payload: { attemptId, usage: reservation } }] : []),
       { type: 'ContextManifestRecorded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, selectionReason: 'direct_dependencies_and_durable_l2', context } },
       { type: 'TaskAttemptStarted', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, context, idempotencyKey, executionParentPresent: executionParent !== undefined, startedAt: new Date(this.now()).toISOString(), leaseExpiresAt: new Date(this.now() + this.idleTimeoutMs).toISOString(), maxWallExpiresAt: new Date(this.now() + Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs)).toISOString() } },
     ]))
+    const dispatchStartedAt = this.now()
     let result
+    let adapterThrew = false
     let sessionRecorded = false
     const leaseExpired = new Promise<ExecutionResult>(resolve => { this.livenessSettlers.set(attemptId, () => resolve({ status: 'failed', summary: 'attempt lease expired', failureKind: 'infrastructure', artifacts: [], evidence: [] })) })
-    const effectiveTimeoutMs = Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs)
-    try { result = await Promise.race([this.adapter.execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, timeoutMs: effectiveTimeoutMs, onSessionId: dshSessionId => { sessionRecorded = true; this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }])) }, ...(executionParent === undefined ? {} : { parent: executionParent }) }), leaseExpired]) } catch (error) {
+    const effectiveTimeoutMs = profile?.timeoutMs ?? Math.min(task.timeoutMs ?? this.maxWallTimeMs, this.maxWallTimeMs)
+    const onSessionId = (dshSessionId: string): void => {
+      if (controller.signal.aborted || sessionRecorded) return
+      sessionRecorded = true
+      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]))
+    }
+    try {
+      result = await Promise.race([
+        (lease ?? this.adapter).execute({ attemptId, taskId: task.id, context, signal: controller.signal, idempotencyKey, retryPolicy: task.retryPolicy ?? { maxAttempts: this.defaultAttempts }, sideEffectClass: task.sideEffectClass, timeoutMs: effectiveTimeoutMs, ...(profile === undefined ? {} : { profile }), onSessionId, onExternalSessionId: sessionId => {
+          if (!controller.signal.aborted) this.store!.transaction(() => this.store!.append([{ type: 'WorkerSessionLinked', goalId, taskId: task.id, payload: { attemptId, sessionId: sessionId.slice(0, 256) } }]))
+        }, onProgress: message => {
+          if (controller.signal.aborted) return
+          const now = this.now()
+          this.store!.transaction(() => this.store!.append([{ type: 'AttemptProgressRecorded', goalId, taskId: task.id, payload: { attemptId, at: new Date(now).toISOString(), leaseExpiresAt: new Date(now + this.idleTimeoutMs).toISOString(), phase: 'worker', message: message.slice(0, 512) } }]))
+        }, ...(executionParent === undefined ? {} : { parent: executionParent }) }),
+        leaseExpired,
+      ])
+    } catch (error) {
+      adapterThrew = true
       const failure = error as Error & { dshSessionId?: string }
       // An adapter that throws is an environment fault the seam could not
       // represent as a result, so it is classified as infrastructure.
       result = { status: 'failed' as const, summary: failure instanceof Error ? failure.message : String(failure), failureKind: 'infrastructure' as const, artifacts: [], evidence: [], ...(failure.dshSessionId === undefined ? {} : { dshSessionId: failure.dshSessionId }) }
     }
     this.livenessSettlers.delete(attemptId)
-    this.aborters.delete(attemptId)
-    executionSignal?.removeEventListener('abort', relayAbort)
-    if (this.store!.getGoal(goalId)?.state === 'CANCELLED' || this.store!.listAttempts(task.id, goalId).find(item => item.id === attemptId)?.state !== 'RUNNING') return
+    if (this.closed) return
+    if (this.store!.getGoal(goalId)?.state === 'CANCELLED' || this.store!.listAttempts(task.id, goalId).find(item => item.id === attemptId)?.state !== 'RUNNING') {
+      if (budgetActive) this.store!.transaction(() => this.store!.append([{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'attempt was terminalized before result processing' } }]))
+      return
+    }
     // A conversation stop is an operator interruption, not a failed unit of
     // work.  In particular, it must never feed the automatic-replan loop.
     if (controller.signal.aborted) {
       this.retryAfter.delete(this.key(goalId, task.id))
       this.store!.transaction(() => this.store!.append([
-        { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } },
+        ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'conversation stopped' } }] : []),
+        ...this.interruptedAttempt(goalId, task.id, attemptId, 'conversation stopped'),
         { type: 'GoalPaused', goalId, payload: { reason: 'conversation stopped; resume with a live parent' } },
       ]))
       return
     }
     if (this.store!.getGoal(goalId)?.revision !== attemptRevision) {
-      this.store!.transaction(() => this.store!.append([{ type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } }]))
+      this.store!.transaction(() => this.store!.append([
+        ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'task result belongs to an obsolete plan revision' } }] : []),
+        { type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'task result belongs to an obsolete plan revision' } },
+      ]))
       return
     }
     // A child that reports an interruption (e.g. DSH stopReason 'aborted') is
@@ -325,7 +480,8 @@ export class Scheduler {
     if (result.status === 'failed' && failureKind === 'interrupted') {
       this.retryAfter.delete(this.key(goalId, task.id))
       this.store!.transaction(() => this.store!.append([
-        { type: 'TaskInterrupted', goalId, taskId: task.id, payload: { attemptId, reason: result.summary } },
+        ...(budgetActive ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'task execution interrupted' } }] : []),
+        ...this.interruptedAttempt(goalId, task.id, attemptId, result.summary),
         { type: 'GoalPaused', goalId, payload: { reason: 'task execution interrupted; resume with a live parent' } },
       ]))
       return
@@ -333,16 +489,43 @@ export class Scheduler {
     try {
       const baseContract = validateExecutionResult(result)
       const outputContract = validateOutputContract(task, result)
-      const selectedValidator = task.validator === undefined ? this.validator : this.validators[task.validator]
-      const namedValidatorResult = task.validator !== undefined && selectedValidator === undefined
+      const selectedValidator = task.validator === undefined || task.validator === 'workflow-result' ? this.validator : this.validators[task.validator]
+      const namedValidatorResult = task.validator !== undefined && task.validator !== 'workflow-result' && selectedValidator === undefined
         ? { ok: false as const, reason: `unknown task validator: ${task.validator}` }
         : baseContract.ok && outputContract.ok && selectedValidator !== undefined ? await selectedValidator({ goalId, task, attemptId, result }) : undefined
-      const contract = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
+      const baseAcceptance = namedValidatorResult ?? (baseContract.ok ? outputContract : baseContract)
+      const acceptance = task.acceptanceChecks === undefined || task.acceptanceChecks.length === 0 ? undefined
+        : this.acceptanceEngine === undefined ? { verdict: 'failed' as const, checks: [{ id: 'engine', kind: 'command' as const, ok: false, summary: 'acceptance engine is not configured' }] }
+        : await this.acceptanceEngine.evaluate({ attemptId, workspace: process.cwd(), checks: task.acceptanceChecks })
+      const contract = baseAcceptance.ok && (task.acceptancePolicy !== 'required' || acceptance?.verdict === 'passed')
+        ? { ok: true as const }
+        : { ok: false as const, reason: baseAcceptance.ok ? acceptance === undefined ? 'required task has no acceptance checks' : acceptance.checks.find(check => !check.ok)?.summary ?? 'acceptance failed' : baseAcceptance.reason }
+      if (this.closed) return
       const attemptCount = this.store!.listAttempts(task.id, goalId).length
       const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
       const quotaRetryAt = failureKind === 'quota' ? validQuotaRetryAt(result.retryAt, this.now()) : undefined
+      let committed = false
       this.store!.transaction(() => {
+      const current = this.store!.getGoal(goalId)
+      const attempt = this.store!.listAttempts(task.id, goalId).find(item => item.id === attemptId)
+      if (current?.state === 'CANCELLED' || current?.revision !== attemptRevision || attempt?.state !== 'RUNNING' || controller.signal.aborted) {
+        if (budgetActive) this.store!.append([{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'attempt lost its fence during verification' } }])
+        if (attempt?.state === 'RUNNING' && controller.signal.aborted) this.store!.append([
+          ...this.interruptedAttempt(goalId, task.id, attemptId, 'interrupted during verification'),
+          ...(current?.state === 'RUNNING' ? [{ type: 'GoalPaused', goalId, payload: { reason: 'interrupted during verification' } }] : []),
+        ])
+        else if (attempt?.state === 'RUNNING' && current?.revision !== attemptRevision) this.store!.append([
+          { type: 'TaskAttemptSuperseded', goalId, taskId: task.id, payload: { attemptId, revision: attemptRevision, reason: 'verification completed for an obsolete revision' } },
+        ])
+        return
+      }
+      committed = true
       const events: Array<{ type: string; goalId: string; taskId?: string; payload: Record<string, unknown> }> = []
+      if (budgetActive) {
+        if (adapterThrew) events.push({ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'execution adapter threw before reporting usage' } })
+        else events.push({ type: 'BudgetSettled', goalId, taskId: task.id, payload: { attemptId, reservation, actual: { attempts: 1, wallTimeMs: Math.max(0, this.now() - dispatchStartedAt), estimatedTokens: result.usage?.tokens ?? reservation.estimatedTokens, estimatedCostMicros: result.usage?.costMicros ?? reservation.estimatedCostMicros, estimated: result.usage?.estimated ?? true } } })
+      }
+      events.push({ type: 'ExecutionEvaluationRecorded', goalId, taskId: task.id, payload: { attemptId, ...(profile === undefined ? {} : { profileId: profile.id }), outcome: result.status, wallTimeMs: Math.max(0, this.now() - dispatchStartedAt), validatorOk: contract.ok, artifactContractOk: outputContract.ok } })
       // onSessionId already recorded the child session at start; the settled
       // result must not duplicate it for the same attempt.
       if (result.dshSessionId !== undefined && !sessionRecorded) events.push({ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId: result.dshSessionId } })
@@ -354,6 +537,7 @@ export class Scheduler {
           : { ...stored, attemptId } })
       }
       for (const evidence of result.evidence) events.push({ type: 'EvidenceRecorded', goalId, taskId: task.id, payload: { attemptId, evidence } })
+      if (acceptance !== undefined) for (const check of acceptance.checks) events.push({ type: 'AcceptanceCheckFinished', goalId, taskId: task.id, payload: { attemptId, ...check } })
       events.push({ type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: contract.ok, validator: task.validator ?? 'result-contract', ...(contract.ok ? {} : { reason: contract.reason }), ...(failureKind === 'output' ? {} : { failureKind }) } })
       if (contract.ok) {
         this.retryAfter.delete(this.key(goalId, task.id))
@@ -399,20 +583,30 @@ export class Scheduler {
       }
       this.store!.append(events)
       })
-      if (!contract.ok && failureKind !== 'quota' && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
+      if (committed && !contract.ok && failureKind !== 'quota' && task.sideEffectClass !== 'external_effect' && attemptCount >= maxAttempts) {
         if (failureKind === 'output') await this.onTerminalFailure?.({ goalId, task, reason: contract.reason ?? result.summary })
         // An exhausted infrastructure retry budget is not validation evidence:
         // pause the goal for an operator to resume once the environment
         // recovers, and never generate a replan proposal from it.
         else this.store!.transaction(() => this.store!.append([{ type: 'GoalPaused', goalId, payload: { reason: `task ${task.id} exhausted its retry budget from infrastructure failures; resume when the environment recovers` } }]))
       }
-    } catch (error) { this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId, sessionRecorded) }
+    } catch (error) {
+      if (this.closed) return
+      const current = this.store!.getGoal(goalId)
+      const attempt = this.store!.listAttempts(task.id, goalId).find(item => item.id === attemptId)
+      if (current?.revision === attemptRevision && current.state !== 'CANCELLED' && attempt?.state === 'RUNNING' && !controller.signal.aborted) {
+        this.terminalFailure(goalId, task, attemptId, failureMessage(error), result.dshSessionId, sessionRecorded, budgetActive)
+      } else if (budgetActive) {
+        this.store!.transaction(() => this.store!.append([{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason: 'attempt ended during verification' } }]))
+      }
+    }
   }
-  private terminalFailure(goalId: string, task: TaskNode, attemptId: string, reason: string, dshSessionId?: string, sessionRecorded = false): void {
+  private terminalFailure(goalId: string, task: TaskNode, attemptId: string, reason: string, dshSessionId?: string, sessionRecorded = false, releaseBudget = false): void {
     if (this.store!.getGoal(goalId)?.state === 'CANCELLED') return
     const attemptCount = this.store!.listAttempts(task.id, goalId).length
     const maxAttempts = Math.max(task.retryPolicy?.maxAttempts ?? 0, this.defaultAttempts)
     this.store!.transaction(() => this.store!.append([
+      ...(releaseBudget ? [{ type: 'BudgetReleased', goalId, taskId: task.id, payload: { attemptId, reason } }] : []),
       ...(dshSessionId === undefined || sessionRecorded ? [] : [{ type: 'TaskAttemptSessionRecorded', goalId, taskId: task.id, payload: { attemptId, dshSessionId } }]),
       { type: 'ValidationRecorded', goalId, taskId: task.id, payload: { attemptId, ok: false, validator: task.validator ?? 'runtime', reason } },
       { type: 'TaskAttemptFailed', goalId, taskId: task.id, payload: { attemptId, reason } },
@@ -431,11 +625,13 @@ export class Scheduler {
 
 function validateOutputContract(task: TaskNode, result: import('./adapters.js').ExecutionResult): { readonly ok: boolean; readonly reason?: string } {
   if (result.status === 'failed') return { ok: false, reason: result.summary }
+  if (task.workflowReview === true && readWorkflowVerdict(result.artifacts) === undefined) return { ok: false, reason: '流程评审必须提交有效且唯一的评审结论' }
   const allowedTypes = new Set<string>(V1_ARTIFACT_TYPES)
   const invalid = result.artifacts.find(artifact => !allowedTypes.has(artifact.type))
   if (invalid !== undefined) return { ok: false, reason: `result artifact type "${invalid.type}" is not a V1 artifact type; valid types: ${V1_ARTIFACT_TYPES.join(', ')}` }
   if (result.artifacts.some(artifact => artifact.mimeType !== undefined && !/^[\w.+-]+\/[\w.+-]+$/.test(artifact.mimeType))) return { ok: false, reason: 'result artifact MIME type must be type/subtype' }
   const contract = task.outputContract ?? {}
+  if (contract.requiresArtifact === true && result.artifacts.length === 0) return { ok: false, reason: '流程步骤必须提交产物' }
   const types = contract.artifactTypes
   if (types !== undefined) {
     if (!Array.isArray(types) || types.some(type => typeof type !== 'string')) return { ok: false, reason: 'outputContract.artifactTypes must be a string array' }

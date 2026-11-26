@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "selection": {"algorithm": "sha256('gcca-swe-2026-v1:' + instance_id) ascending", "source_checked_at": "2026-09-21"},
+  "development": {"dataset": "SWE-bench/SWE-bench_Lite", "split": "test", "instances": ["django__django-13710","matplotlib__matplotlib-23563","scikit-learn__scikit-learn-14092","django__django-14730","matplotlib__matplotlib-24334","django__django-15498","django__django-15789","scikit-learn__scikit-learn-13241","django__django-12470","matplotlib__matplotlib-22835"]},
+  "golden": {"dataset": "SWE-bench/SWE-bench_Verified", "split": "test", "instances": ["matplotlib__matplotlib-13989","django__django-14792","sphinx-doc__sphinx-9658","django__django-13344","django__django-13112","astropy__astropy-13977","django__django-12325","astropy__astropy-8872","sympy__sympy-24661","sympy__sympy-22080","django__django-11265","matplotlib__matplotlib-24026","django__django-11749","matplotlib__matplotlib-20859","django__django-14771","django__django-11477","django__django-14311","sympy__sympy-15349","sympy__sympy-16597","django__django-14007","django__django-11734","sympy__sympy-23824","astropy__astropy-14369","sphinx-doc__sphinx-9320","django__django-7530","scikit-learn__scikit-learn-12682","pytest-dev__pytest-7236","django__django-11179","scikit-learn__scikit-learn-25102","astropy__astropy-7166"]}
+}

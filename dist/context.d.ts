@@ -1,4 +1,5 @@
 /** One artifact eligible for a child agent's focused context. */
+import type { MemoryCandidate, MemoryRetriever, RetrievalDecision } from './memory-retrieval.js';
 export interface ContextArtifact {
     readonly id: string;
     readonly taskId: string;
@@ -41,6 +42,8 @@ export interface ContextView {
         readonly evidence: readonly ProjectEvidence[];
     };
     readonly priorFailureSummary?: string;
+    /** Explainable optional L3 retrieval; mandatory artifacts are always separate. */
+    readonly retrieval?: RetrievalDecision;
 }
 /** Builds child contexts from direct validated task outputs only. */
 export declare class ContextBroker {
@@ -57,6 +60,9 @@ export declare class ContextBroker {
             readonly summary?: string;
         }>;
         readonly artifacts: readonly ContextArtifact[];
+        readonly memories?: readonly MemoryCandidate[];
+        readonly memoryRetriever?: MemoryRetriever;
+        readonly maxMemoryItems?: number;
     });
     /** Build a focused view for one task. */
     build(taskId: string): ContextView;

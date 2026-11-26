@@ -1,12 +1,18 @@
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent';
 import type { ExecutionAdapter, PlannerAdapter } from './adapters.js';
+import type { CallRouter, ModelRole } from './call-routing.js';
 /** Bind a model-facing tool invocation's Agent to child starts made during its async work. */
 export declare function withDshParent<T>(parent: Agent, work: () => Promise<T>): Promise<T>;
 export interface DshAdapterOptions {
     readonly providerName: string;
+    readonly callRouter?: CallRouter;
+    readonly modelRole?: ModelRole;
     readonly agentOptions?: Record<string, unknown>;
     readonly timeoutMs?: number;
+    readonly persona?: string;
+    readonly toolAllow?: readonly string[];
+    readonly toolDeny?: readonly string[];
 }
 /** Build an initial-plan adapter backed by a configured DSH one-shot provider. */
 export declare function createDshPlannerAdapter(subagents: Pick<SubagentRuntime, 'start'>, options: DshAdapterOptions): PlannerAdapter;

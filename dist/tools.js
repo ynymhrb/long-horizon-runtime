@@ -1,24 +1,71 @@
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createDshExecutionAdapter, createDshPlannerAdapter, withDshParent } from './dsh-adapters.js';
 import { LongTaskRuntime } from './runtime.js';
 import { TaskControlApi } from './task-api.js';
 import { filterRoutingTools, routingPolicyText } from './routing-policy.js';
+import { normalizeExecutionProfiles, ProfileRouter } from './execution-profiles.js';
+import { ExecutionPolicy } from './execution-policy.js';
+import { CallRouter } from './call-routing.js';
+import { WorkerPool } from './worker-pool.js';
+import { createProcessWorker } from './process-worker.js';
+import { parseWorkflow } from './workflow.js';
+import { applySettingsPreferences, LongTaskSettings } from './settings.js';
 export const name = 'long-task-runtime';
 export const inject = ['tools', 'subagents', 'systemPrompt'];
 /** Mount the runtime service and six stateless model-facing controls. */
 export function apply(ctx, input) {
-    const config = resolveConfig(input);
+    const host = { ...input, ...ctx.get?.('longTaskSettingsOverlay') };
+    const preferences = ctx.get?.('longTaskWebPreferences');
+    let effective = host;
+    let warning;
+    if (preferences?.draft !== undefined) {
+        try {
+            const candidate = { ...host, ...applySettingsPreferences(host, preferences.draft) };
+            resolveConfig(candidate);
+            effective = candidate;
+        }
+        catch {
+            warning = '保存的设置与当前宿主配置不一致。请核对后重新保存。';
+        }
+    }
+    const config = resolveConfig(effective);
+    const router = (config.modelEndpoints?.length || config.toolConcurrency?.length)
+        ? new CallRouter(config.modelEndpoints ?? [], config.toolConcurrency ?? []) : undefined;
     const profile = config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile };
-    const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile });
-    const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.maxWallTimeMs, ...profile });
+    const planner = createDshPlannerAdapter(ctx.subagents, { providerName: config.plannerProvider, ...profile, ...(router === undefined ? {} : { callRouter: router }) });
+    const execution = createDshExecutionAdapter(ctx.subagents, { providerName: config.executionProvider, timeoutMs: config.maxWallTimeMs, ...profile, ...(router === undefined ? {} : { callRouter: router }) });
+    const declaredWorkers = config.workers ?? [];
+    const workers = declaredWorkers.some(worker => worker.id === 'dsh')
+        ? declaredWorkers : [{ kind: 'dsh', id: 'dsh', maxConcurrent: config.maxConcurrentTasks }, ...declaredWorkers];
+    const pool = new WorkerPool(config.maxConcurrentTasks, workers.map(worker => ({
+        id: worker.id, maxConcurrent: worker.maxConcurrent,
+        ...(worker.kind === 'dsh' ? { adapter: execution } : { adapter: createProcessWorker(worker), workspaceKey: processWorkspaceKey(worker.cwd) }),
+    })));
+    router?.install(ctx);
     const runtime = config.runtimeFactory?.(planner, execution, config) ?? new LongTaskRuntime(planner, execution, {
-        databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true,
+        databasePath: config.databasePath, artifactDirectory: config.artifactDirectory, artifactInlineLimitBytes: config.artifactInlineLimitBytes, maxConcurrentTasks: config.maxConcurrentTasks, workerPool: pool, defaultRetryPolicy: config.retryPolicy, idleTimeoutMs: config.idleTimeoutMs, maxWallTimeMs: config.maxWallTimeMs, autoReplan: config.autoReplan ?? true, profileRouter: new ProfileRouter(config.executionProfiles), ...(config.policyMode === 'evaluated' ? { executionPolicy: new ExecutionPolicy('evaluated') } : {}),
     });
     ctx.provide('longTaskRuntime', runtime);
+    ctx.provide('longTaskSettings', new LongTaskSettings(effective, () => runtime.settingsBusy(), () => runtime.holdSettingsReload(), override => {
+        const candidate = resolveConfig({ ...host, ...override });
+        for (const id of runtime.settingsReferencedProfiles()) {
+            if (!candidate.executionProfiles.profiles.has(id))
+                throw new Error('仍有未完成任务使用执行组：' + id);
+        }
+    }, host, warning));
     ctx.systemPrompt.section({
         name: 'long-task:routing',
         order: 130,
-        text: assembly => routingPolicyText(assembly.agent),
+        text: assembly => {
+            const base = routingPolicyText(assembly.agent);
+            if (base === '')
+                return base;
+            const templates = [...config.workflowTemplates.keys()].join(', ') || '无';
+            const profiles = [...config.executionProfiles.profiles.keys()].join(', ');
+            return base + '\n用户指定流程、评审退回或轮流讨论时，long_task_create 接受 workflow_template 或 orchestration_json。只使用已注册的执行配置：' + profiles + '。流程模板：' + templates + '。';
+        },
     });
     if (config.routingMode === 'strict') {
         ctx.on('system-prompt/assemble', async (assembly, context, next) => {
@@ -44,12 +91,24 @@ export function apply(ctx, input) {
     }));
     ctx.tools.register(defineTool({
         name: 'long_task_create', description: 'Create and plan a durable long-running goal. With planning_mode "auto" execution begins immediately in the background and this call returns right away; poll long_task_status or long_task_events for progress. Use planning_mode "require_confirmation" to review the generated plan before execution.',
-        parameters: { objective: { type: 'string', required: true }, constraints: { type: 'array', items: { type: 'string' } }, planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] } }, output: toolOutput,
+        parameters: {
+            objective: { type: 'string' },
+            // qwen3.5:4b emits a task-description shape for this tool. Accept its
+            // description field as a backwards-compatible objective alias.
+            description: { type: 'string' },
+            constraints: { type: 'array', items: { type: 'string' } },
+            planning_mode: { type: 'string', enum: ['auto', 'require_confirmation'] },
+            workflow_template: { type: 'string', description: '已注册的流程模板 ID，dynamic 表示使用动态规划' },
+            orchestration_json: { type: 'string', description: '完整流程 JSON。mode=workflow 时包含 entry 与 stages（id/objective/profile/next/onChangesRequested/maxVisits/sideEffectClass）；mode=discussion 时包含 participants（执行配置 ID 或含 id/profile/instruction 的角色对象）、rounds、moderator 和可选 convergence。与 workflow_template 二选一。' },
+        }, output: toolOutput,
         execute: (args, exec) => {
             const agent = requireParent(exec.agent);
             return toolValue(() => withDshParent(agent, async () => {
+                const objective = createObjective(args);
+                const orchestration = resolveOrchestration(config, args.workflow_template, args.orchestration_json);
                 const task = await taskApi.create({
-                    objective: args.objective,
+                    objective,
+                    ...(orchestration === undefined ? {} : { orchestration }),
                     ...(args.constraints === undefined ? {} : { constraints: args.constraints }),
                     planningMode: args.planning_mode ?? config.defaultPlanningMode,
                     ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
@@ -83,8 +142,27 @@ export function apply(ctx, input) {
     }));
     ctx.tools.register(defineTool({ name: 'long_task_confirm', description: 'Confirm a proposed plan and begin its durable execution in the background; returns immediately with the running task, poll long_task_status for progress.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
             taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = runtime.confirmGoal(args.goal_id); runtime.startBackground(args.goal_id, exec.agent); return goal; })) }));
+    ctx.tools.register(defineTool({
+        name: 'long_task_propose_workflow',
+        description: '为已暂停的配置流程提出新修订，保留所有已完成阶段。请用户在任务区确认。',
+        parameters: {
+            goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true },
+            reason: { type: 'string', required: true }, workflow_template: { type: 'string' }, orchestration_json: { type: 'string' },
+        },
+        output: toolOutput,
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => {
+            if (args.workflow_template === undefined && args.orchestration_json === undefined)
+                throw new Error('请提供新流程');
+            const spec = resolveOrchestration(config, args.workflow_template, args.orchestration_json);
+            if (spec === undefined)
+                throw new Error('流程修订需要声明式流程或讨论定义');
+            return taskApi.proposeWorkflow({ taskId: args.goal_id, expectedRevision: args.expected_revision, spec, reason: args.reason }, {
+                ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }),
+            });
+        })),
+    }));
     ctx.tools.register(defineTool({ name: 'long_task_status', description: 'Read a durable long-task goal status.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.getStatus(args.goal_id) ?? { goal: null })) }));
-    ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal and continue its execution in the background; returns immediately. An indeterminate external effect requires an explicit resolution.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
+    ctx.tools.register(defineTool({ name: 'long_task_resume', description: 'Resume a paused or already-marked-running durable long-task goal and continue its execution in the background; returns immediately. An indeterminate external effect requires an explicit resolution. A goal paused by the user must be resumed by the user from the task area; this call is rejected in that case.', parameters: { ...goalParameter, recovery_resolution: { type: 'string', enum: ['retry', 'confirmed_succeeded'] } }, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => { if (exec.agent !== undefined)
             taskApi.continueInSession(args.goal_id, { sessionId: String(exec.agent.id), ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }); const goal = await runtime.resumeGoal(args.goal_id, undefined, args.recovery_resolution); runtime.startBackground(args.goal_id, exec.agent); return goal; })) }));
     ctx.tools.register(defineTool({ name: 'long_task_cancel', description: 'Cancel a durable long-task goal without deleting its audit history.', parameters: goalParameter, output: toolOutput, execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => runtime.cancelGoal(args.goal_id))) }));
     ctx.tools.register(defineTool({
@@ -117,6 +195,16 @@ export function apply(ctx, input) {
             return result;
         })),
     }));
+    ctx.tools.register(defineTool({
+        name: 'long_task_extend_budget', description: 'Increase a durable task budget using the displayed control revision. Budget limits may only increase.',
+        parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, limit: { type: 'object', required: true, properties: { max_attempts: { type: 'number' }, max_wall_time_ms: { type: 'number' }, max_estimated_tokens: { type: 'number' }, max_estimated_cost_micros: { type: 'number' } }, additionalProperties: false } }, output: toolOutput,
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.extendBudget({ taskId: args.goal_id, expectedRevision: args.expected_revision, limit: { ...(args.limit.max_attempts === undefined ? {} : { maxAttempts: args.limit.max_attempts }), ...(args.limit.max_wall_time_ms === undefined ? {} : { maxWallTimeMs: args.limit.max_wall_time_ms }), ...(args.limit.max_estimated_tokens === undefined ? {} : { maxEstimatedTokens: args.limit.max_estimated_tokens }), ...(args.limit.max_estimated_cost_micros === undefined ? {} : { maxEstimatedCostMicros: args.limit.max_estimated_cost_micros }) } }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+    }));
+    ctx.tools.register(defineTool({
+        name: 'long_task_record_memory_feedback', description: 'Record revision-fenced user or validator feedback about one memory retrieval. This creates an audit record only and never changes ranking automatically.',
+        parameters: { goal_id: { type: 'string', required: true }, expected_revision: { type: 'number', required: true }, memory_id: { type: 'string', required: true }, helpful: { type: 'boolean', required: true }, reason: { type: 'string', required: true } }, output: toolOutput,
+        execute: (args, exec) => toolValue(() => withParent(exec.agent, async () => taskApi.recordMemoryRetrievalFeedback({ taskId: args.goal_id, expectedRevision: args.expected_revision, memoryId: args.memory_id, helpful: args.helpful, reason: args.reason }, { ...(config.workspaceScope === undefined ? {} : { workspaceScope: config.workspaceScope }) }))),
+    }));
 }
 const goalParameter = { goal_id: { type: 'string', required: true } };
 const toolOutput = { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] };
@@ -129,6 +217,14 @@ function requireParent(agent) {
     if (agent === undefined)
         throw new Error('long-task tools require a current parent Agent');
     return agent;
+}
+/** Normalize the canonical field and the local-model task-description alias. */
+function createObjective(args) {
+    for (const value of [args.objective, args.description]) {
+        if (typeof value === 'string' && value.trim().length > 0)
+            return value.trim();
+    }
+    throw new TypeError('long_task_create requires a non-empty objective or description');
 }
 /** Goal views contain only JSON values, but their narrow TypeScript shape lacks an index signature. */
 async function toolValue(work) { return JSON.parse(JSON.stringify(await work())); }
@@ -144,6 +240,7 @@ function resolveConfig(config) {
     const artifactInlineLimitBytes = config.artifactInlineLimitBytes ?? 65_536;
     const retryPolicy = config.retryPolicy ?? { maxAttempts: 1 };
     const routingMode = config.routingMode ?? 'advisory';
+    const policyMode = config.policyMode ?? 'fixed';
     if (!Number.isSafeInteger(maxConcurrentTasks) || maxConcurrentTasks < 1)
         throw new TypeError('maxConcurrentTasks must be a positive safe integer');
     if (!Number.isSafeInteger(executionTimeoutMs) || executionTimeoutMs < 1)
@@ -161,7 +258,77 @@ function resolveConfig(config) {
         throw new TypeError('defaultPlanningMode must be auto or require_confirmation');
     if (routingMode !== 'advisory' && routingMode !== 'strict')
         throw new TypeError('routingMode must be advisory or strict');
-    return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode };
+    if (policyMode !== 'fixed' && policyMode !== 'evaluated')
+        throw new TypeError('policyMode must be fixed or evaluated');
+    const configuredProfiles = config.executionProfiles ?? [{
+            id: 'default', providerName: config.executionProvider, ...(config.defaultAgentProfile === undefined ? {} : { agentOptions: config.defaultAgentProfile }),
+        }];
+    const declaredWorkers = config.workers ?? [];
+    const workerMap = new Map(declaredWorkers.map(worker => [worker.id, worker]));
+    if (workerMap.size !== declaredWorkers.length)
+        throw new Error('Worker ID 重复');
+    for (const worker of workerMap.values())
+        if (!['dsh', 'codex-cli', 'claude-cli', 'custom-exec'].includes(worker.kind))
+            throw new Error('未知 Worker 类型：' + worker.kind);
+    const aliases = [...workerMap.values()].filter(worker => !configuredProfiles.some(profile => profile.id === worker.id))
+        .map(worker => ({ id: worker.id, providerName: config.executionProvider, workerIds: [worker.id], ...(worker.kind === 'dsh' && worker.modelRole !== undefined ? { modelRole: worker.modelRole } : {}), ...(worker.capabilities === undefined ? {} : { capabilities: worker.capabilities }) }));
+    const executionProfiles = normalizeExecutionProfiles({
+        ...(config.defaultExecutionProfile === undefined ? {} : { defaultProfile: config.defaultExecutionProfile }),
+        profiles: [...configuredProfiles, ...aliases],
+    });
+    for (const profile of executionProfiles.profiles.values()) {
+        if (profile.modelRole !== undefined && !config.modelEndpoints?.some(endpoint => endpoint.roles.includes(profile.modelRole))) {
+            throw new Error('执行配置引用未注册的模型角色：' + profile.modelRole);
+        }
+        for (const id of profile.workerIds ?? ['dsh']) {
+            const worker = workerMap.get(id);
+            if (worker === undefined && id !== 'dsh')
+                throw new Error('执行配置引用未知 Worker：' + id);
+            if (worker === undefined || worker.kind === 'dsh')
+                continue;
+            if (profile.modelRole !== undefined)
+                throw new Error('外部 Worker 不支持插件的模型角色路由：' + id);
+            if ((profile.toolDeny?.length ?? 0) > 0)
+                throw new Error('外部 Worker 无法应用 DSH 工具拒绝列表：' + id);
+            if (profile.capabilities?.some(capability => !worker.capabilities?.includes(capability)) === true)
+                throw new Error('Worker 缺少执行配置声明的能力：' + id);
+        }
+    }
+    const profileIds = [...executionProfiles.profiles.keys()];
+    const workflowTemplates = new Map(Object.entries(config.workflowTemplates ?? {}).map(([id, value]) => {
+        if (id.trim() === '' || id === 'dynamic')
+            throw new Error('无效的流程模板 ID：' + id);
+        return [id, parseWorkflow(value, profileIds)];
+    }));
+    if (config.defaultWorkflow !== undefined && config.defaultWorkflow !== 'dynamic' && !workflowTemplates.has(config.defaultWorkflow))
+        throw new Error('未知默认流程模板：' + config.defaultWorkflow);
+    return { ...config, maxConcurrentTasks, executionTimeoutMs, idleTimeoutMs, maxWallTimeMs, artifactInlineLimitBytes, retryPolicy, defaultPlanningMode, routingMode, policyMode, executionProfiles, workflowTemplates };
+}
+function resolveOrchestration(config, requested, json) {
+    if (requested !== undefined && json !== undefined)
+        throw new Error('workflow_template 和 orchestration_json 只能使用一个');
+    if (json !== undefined) {
+        if (json.length > 100_000)
+            throw new Error('流程配置过长');
+        return parseWorkflow(JSON.parse(json), [...config.executionProfiles.profiles.keys()]);
+    }
+    const id = requested ?? config.defaultWorkflow;
+    if (id === undefined || id === 'dynamic')
+        return undefined;
+    const workflow = config.workflowTemplates.get(id);
+    if (workflow === undefined)
+        throw new Error('未知流程模板：' + id);
+    return workflow;
+}
+function processWorkspaceKey(cwd) {
+    let path;
+    try {
+        path = realpathSync.native(cwd);
+    }
+    catch {
+        path = resolve(cwd);
+    }
+    return process.platform === 'win32' ? path.toLowerCase() : path;
 }
 function requiredText(value, name) { if (value.trim().length === 0)
     throw new TypeError(`${name} must be non-empty`); }

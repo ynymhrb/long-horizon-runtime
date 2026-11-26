@@ -32,9 +32,29 @@ describe('DSH adapters', () => {
 
     expect(plan).toMatchObject({ goalId: 'goal-1', revision: 1 })
     expect(request).toMatchObject({ parent: { id: 'parent' } })
-    expect(request?.toolFilter).toEqual({ deny: CHILD_TASK_TOOL_DENY })
+    expect(request?.persona).toContain('JSON plan compiler')
+    expect(request?.persona).toContain('Objective: research topic')
+    expect(request?.persona).toContain('executionProfile')
+    expect(request?.toolFilter).toEqual({ allow: [], deny: CHILD_TASK_TOOL_DENY })
     expect(() => assertObjectJsonSchema(request!.outputSchema)).not.toThrow()
     expect(disposed).toBe(true)
+  })
+
+  test('derives the next plan revision without asking the local model to emit it', async () => {
+    let request: Record<string, unknown> | undefined
+    const planner = createDshPlannerAdapter({
+      async start(_provider: string, received: Record<string, unknown>) {
+        request = received
+        return { id: 'child-revision', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { tasks: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'planner' })
+
+    const initial = await withDshParent({ id: 'parent' } as never, () => planner.plan({ goalId: 'g', objective: 'o', constraints: [] }))
+    const replan = await withDshParent({ id: 'parent' } as never, () => planner.plan({ goalId: 'g', objective: 'o', constraints: [], baseRevision: 4 }))
+
+    expect(initial.revision).toBe(1)
+    expect(replan.revision).toBe(5)
+    expect((request?.outputSchema as { required: string[] }).required).not.toContain('revision')
   })
 
   test('carries the active parent request route into a planner child start', async () => {
@@ -129,6 +149,30 @@ describe('DSH adapters', () => {
     const artifactsSchema = (request!.outputSchema as { properties: { artifacts: { items: { properties: { type: { enum: string[] } } } } } }).properties.artifacts.items.properties.type
     expect(artifactsSchema.enum).toEqual([...V1_ARTIFACT_TYPES])
     expect(request?.toolFilter).toEqual({ deny: CHILD_TASK_TOOL_DENY })
+    expect(request?.persona).toContain('structured task executor')
+    expect(request?.persona).toContain('Task: t')
+    expect(request?.persona).toContain('Context: {"objective":"g"')
+    expect(request?.persona).toContain('Do not call long_task lifecycle controls')
+    expect((request?.prompt as Array<{ text: string }>)[0]?.text).toContain('Invoke the provided structured_output tool exactly once')
+  })
+
+  test('forwards a resolved profile provider, options, timeout, and additive deny list', async () => {
+    let provider = ''
+    let request: Record<string, unknown> | undefined
+    const adapter = createDshExecutionAdapter({
+      async start(receivedProvider: string, received: Record<string, unknown>) {
+        provider = receivedProvider
+        request = received
+        return { id: 'child', localAgent: undefined, result: Promise.resolve({ stopReason: 'completed', output: [], structured: { summary: 'done', artifacts: [], evidence: [] } }), async dispose() {} }
+      },
+    } as never, { providerName: 'worker' })
+    await withDshParent({ id: 'parent' } as never, () => adapter.execute({
+      attemptId: 'a', taskId: 't', signal: new AbortController().signal,
+      context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] },
+      profile: { id: 'fast', providerName: 'spawn-fast', capabilities: ['code'], toolDeny: ['shell'], timeoutMs: 12_000, agentOptions: { model: 'fast' }, agentOptionsHash: 'hash', selectionReason: 'task selected fast' },
+    }))
+    expect(provider).toBe('spawn-fast')
+    expect(request).toMatchObject({ agentOptions: { model: 'fast' }, toolFilter: { deny: expect.arrayContaining([...CHILD_TASK_TOOL_DENY, 'shell']) } })
   })
 
   test('maps a completed execution child result into the runtime contract', async () => {
@@ -329,4 +373,22 @@ describe('DSH adapters', () => {
     expect(result.summary).toContain('timeout after 30ms')
     expect(disposed).toBe(true)
   }, 1_000)
+})
+
+test('DSH 节点的写权限提示匹配副作用类别', async () => {
+  const personas: string[] = []
+  const adapter = createDshExecutionAdapter({
+    async start(_provider: string, request: { persona: string }) {
+      personas.push(request.persona)
+      return { id: 'child', result: Promise.resolve({ stopReason: 'completed', output: [], structured: { summary: 'done', artifacts: [], evidence: [] } }), async dispose() {} }
+    },
+  } as never, { providerName: 'worker' })
+  const base = { attemptId: 'a', taskId: 't', signal: new AbortController().signal, context: { objective: 'g', task: { id: 't', objective: 'work' }, artifacts: [] } }
+  await withDshParent({ id: 'parent' } as never, async () => {
+    await adapter.execute({ ...base, sideEffectClass: 'read_only' })
+    await adapter.execute({ ...base, sideEffectClass: 'idempotent' })
+  })
+  expect(personas[0]).toContain('never modify tracked source')
+  expect(personas[1]).toContain('may edit workspace files explicitly required')
+  expect(personas[1]).not.toContain('never modify tracked source')
 })

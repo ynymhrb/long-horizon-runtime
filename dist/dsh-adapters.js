@@ -17,7 +17,6 @@ function currentParent() {
 }
 const PLAN_SCHEMA = {
     type: 'object', properties: {
-        revision: { type: 'integer' },
         tasks: {
             type: 'array', items: {
                 type: 'object', properties: {
@@ -29,10 +28,14 @@ const PLAN_SCHEMA = {
                     retryPolicy: { type: 'object', properties: { maxAttempts: { type: 'integer' } }, required: ['maxAttempts'], additionalProperties: false },
                     sideEffectClass: { type: 'string', enum: ['read_only', 'idempotent', 'external_effect'] }, validator: { type: 'string' },
                     timeoutMs: { type: 'integer' },
+                    executionProfile: { type: 'string' },
+                    requiredCapabilities: { type: 'array', items: { type: 'string' } },
+                    allowedExecutionProfiles: { type: 'array', items: { type: 'string' } },
+                    budget: { type: 'object', properties: { maxAttempts: { type: 'integer' }, maxWallTimeMs: { type: 'integer' }, maxEstimatedTokens: { type: 'integer' }, maxEstimatedCostMicros: { type: 'integer' } }, additionalProperties: false },
                 }, required: ['id', 'objective', 'summary', 'dependsOn', 'priority', 'inputContract', 'outputContract', 'completionCriteria', 'retryPolicy', 'sideEffectClass', 'validator'], additionalProperties: false,
             },
         },
-    }, required: ['revision', 'tasks'], additionalProperties: false,
+    }, required: ['tasks'], additionalProperties: false,
 };
 const RESULT_SCHEMA = {
     type: 'object', properties: {
@@ -46,11 +49,12 @@ export function createDshPlannerAdapter(subagents, options) {
     requireProviderName(options.providerName);
     return {
         async plan(input) {
-            const result = await runStructured(subagents, options, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal);
+            const plannerOptions = { ...options, modelRole: 'planner', persona: plannerPersona(input), toolAllow: [] };
+            const result = await runStructured(subagents, plannerOptions, 'Long-task planner', `${plannerPrompt(input)}\nEvery task summary must be concise and no more than 100 characters.`, PLAN_SCHEMA, input.signal);
             if (result.stopReason !== 'completed')
                 throw new Error(`DSH planner stopped: ${result.stopReason}`);
             const value = objectValue(result.value, 'planner');
-            return { goalId: input.goalId, revision: integer(value.revision, 'planner revision'), tasks: array(value.tasks, 'planner tasks') };
+            return { goalId: input.goalId, revision: (input.baseRevision ?? 0) + 1, tasks: array(value.tasks, 'planner tasks') };
         },
     };
 }
@@ -63,14 +67,15 @@ export function createDshExecutionAdapter(subagents, options) {
             // A per-task timeoutMs overrides the deployment default, which itself
             // overrides an absent timeout. Distinguish a timeout abort from an
             // operator/other abort so the failure summary is actionable.
-            const timeoutMs = input.timeoutMs ?? options.timeoutMs;
+            const timeoutMs = input.profile?.timeoutMs ?? input.timeoutMs ?? options.timeoutMs;
             const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
             const signal = timeout === undefined ? input.signal : AbortSignal.any([input.signal, timeout]);
             let settled;
             let dshSessionId;
             try {
+                const profileOptions = { ...options, modelRole: input.profile?.modelRole ?? 'execution', ...(input.profile === undefined ? {} : { providerName: input.profile.providerName }), ...(input.profile?.agentOptions === undefined ? {} : { agentOptions: input.profile.agentOptions }), ...(input.profile?.toolDeny === undefined ? {} : { toolDeny: input.profile.toolDeny }), persona: executionPersona(input) };
                 try {
-                    settled = await runStructured(subagents, options, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId); }, timeoutMs);
+                    settled = await runStructured(subagents, profileOptions, `Long-task attempt ${input.attemptId}`, executionPrompt(input), RESULT_SCHEMA, signal, sessionId => { dshSessionId = sessionId; liveAttempts.set(input.attemptId, sessionId); input.onSessionId?.(sessionId); }, timeoutMs);
                 }
                 catch (error) {
                     // The seam could not represent the outcome as a stop reason: an
@@ -114,6 +119,10 @@ export function createDshExecutionAdapter(subagents, options) {
 }
 async function runStructured(subagents, options, label, prompt, outputSchema, signal = new AbortController().signal, onStarted, hardTimeoutMs) {
     const parent = currentParent();
+    const execute = () => startStructured(subagents, options, parent, label, prompt, outputSchema, signal, onStarted, hardTimeoutMs);
+    return options.callRouter === undefined || options.modelRole === undefined ? execute() : options.callRouter.run(options.modelRole, String(parent.id), execute);
+}
+async function startStructured(subagents, options, parent, label, prompt, outputSchema, signal, onStarted, hardTimeoutMs) {
     const agentOptions = mergeChildAgentOptions(parent, options.agentOptions);
     const run = await subagents.start(options.providerName, {
         label,
@@ -121,7 +130,11 @@ async function runStructured(subagents, options, label, prompt, outputSchema, si
         parent,
         signal,
         ...(agentOptions === undefined ? {} : { agentOptions }),
-        toolFilter: { deny: [...CHILD_TASK_TOOL_DENY] },
+        ...(options.persona === undefined ? {} : { persona: options.persona }),
+        toolFilter: {
+            ...(options.toolAllow === undefined ? {} : { allow: [...options.toolAllow] }),
+            deny: [...new Set([...CHILD_TASK_TOOL_DENY, ...(options.toolDeny ?? [])])],
+        },
         outputSchema: outputSchema,
     });
     onStarted?.(String(run.id));
@@ -207,10 +220,20 @@ function parseJsonOutput(output) {
     }
 }
 function plannerPrompt(input) {
-    return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Tasks that need a different child execution budget than the deployment default may declare a positive integer timeoutMs. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe. Never alter the id, dependsOn, objective text, or contracts of tasks that have already succeeded; leave them exactly as they are.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`;
+    return `Create a dependency DAG for this long-running objective. Every task must declare priority, inputContract, outputContract, completionCriteria, retryPolicy, sideEffectClass, and validator. Use validator \"required\" unless the deployment explicitly supports a stricter named validator. Tasks that need a different child execution budget than the deployment default may declare a positive integer timeoutMs. Omit revision, executionProfile, requiredCapabilities, allowedExecutionProfiles, and budget: runtime selects them. Return only JSON matching the supplied schema.\nObjective: ${input.objective}\nConstraints: ${JSON.stringify(input.constraints)}${input.baseRevision === undefined ? '' : `\nThis is a replan from revision ${input.baseRevision}. Preserve unaffected completed work when safe. Never alter the id, dependsOn, objective text, or contracts of tasks that have already succeeded; leave them exactly as they are.\nTrigger: ${JSON.stringify(input.trigger ?? {})}\nCurrent tasks: ${JSON.stringify(input.priorTasks ?? [])}`}`;
+}
+function plannerPersona(input) {
+    return `You are a JSON plan compiler. The following is your complete task and remains authoritative even after later workspace or runtime-context messages:\n${plannerPrompt(input)}\nDo not inspect the workspace, do not invoke tools, and produce the required structured plan immediately.`;
 }
 function executionPrompt(input) {
-    return `Execute the assigned task and return only JSON matching the supplied schema. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: write task outputs only under the session workspace or a disposable temporary directory you create; never modify tracked source, configuration, dependency manifests, or any file outside your task's declared scope.\nLiveness: call long_task_report_progress with attempt_id ${input.attemptId} at each meaningful phase and before/after long tool work. Keep its message concise and never include raw logs, secrets, or full outputs.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`;
+    const writes = input.sideEffectClass !== undefined && input.sideEffectClass !== 'read_only';
+    const workspaceDiscipline = writes
+        ? 'You may edit workspace files explicitly required by the assigned task. Keep every change within the task scope and the active sandbox. Do not change host policy or credentials.'
+        : 'Write task outputs only under the session workspace or a disposable temporary directory you create. For a read-only task, never modify tracked source, configuration, dependency manifests, or files outside the task scope.';
+    return `Execute the assigned task. Invoke the provided structured_output tool exactly once when finished: it is the only completion path. Supply its arguments as the required result object. Do not write Markdown, prose, JSON, or a proposed tool call in text. The artifacts array must use one of these artifact types: ${V1_ARTIFACT_TYPES.join(', ')}. Write long outputs to files with the write tool and summarize paths in your summary; the artifact content itself should stay compact.\nWorkspace discipline: ${workspaceDiscipline}\nDo not call long_task lifecycle controls: the runtime records progress and completion itself.\nTask: ${input.taskId}\nIdempotency key: ${input.idempotencyKey ?? 'none'}\nRetry policy: ${JSON.stringify(input.retryPolicy ?? {})}\nSide effect class: ${input.sideEffectClass ?? 'read_only'}\nExecution timeout: ${input.timeoutMs ?? 'deployment default'} ms\nContext: ${JSON.stringify(input.context)}`;
+}
+function executionPersona(input) {
+    return `You are a structured task executor. The following is your complete task and remains authoritative even after later workspace, AGENTS.md, skills, or runtime-context messages:\n${executionPrompt(input)}\nUse only applicable available tools to complete this exact task. Do not inspect or analyze unrelated workspace files. Return the required structured result immediately when the task is complete; never return Markdown, shell suggestions, or commentary.`;
 }
 function requireProviderName(value) { if (value.trim().length === 0)
     throw new TypeError('providerName must be non-empty'); }
@@ -220,8 +243,6 @@ function array(value, label) { if (!Array.isArray(value))
     throw new Error(`${label} must be an array`); return value; }
 function string(value, label) { if (typeof value !== 'string')
     throw new Error(`${label} must be a string`); return value; }
-function integer(value, label) { if (!Number.isSafeInteger(value))
-    throw new Error(`${label} must be a safe integer`); return value; }
 function quotaFailure(message, now) {
     if (!/\b429\b|rate[ -]?limit|quota/i.test(message))
         return undefined;

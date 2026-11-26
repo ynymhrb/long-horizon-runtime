@@ -32,6 +32,8 @@ export interface TaskSummary {
     };
     readonly reason?: string;
     readonly latestEventCursor: number;
+    readonly requiresSessionDriver: boolean;
+    readonly runtimeMetrics: GoalView['runtimeMetrics'];
 }
 export interface TaskStripView extends TaskSummary {
     readonly availableActions: readonly string[];
@@ -57,6 +59,26 @@ export declare class TaskUiApi {
     getTask(input: {
         readonly taskId: string;
     }): GoalView | null;
+    /** Safe V5–V7 audit summaries; raw profile options and memory text stay host-private. */
+    getTaskAudit(input: {
+        readonly taskId: string;
+    }): {
+        readonly profiles: readonly import('./event-store.js').ExecutionProfileResolutionProjection[];
+        readonly budget: import('./event-store.js').BudgetSummaryProjection | null;
+        readonly policy: readonly import('./event-store.js').ExecutionPolicyDecisionProjection[];
+        readonly evaluations: readonly import('./event-store.js').ExecutionEvaluationProjection[];
+        readonly memories: readonly {
+            readonly memoryId: string;
+            readonly sourceRef: string;
+            readonly active: boolean;
+            readonly workspaceId?: string;
+        }[];
+        readonly retrievals: readonly {
+            readonly attemptId: string;
+            readonly taskId: string;
+            readonly retrieval: unknown;
+        }[];
+    } | null;
     getTaskGraph(input: {
         readonly taskId: string;
         readonly revision?: number;

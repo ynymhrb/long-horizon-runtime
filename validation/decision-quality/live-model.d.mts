@@ -1,0 +1,1 @@
+export function createDeepSeekDecisionModel(options: { apiKey: string; model: string; tokenBudget: number; timeoutMs?: number; fetchImpl?: typeof fetch }): { evaluate(input: object): Promise<{ output: unknown; usage: { totalTokens: number; usedTokens: number } }>; usage(): { usedTokens: number; tokenBudget: number } }

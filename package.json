@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-long-task-runtime",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "description": "Durable long-horizon task runtime plugin for DeepSeek Harness",
   "license": "MIT",
   "type": "module",
@@ -20,6 +20,16 @@
     "./client": {
       "default": "./dist/client.js"
     },
+    "./web-preferences": {
+      "types": "./dist/web-preferences.d.ts",
+      "import": "./dist/web-preferences.js",
+      "default": "./dist/web-preferences.js"
+    },
+    "./settings-overlay": {
+      "types": "./dist/settings-overlay.d.ts",
+      "import": "./dist/settings-overlay.js",
+      "default": "./dist/settings-overlay.js"
+    },
     "./remote": {
       "types": "./dist/remote.d.ts",
       "import": "./dist/remote.js",
@@ -36,7 +46,8 @@
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-layout",
+      "@deepseek-ai/dsh-client-ui-settings-general"
       ],
       "platform": "web"
     }
@@ -45,6 +56,7 @@
     "dist",
     "client",
     "cordis.patch.yml",
+    "examples/orchestration.cordis.example.yml",
     "README.md"
   ],
   "engines": {
@@ -53,6 +65,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "experiment:decision-quality": "node validation/decision-quality/cli.mjs",
     "aris:pilot": "node validation/aris-pilot/cli.mjs",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json && pnpm run build:client",

@@ -18,6 +18,19 @@ export class TaskUiApi {
         return { items, ...(cursor + items.length < all.length ? { nextCursor: cursor + items.length } : {}) };
     }
     getTask(input) { return this.runtime.getStatus(input.taskId) ?? null; }
+    /** Safe V5–V7 audit summaries; raw profile options and memory text stay host-private. */
+    getTaskAudit(input) {
+        if (this.runtime.getStatus(input.taskId) === undefined)
+            return null;
+        return {
+            profiles: this.runtime.store.listExecutionProfileResolutions(input.taskId),
+            budget: this.runtime.store.getBudgetSummary(input.taskId) ?? null,
+            policy: this.runtime.store.listExecutionPolicyDecisions(input.taskId),
+            evaluations: this.runtime.store.listExecutionEvaluations(input.taskId),
+            memories: this.runtime.store.listMemoryRecords(input.taskId).map(record => ({ memoryId: record.memoryId, sourceRef: record.sourceRef, active: record.active, ...(record.workspaceId === undefined ? {} : { workspaceId: record.workspaceId }) })),
+            retrievals: this.runtime.store.listContextManifests(input.taskId).flatMap(manifest => manifest.context.retrieval === undefined ? [] : [{ attemptId: manifest.attemptId, taskId: manifest.taskId, retrieval: manifest.context.retrieval }]),
+        };
+    }
     getTaskGraph(input) {
         const task = this.runtime.getStatus(input.taskId);
         if (task === undefined)
@@ -40,7 +53,7 @@ export class TaskUiApi {
         return task === undefined || terminalStates.has(task.state) ? null : { ...this.summary(task), availableActions: task.availableActions };
     }
     async updateTask(input) {
-        return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) });
+        return this.control.update({ taskId: input.taskId, expectedRevision: input.expectedRevision, action: input.action, ...(input.recoveryResolution === undefined ? {} : { recoveryResolution: input.recoveryResolution }) }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' });
     }
     /** Explicit user action: create a durable cross-session link and make it current. */
     async attachCurrentSession(input) {
@@ -59,10 +72,10 @@ export class TaskUiApi {
         return this.control.rejectReplanAtRevision(input.taskId, input.expectedRevision);
     }
     async editTaskGoal(input) {
-        return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) });
+        return this.control.editGoal({ taskId: input.taskId, expectedRevision: input.expectedRevision, objective: input.objective, reason: input.reason }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' });
     }
     async acceptReplan(input) {
-        return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }) });
+        return this.control.acceptReplan({ taskId: input.taskId, expectedRevision: input.expectedRevision }, { ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }), ...(input.workspaceScope === undefined ? {} : { workspaceScope: input.workspaceScope }), ...(input.parent === undefined ? {} : { parent: input.parent }), ...(input.signal === undefined ? {} : { signal: input.signal }), authority: 'operator' });
     }
     async archiveTask(input) {
         const current = this.runtime.getStatus(input.taskId);
@@ -100,6 +113,8 @@ export class TaskUiApi {
             ...(current === undefined ? {} : { currentOrLastNode: { id: current.id, objective: current.objective, state: current.state } }),
             ...(task.pauseReason === undefined ? {} : { reason: task.pauseReason }),
             latestEventCursor: this.runtime.store.latestSeq(task.id),
+            runtimeMetrics: task.runtimeMetrics,
+            requiresSessionDriver: task.requiresSessionDriver,
         };
     }
 }

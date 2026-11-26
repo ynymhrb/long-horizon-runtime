@@ -1,4 +1,5 @@
-import type { GoalState, TaskNode } from './domain.js';
+import type { GoalState, PauseOrigin, TaskNode } from './domain.js';
+import type { BudgetLimit, BudgetUsage } from './budgets.js';
 /** Durable event accepted by the runtime event log. Payloads must be JSON serializable. */
 export interface RuntimeEvent {
     readonly type: string;
@@ -28,6 +29,7 @@ export interface GoalProjection {
     readonly controlRevision: number;
     readonly workspaceScope?: string;
     readonly pauseReason?: string;
+    readonly pauseOrigin?: PauseOrigin;
     readonly archivedAt?: string;
 }
 export interface GoalVersion {
@@ -99,6 +101,76 @@ export interface QuotaRecovery {
     readonly retryAt: string;
     readonly diagnostic: string;
 }
+export interface ExecutionProfileResolutionProjection {
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly profileId: string;
+    readonly providerName: string;
+    readonly agentOptionsHash: string;
+    readonly capabilities: readonly string[];
+    readonly toolDeny: readonly string[];
+    readonly timeoutMs: number;
+    readonly selectionReason: string;
+}
+export interface BudgetSummaryProjection {
+    readonly goal: BudgetLimit;
+    readonly usage: BudgetUsage;
+    readonly reservations: readonly {
+        readonly attemptId: string;
+        readonly usage: BudgetUsage;
+    }[];
+}
+export interface ExecutionEvaluationProjection {
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly profileId?: string;
+    readonly outcome: string;
+    readonly wallTimeMs: number;
+    readonly validatorOk: boolean;
+    readonly artifactContractOk: boolean;
+}
+export interface ExecutionPolicyDecisionProjection {
+    readonly taskId: string;
+    readonly attemptId: string;
+    readonly selectedProfileId: string;
+    readonly policyVersion: string;
+    readonly candidates: readonly {
+        readonly profileId: string;
+        readonly score: number;
+    }[];
+    readonly excluded: readonly {
+        readonly profileId: string;
+        readonly reason: string;
+    }[];
+}
+export interface MemoryIndexEntryProjection {
+    readonly memoryId: string;
+    readonly contentHash: string;
+    readonly sourceRef: string;
+    readonly active: boolean;
+}
+export interface MemoryRecordProjection {
+    readonly memoryId: string;
+    readonly text: string;
+    readonly sourceRef: string;
+    readonly active: boolean;
+    readonly workspaceId?: string;
+}
+export interface RunRoundProjection {
+    readonly round: number;
+    readonly revision: number;
+    readonly startedAt: string;
+    readonly finishedAt?: string;
+    readonly outcome?: string;
+}
+export interface RuntimeMetrics {
+    readonly runRoundCount: number;
+    readonly activeRunTimeMs: number;
+    readonly elapsedRunTimeMs: number;
+    readonly firstStartedAt?: string;
+    readonly lastFinishedAt?: string;
+    readonly activeRound?: Pick<RunRoundProjection, 'round' | 'revision' | 'startedAt'>;
+}
 /** SQLite append-only event log and entirely rebuildable materialized projections. */
 export declare class RuntimeEventStore {
     private readonly db;
@@ -109,6 +181,8 @@ export declare class RuntimeEventStore {
     transaction<T>(work: () => T): T;
     /** Rebuild every owned projection from ordered append-only events. */
     rebuild(): void;
+    nextPlanRevision(goalId: string): number;
+    latestEventPayload(goalId: string, type: string): Record<string, unknown> | undefined;
     getGoal(goalId: string): GoalProjection | undefined;
     getQuotaRecovery(goalId: string): QuotaRecovery | undefined;
     /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */
@@ -126,6 +200,12 @@ export declare class RuntimeEventStore {
     /** One explicit display binding per conversation; historic task links remain separate. */
     getCurrentTaskForSession(sessionId: string): CurrentTaskBinding | undefined;
     listContextManifests(goalId: string): ContextManifestProjection[];
+    listExecutionProfileResolutions(goalId: string): ExecutionProfileResolutionProjection[];
+    getBudgetSummary(goalId: string): BudgetSummaryProjection | undefined;
+    listExecutionEvaluations(goalId: string): ExecutionEvaluationProjection[];
+    listExecutionPolicyDecisions(goalId: string): ExecutionPolicyDecisionProjection[];
+    listMemoryIndexEntries(goalId: string): MemoryIndexEntryProjection[];
+    listMemoryRecords(goalId: string): MemoryRecordProjection[];
     getPlan(goalId: string, revision?: number): {
         readonly revision: number;
         readonly state: string;
@@ -139,6 +219,8 @@ export declare class RuntimeEventStore {
     listTasks(goalId: string): TaskNode[];
     getTask(goalId: string, taskId: string): TaskNode | undefined;
     listAttempts(taskId: string, goalId?: string): AttemptProjection[];
+    listRunRounds(goalId: string): RunRoundProjection[];
+    getRuntimeMetrics(goalId: string, now?: number): RuntimeMetrics;
     listRunningAttempts(): AttemptProjection[];
     getRunningAttemptBySession(sessionId: string): AttemptProjection | undefined;
     listActiveValidatedArtifacts(goalId: string, taskIds?: readonly string[]): ArtifactProjection[];

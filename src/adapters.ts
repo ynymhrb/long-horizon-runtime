@@ -24,6 +24,8 @@ export interface ExecutionResult {
   readonly failureDiagnostic?: string
   readonly artifacts: readonly { readonly type: string; readonly content: string; readonly mimeType?: string }[]
   readonly evidence: readonly string[]
+  /** Optional provider-reported usage. Missing dimensions remain estimated. */
+  readonly usage?: { readonly tokens?: number; readonly costMicros?: number; readonly estimated?: boolean }
   /** Durable reference to the child created by the DSH execution adapter. */
   readonly dshSessionId?: string
 }
@@ -36,7 +38,7 @@ export interface PlannerAdapter {
 /** Boundary for one isolated DSH child attempt. */
 export interface ExecutionAdapter {
   /** parent is a live, opaque DSH Agent supplied by a tool call and is never durable state. */
-  execute(input: { readonly attemptId: string; readonly taskId: string; readonly context: ContextView; readonly signal: AbortSignal; readonly parent?: unknown; /** Always present for runtime dispatch; optional for legacy test adapters. */ readonly idempotencyKey?: string; readonly retryPolicy?: import('./domain.js').RetryPolicy; readonly sideEffectClass?: import('./domain.js').SideEffectClass; /** Per-task execution budget override; falls back to the adapter default when absent. */ readonly timeoutMs?: number; /** Called as soon as a child session exists, before its result settles. */ readonly onSessionId?: (dshSessionId: string) => void }): Promise<ExecutionResult>
+  execute(input: { readonly attemptId: string; readonly taskId: string; readonly context: ContextView; readonly signal: AbortSignal; readonly parent?: unknown; /** Always present for runtime dispatch; optional for legacy test adapters. */ readonly idempotencyKey?: string; readonly retryPolicy?: import('./domain.js').RetryPolicy; readonly sideEffectClass?: import('./domain.js').SideEffectClass; /** Per-task execution budget override; falls back to the adapter default when absent. */ readonly timeoutMs?: number; readonly profile?: import('./execution-profiles.js').ResolvedExecutionProfile; /** Called as soon as a child session exists, before its result settles. */ readonly onSessionId?: (dshSessionId: string) => void; readonly onExternalSessionId?: (sessionId: string) => void; readonly onProgress?: (message: string) => void }): Promise<ExecutionResult>
   cancel?(attemptId: string): void
   /** Whether this process still owns a published, unsettled child session. */
   isAttemptAlive?(attemptId: string): boolean

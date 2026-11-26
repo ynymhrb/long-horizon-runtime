@@ -33,14 +33,22 @@ export class RuntimeEventStore {
     /** Rebuild every owned projection from ordered append-only events. */
     rebuild() {
         this.transaction(() => {
-            this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;');
+            this.db.exec('DELETE FROM current_task_bindings; DELETE FROM task_session_links; DELETE FROM context_manifests; DELETE FROM quota_recoveries; DELETE FROM execution_profile_resolutions; DELETE FROM execution_evaluations; DELETE FROM execution_policy_decisions; DELETE FROM memory_index_entries; DELETE FROM memory_records; DELETE FROM budget_state; DELETE FROM goal_versions; DELETE FROM goals; DELETE FROM plan_revisions; DELETE FROM task_nodes; DELETE FROM task_attempts; DELETE FROM goal_run_rounds; DELETE FROM artifacts; DELETE FROM evidence; DELETE FROM validation_results; DELETE FROM decisions; DELETE FROM memories; DELETE FROM checkpoints;');
             const rows = this.db.prepare('SELECT seq, type, goal_id, task_id, payload_json FROM runtime_events ORDER BY seq').all();
             for (const row of rows)
                 projectEvent(this.db, { type: row.type, goalId: row.goal_id, ...(row.task_id == null ? {} : { taskId: row.task_id }), payload: JSON.parse(row.payload_json) }, row.seq);
         });
     }
+    nextPlanRevision(goalId) {
+        const row = this.db.prepare('SELECT COALESCE(MAX(revision), 0) AS revision FROM plan_revisions WHERE goal_id = ?').get(goalId);
+        return row.revision + 1;
+    }
+    latestEventPayload(goalId, type) {
+        const row = this.db.prepare('SELECT payload_json FROM runtime_events WHERE goal_id = ? AND type = ? ORDER BY seq DESC LIMIT 1').get(goalId, type);
+        return row === undefined ? undefined : JSON.parse(row.payload_json);
+    }
     getGoal(goalId) {
-        const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, archived_at FROM goals WHERE id = ?').get(goalId);
+        const row = this.db.prepare('SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, pause_origin, archived_at FROM goals WHERE id = ?').get(goalId);
         return row === undefined ? undefined : goalProjection(row);
     }
     getQuotaRecovery(goalId) {
@@ -49,7 +57,7 @@ export class RuntimeEventStore {
     }
     /** All profile-local goals, newest first.  Task Area intentionally spans sessions. */
     listGoals(options = {}) {
-        const rows = this.db.prepare(`SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, archived_at FROM goals ${options.archived === true ? 'WHERE archived_at IS NOT NULL' : 'WHERE archived_at IS NULL'} ORDER BY rowid DESC`).all();
+        const rows = this.db.prepare(`SELECT id, objective, constraints_json, planning_mode, state, revision, control_revision, workspace_scope, pause_reason, pause_origin, archived_at FROM goals ${options.archived === true ? 'WHERE archived_at IS NOT NULL' : 'WHERE archived_at IS NULL'} ORDER BY rowid DESC`).all();
         return rows.map(goalProjection);
     }
     listGoalVersions(goalId) {
@@ -65,10 +73,17 @@ export class RuntimeEventStore {
             remove('current_task_bindings').run(goalId);
             remove('task_session_links').run(goalId);
             remove('context_manifests').run(goalId);
+            remove('execution_profile_resolutions').run(goalId);
+            remove('execution_evaluations').run(goalId);
+            remove('execution_policy_decisions').run(goalId);
+            remove('memory_index_entries').run(goalId);
+            remove('memory_records').run(goalId);
+            remove('budget_state').run(goalId);
             remove('goal_versions').run(goalId);
             remove('plan_revisions').run(goalId);
             remove('task_nodes').run(goalId);
             remove('task_attempts').run(goalId);
+            remove('goal_run_rounds').run(goalId);
             remove('quota_recoveries').run(goalId);
             remove('artifacts').run(goalId);
             remove('evidence').run(goalId);
@@ -101,6 +116,28 @@ export class RuntimeEventStore {
     listContextManifests(goalId) {
         return this.db.prepare('SELECT attempt_id, task_id, revision, selection_reason, context_json FROM context_manifests WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ attemptId: String(row.attempt_id), taskId: String(row.task_id), revision: Number(row.revision), selectionReason: String(row.selection_reason), context: JSON.parse(String(row.context_json)) }));
     }
+    listExecutionProfileResolutions(goalId) {
+        return this.db.prepare('SELECT task_id, attempt_id, profile_id, provider_name, agent_options_hash, capabilities_json, tool_deny_json, timeout_ms, selection_reason FROM execution_profile_resolutions WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ taskId: String(row.task_id), attemptId: String(row.attempt_id), profileId: String(row.profile_id), providerName: String(row.provider_name), agentOptionsHash: String(row.agent_options_hash), capabilities: JSON.parse(String(row.capabilities_json)), toolDeny: JSON.parse(String(row.tool_deny_json)), timeoutMs: Number(row.timeout_ms), selectionReason: String(row.selection_reason) }));
+    }
+    getBudgetSummary(goalId) {
+        const row = this.db.prepare('SELECT goal_limit_json, usage_json, reservations_json FROM budget_state WHERE goal_id = ?').get(goalId);
+        return row === undefined ? undefined : { goal: JSON.parse(String(row.goal_limit_json)), usage: JSON.parse(String(row.usage_json)), reservations: JSON.parse(String(row.reservations_json)) };
+    }
+    listExecutionEvaluations(goalId) {
+        return this.db.prepare('SELECT task_id, attempt_id, profile_id, outcome, wall_time_ms, validator_ok, artifact_contract_ok FROM execution_evaluations WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ taskId: String(row.task_id), attemptId: String(row.attempt_id), ...(row.profile_id == null ? {} : { profileId: String(row.profile_id) }), outcome: String(row.outcome), wallTimeMs: Number(row.wall_time_ms), validatorOk: Boolean(row.validator_ok), artifactContractOk: Boolean(row.artifact_contract_ok) }));
+    }
+    listExecutionPolicyDecisions(goalId) {
+        return this.db.prepare('SELECT task_id, attempt_id, payload_json FROM execution_policy_decisions WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => {
+            const payload = JSON.parse(String(row.payload_json));
+            return { taskId: String(row.task_id), attemptId: String(row.attempt_id), selectedProfileId: String(payload.selectedProfileId), policyVersion: String(payload.policyVersion), candidates: Array.isArray(payload.candidates) ? payload.candidates : [], excluded: Array.isArray(payload.excluded) ? payload.excluded : [] };
+        });
+    }
+    listMemoryIndexEntries(goalId) {
+        return this.db.prepare('SELECT memory_id, content_hash, source_ref, active FROM memory_index_entries WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ memoryId: String(row.memory_id), contentHash: String(row.content_hash), sourceRef: String(row.source_ref), active: Boolean(row.active) }));
+    }
+    listMemoryRecords(goalId) {
+        return this.db.prepare('SELECT memory_id, text, source_ref, active, workspace_id FROM memory_records WHERE goal_id = ? ORDER BY created_order').all(goalId).map(row => ({ memoryId: String(row.memory_id), text: String(row.text), sourceRef: String(row.source_ref), active: Boolean(row.active), ...(row.workspace_id == null ? {} : { workspaceId: String(row.workspace_id) }) }));
+    }
     getPlan(goalId, revision) {
         const row = this.db.prepare(revision == null ? 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? ORDER BY revision DESC LIMIT 1' : 'SELECT revision, state, tasks_json, metadata_json FROM plan_revisions WHERE goal_id = ? AND revision = ?').get(...(revision == null ? [goalId] : [goalId, revision]));
         if (row === undefined)
@@ -117,6 +154,26 @@ export class RuntimeEventStore {
             : 'SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE task_id = ? AND goal_id = ? ORDER BY created_order')
             .all(...(goalId === undefined ? [taskId] : [taskId, goalId]));
         return rows.map(attemptProjection);
+    }
+    listRunRounds(goalId) {
+        return this.db.prepare('SELECT round, revision, started_at, finished_at, outcome FROM goal_run_rounds WHERE goal_id = ? ORDER BY round').all(goalId).map(row => ({ round: Number(row.round), revision: Number(row.revision), startedAt: String(row.started_at), ...(row.finished_at == null ? {} : { finishedAt: String(row.finished_at) }), ...(row.outcome == null ? {} : { outcome: String(row.outcome) }) }));
+    }
+    getRuntimeMetrics(goalId, now = Date.now()) {
+        const rounds = this.listRunRounds(goalId);
+        const first = rounds[0];
+        const last = rounds.at(-1);
+        const active = last?.finishedAt === undefined ? last : undefined;
+        const activeEnd = active === undefined ? undefined : Math.max(Date.parse(active.startedAt), now);
+        const activeRunTimeMs = rounds.reduce((total, round) => total + durationMs(round.startedAt, round.finishedAt === undefined ? activeEnd : Date.parse(round.finishedAt)), 0);
+        const lastEnd = last === undefined ? undefined : last.finishedAt === undefined ? activeEnd : Date.parse(last.finishedAt);
+        return {
+            runRoundCount: rounds.length,
+            activeRunTimeMs,
+            elapsedRunTimeMs: first === undefined || lastEnd === undefined ? 0 : durationMs(first.startedAt, lastEnd),
+            ...(first === undefined ? {} : { firstStartedAt: first.startedAt }),
+            ...(last?.finishedAt === undefined ? {} : { lastFinishedAt: last.finishedAt }),
+            ...(active === undefined ? {} : { activeRound: { round: active.round, revision: active.revision, startedAt: active.startedAt } }),
+        };
     }
     listRunningAttempts() {
         const rows = this.db.prepare("SELECT id, goal_id, task_id, revision, state, dsh_session_id, context_json, summary, started_at, last_activity_at, lease_expires_at, max_wall_expires_at, latest_progress_json FROM task_attempts WHERE state = 'RUNNING'").all();
@@ -157,7 +214,7 @@ export class RuntimeEventStore {
 function goalProjection(row) {
     return {
         id: String(row.id), objective: String(row.objective), constraints: JSON.parse(String(row.constraints_json)), planningMode: String(row.planning_mode), state: String(row.state), revision: Number(row.revision), controlRevision: Number(row.control_revision),
-        ...(row.workspace_scope == null ? {} : { workspaceScope: String(row.workspace_scope) }), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }), ...(row.archived_at == null ? {} : { archivedAt: String(row.archived_at) }),
+        ...(row.workspace_scope == null ? {} : { workspaceScope: String(row.workspace_scope) }), ...(row.pause_reason == null ? {} : { pauseReason: String(row.pause_reason) }), ...(row.pause_origin == null ? {} : { pauseOrigin: String(row.pause_origin) }), ...(row.archived_at == null ? {} : { archivedAt: String(row.archived_at) }),
     };
 }
 function attemptProjection(row) {
@@ -172,4 +229,8 @@ function attemptProjection(row) {
         ...(row.max_wall_expires_at == null ? {} : { maxWallExpiresAt: String(row.max_wall_expires_at) }),
         ...(row.latest_progress_json == null ? {} : { latestProgress: JSON.parse(String(row.latest_progress_json)) }),
     };
+}
+function durationMs(startedAt, endedAt) {
+    const started = Date.parse(startedAt);
+    return Number.isFinite(started) && endedAt !== undefined && Number.isFinite(endedAt) ? Math.max(0, endedAt - started) : 0;
 }

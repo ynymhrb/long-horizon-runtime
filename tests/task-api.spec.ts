@@ -29,6 +29,24 @@ const execution: ExecutionAdapter = {
 }
 
 describe('TaskControlApi', () => {
+  test('records revision-fenced retrieval feedback without changing retrieval policy', async () => {
+    const runtime = new LongTaskRuntime(planner, execution)
+    const api = new TaskControlApi(runtime)
+    const task = await api.create({ objective: 'feedback', planningMode: 'require_confirmation' }, {})
+    const result = api.recordMemoryRetrievalFeedback({ taskId: task.id, expectedRevision: task.controlRevision, memoryId: 'm1', helpful: true, reason: 'validator confirmed relevance' }, {})
+    expect(result.kind).toBe('applied')
+    expect(runtime.store.listEvents(task.id).at(-2)?.type).toBe('MemoryRetrievalFeedbackRecorded')
+  })
+  test('extends a budget only at the displayed control revision', async () => {
+    const runtime = new LongTaskRuntime(planner, execution, { goalBudget: { maxAttempts: 1 } })
+    const api = new TaskControlApi(runtime)
+    const task = await api.create({ objective: 'budget', planningMode: 'require_confirmation' }, {})
+    const applied = api.extendBudget({ taskId: task.id, expectedRevision: task.controlRevision, limit: { maxAttempts: 2 } }, {})
+    expect(applied.kind).toBe('applied')
+    if (applied.kind !== 'applied') throw new Error('expected applied budget extension')
+    expect(runtime.store.getBudgetSummary(task.id)?.goal).toEqual({ maxAttempts: 2 })
+    expect(api.extendBudget({ taskId: task.id, expectedRevision: task.controlRevision, limit: { maxAttempts: 3 } }, {}).kind).toBe('conflict')
+  })
   test('creates a cross-session task and rejects a stale control revision without mutation', async () => {
     const runtime = new LongTaskRuntime(planner, execution)
     const api = new TaskControlApi(runtime)

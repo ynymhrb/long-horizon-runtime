@@ -34,12 +34,41 @@ export function quotaRecoveryPresentation(recovery, now = new Date(), latestReco
  */
 export const dagToneCss = '.ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}'
 
+export function goalObjectivePresentation(objective) {
+  return { className: 'ltr-goal-objective', singleLine: true, title: objective }
+}
+
+export function taskAreaPresentation() {
+  return {
+    panelClassName: 'ltr-task-area-panel',
+    cockpitPanelClassName: 'ltr-task-cockpit-panel',
+  }
+}
+
+/** Bounded panel geometry follows the host conversation column, never the viewport. */
+export const taskAreaPanelCss = 'box-sizing:border-box;width:100%;max-width:1160px;max-height:min(55vh,430px);margin:0 auto;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:0 0 16px 16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)'
+
+/** The cockpit is a task workspace, not a modal that must preserve transcript height. */
+export const cockpitPanelCss = 'height:calc(100vh - 76px);max-height:none;overflow:hidden'
+
+export function cockpitLayoutPresentation() {
+  return {
+    identityClassName: 'ltr-cockpit-identity',
+    actionsClassName: 'ltr-cockpit-actions',
+    mainClassName: 'ltr-cockpit-main',
+    inspectorClassName: 'ltr-inspector ltr-cockpit-inspector',
+    eventListClassName: 'ltr-event-list ltr-cockpit-events',
+    mainSizing: 'fill-remaining-height',
+    inspectorMode: 'collapsible-below-topology',
+  }
+}
+
 export function taskStripPresentation(task) {
   const state = taskStatePresentation(task.state)
   // A web-side resume only marks the goal RUNNING; a live agent session must
   // drive the actual rounds. Surface that "waiting for driver" state instead
   // of pretending the task is executing on its own.
-  const waitingForDriver = task.state === 'RUNNING' && task.currentOrLastNode?.state !== undefined && task.currentOrLastNode.state !== 'RUNNING'
+  const waitingForDriver = task.requiresSessionDriver === true || (task.requiresSessionDriver === undefined && task.state === 'RUNNING' && task.currentOrLastNode?.state !== undefined && task.currentOrLastNode.state !== 'RUNNING')
   const current = task.currentOrLastNode?.objective
   return { ...state, progress: formatTaskProgress(task.progress, task.currentOrLastNode), detail: waitingForDriver ? `等待会话驱动执行${current ? ` · ${current}` : ''}` : (task.reason ?? current ?? '') }
 }
@@ -49,4 +78,14 @@ export function formatTaskProgress(progress, node) {
   const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective
   const settled = progress?.settled ?? progress?.succeeded ?? 0
   return `${settled}/${progress?.total ?? 0}${compactObjective ? ` · 当前：${compactObjective}` : ''}`
+}
+
+export function formatRuntimeMetrics(metrics) {
+  const duration = value => {
+    const seconds = Math.floor(Math.max(0, value ?? 0) / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const remainder = seconds % 60
+    return minutes > 0 ? `${minutes} 分 ${remainder} 秒` : `${remainder} 秒`
+  }
+  return { summary: `第 ${metrics?.runRoundCount ?? 0} 轮 · 已运行 ${duration(metrics?.activeRunTimeMs)}`, detail: `自然经过 ${duration(metrics?.elapsedRunTimeMs)}` }
 }

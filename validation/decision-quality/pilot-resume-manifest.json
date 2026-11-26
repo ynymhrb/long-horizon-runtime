@@ -1,0 +1,1 @@
+{"version":1,"methods":["causal_advantage","full","local_progress","goal_value"],"scenarios":["scenarios/pilot/irreversible-change-02.json","scenarios/pilot/contradictory-evidence-01.json","scenarios/pilot/contradictory-evidence-02.json"]}

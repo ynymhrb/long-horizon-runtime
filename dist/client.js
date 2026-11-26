@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
 		//#endregion
 		let react = require("react");
 		react = __toESM(react, 1);
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
 		var _a$1;
 		function $constructor(name, initializer, params) {
 			function init(inst, def) {
@@ -87,7 +87,7 @@ window.__ModuleLoader__.load({
 			return globalConfig;
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/util.js
 		function getEnumValues(entries) {
 			const numericValues = Object.values(entries).filter((v) => typeof v === "number");
 			return Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -401,7 +401,7 @@ window.__ModuleLoader__.load({
 			return { ...iss };
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/errors.js
 		const initializer$1 = (inst, def) => {
 			inst.name = "$ZodError";
 			Object.defineProperty(inst, "_zod", {
@@ -461,7 +461,7 @@ window.__ModuleLoader__.load({
 			return fieldErrors;
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/parse.js
 		const _parse = (_Err) => (schema, value, _ctx, _params) => {
 			const ctx = _ctx ? {
 				..._ctx,
@@ -575,7 +575,7 @@ window.__ModuleLoader__.load({
 			return _safeParseAsync(_Err)(schema, value, _ctx);
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/regexes.js
 		/**
 		* @deprecated CUID v1 is deprecated by its authors due to information leakage
 		* (timestamps embedded in the id). Use {@link cuid2} instead.
@@ -639,7 +639,7 @@ window.__ModuleLoader__.load({
 		const lowercase = /^[^A-Z]*$/;
 		const uppercase = /^[^a-z]*$/;
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/checks.js
 		const $ZodCheck = /*@__PURE__*/ $constructor("$ZodCheck", (inst, def) => {
 			var _a;
 			inst._zod ?? (inst._zod = {});
@@ -1001,7 +1001,7 @@ window.__ModuleLoader__.load({
 			};
 		});
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/doc.js
 		var Doc = class {
 			constructor(args = []) {
 				this.content = [];
@@ -1032,14 +1032,14 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/versions.js
 		const version = {
 			major: 4,
 			minor: 4,
 			patch: 3
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/schemas.js
 		const $ZodType = /*@__PURE__*/ $constructor("$ZodType", (inst, def) => {
 			var _a;
 			inst ?? (inst = {});
@@ -2142,7 +2142,7 @@ window.__ModuleLoader__.load({
 			}
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/registries.js
 		var _a;
 		var $ZodRegistry = class {
 			constructor() {
@@ -2189,7 +2189,7 @@ window.__ModuleLoader__.load({
 		(_a = globalThis).__zod_globalRegistry ?? (_a.__zod_globalRegistry = registry());
 		const globalRegistry = globalThis.__zod_globalRegistry;
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/api.js
 		// @__NO_SIDE_EFFECTS__
 		function _string(Class, params) {
 			return new Class({
@@ -2694,7 +2694,7 @@ window.__ModuleLoader__.load({
 			return ch;
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/to-json-schema.js
 		function initializeContext(params) {
 			let target = params?.target ?? "draft-2020-12";
 			if (target === "draft-4") target = "draft-04";
@@ -2989,7 +2989,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			return finalize(ctx, schema);
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/json-schema-processors.js
 		const formatMap = {
 			guid: "uuid",
 			url: "uri",
@@ -3199,7 +3199,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			seen.ref = def.innerType;
 		};
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/iso.js
 		const ZodISODateTime = /*@__PURE__*/ $constructor("ZodISODateTime", (inst, def) => {
 			$ZodISODateTime.init(inst, def);
 			ZodStringFormat.init(inst, def);
@@ -3229,7 +3229,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			return /* @__PURE__ */ _isoDuration(ZodISODuration, params);
 		}
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/errors.js
 		const initializer = (inst, issues) => {
 			$ZodError.init(inst, issues);
 			inst.name = "ZodError";
@@ -3251,7 +3251,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		};
 		const ZodRealError = /*@__PURE__*/ $constructor("ZodError", initializer, { Parent: Error });
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/parse.js
 		const parse = /* @__PURE__ */ _parse(ZodRealError);
 		const parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 		const safeParse = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -3265,7 +3265,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		const safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 		const safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 		//#endregion
-		//#region node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
+		//#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/schemas.js
 		const _installedGroups = /* @__PURE__ */ new WeakMap();
 		function _installLazyMethods(inst, group, methods) {
 			const proto = Object.getPrototypeOf(inst);
@@ -4021,6 +4021,619 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		function superRefine(fn, params) {
 			return /* @__PURE__ */ _superRefine(fn, params);
 		}
+		//#endregion
+		//#region client/remote-contract.js
+		const owner = "@deepseek-ai/dsh-long-task-runtime";
+		const namespace = "longTasks";
+		const result = {
+			mode: "strict",
+			typeSymbol: "LongTaskRemoteResult",
+			schema: unknown()
+		};
+		function descriptor(method, schema, name = "input", acceptsUndefined = false) {
+			return {
+				id: owner + "#" + namespace + "/" + method,
+				service: namespace,
+				namespace,
+				method,
+				invocation: { kind: "direct" },
+				parameters: schema === void 0 ? [] : [{
+					name,
+					wire: name,
+					source: "json",
+					...acceptsUndefined ? { acceptsUndefined } : {},
+					codec: {
+						mode: "strict",
+						typeSymbol: method + "Input",
+						schema
+					}
+				}],
+				result
+			};
+		}
+		const taskId = string();
+		const task = object({ taskId });
+		const sessionId = string();
+		const control = {
+			taskId,
+			expectedRevision: number()
+		};
+		const workspaceScope = string().optional();
+		const link = object({
+			taskId,
+			sessionId,
+			workspaceScope
+		});
+		const longTaskRemote = {
+			package: owner,
+			descriptors: [
+				descriptor("getLongTaskSettings"),
+				descriptor("saveLongTaskSettings", object({
+					expectedRevision: string().length(64),
+					draft: unknown()
+				})),
+				descriptor("get", taskId, "taskId"),
+				descriptor("list"),
+				descriptor("listTasks", object({
+					cursor: number().optional(),
+					filter: object({
+						state: string().optional(),
+						query: string().optional(),
+						archived: boolean().optional(),
+						sessionId: sessionId.optional()
+					}).optional()
+				}).optional(), "input", true),
+				descriptor("getTask", task),
+				descriptor("getTaskAudit", task),
+				descriptor("getTaskGraph", object({
+					taskId,
+					revision: number().optional()
+				})),
+				descriptor("listTaskEvents", object({
+					taskId,
+					cursor: number().optional(),
+					taskNodeId: string().optional()
+				})),
+				descriptor("getCurrentTaskForSession", object({ sessionId })),
+				descriptor("updateTask", object({
+					...control,
+					action: _enum([
+						"confirm",
+						"resume",
+						"pause",
+						"cancel"
+					]),
+					sessionId: sessionId.optional(),
+					workspaceScope,
+					recoveryResolution: _enum(["retry", "confirmed_succeeded"]).optional()
+				})),
+				descriptor("attachCurrentSession", link),
+				descriptor("setCurrentSession", link),
+				descriptor("clearCurrentSession", object({ sessionId })),
+				descriptor("rejectReplan", object(control)),
+				descriptor("editTaskGoal", object({
+					...control,
+					objective: string(),
+					reason: string(),
+					sessionId: sessionId.optional()
+				})),
+				descriptor("acceptReplan", object({
+					...control,
+					sessionId: sessionId.optional()
+				})),
+				descriptor("archiveTask", object(control)),
+				descriptor("restoreTask", task),
+				descriptor("getTaskNavigation", task)
+			]
+		};
+		//#endregion
+		//#region client/remote-value.js
+		function remoteValue(result) {
+			if (result && result.ok === false) throw new Error(result.error?.message ?? "远程调用失败");
+			return result && result.ok === true ? result.value : result;
+		}
+		//#endregion
+		//#region client/LongTaskSettingsPage.js
+		const e$5 = react.default.createElement;
+		const workerNames = {
+			dsh: "DSH",
+			"codex-cli": "Codex",
+			"claude-cli": "Claude Code",
+			"custom-exec": "自定义"
+		};
+		const tabs = [
+			["workers", "执行器"],
+			["limits", "模型与工具"],
+			["flows", "编排"]
+		];
+		function registerLongTaskSettings(slots, remote) {
+			slots.inject("settings.section", () => slots.register({
+				name: "settings.section",
+				id: "long-task-settings",
+				order: 31,
+				label: "长任务"
+			}, () => e$5(LongTaskSettingsPage, { remote })));
+		}
+		function Field({ label, value, onChange, options, numeric, multiline, min = 1, max = 1e3 }) {
+			const control = options !== void 0 ? e$5("select", {
+				value,
+				onChange: (event) => onChange(event.target.value)
+			}, ...options.map(([id, text]) => e$5("option", {
+				key: id,
+				value: id
+			}, text))) : multiline ? e$5("textarea", {
+				value,
+				rows: 2,
+				onChange: (event) => onChange(event.target.value)
+			}) : e$5("input", {
+				value,
+				type: numeric ? "number" : "text",
+				...numeric ? {
+					min,
+					max,
+					step: 1
+				} : {},
+				onChange: (event) => onChange(numeric ? Number(event.target.value) : event.target.value)
+			});
+			return e$5("label", { className: "lts-field" }, e$5("span", null, label), control);
+		}
+		function ChoiceList({ label, values, options, onChange }) {
+			return e$5("fieldset", { className: "lts-choices" }, e$5("legend", null, label), ...options.map((id) => e$5("label", { key: id }, e$5("input", {
+				type: "checkbox",
+				checked: values.includes(id),
+				onChange: (event) => onChange(event.target.checked ? [...values, id] : values.filter((value) => value !== id))
+			}), id)));
+		}
+		function Button({ label, onClick, disabled }) {
+			return e$5("button", {
+				type: "button",
+				className: "lts-button",
+				onClick,
+				disabled
+			}, label);
+		}
+		function title(label, action) {
+			return e$5("div", { className: "lts-line" }, e$5("h3", null, label), action);
+		}
+		function nextId(prefix, ids) {
+			let index = 1;
+			while (ids.includes(prefix + "-" + index)) index++;
+			return prefix + "-" + index;
+		}
+		function field(label, value, onChange, options = {}) {
+			return e$5(Field, {
+				label,
+				value,
+				onChange,
+				...options
+			});
+		}
+		function options(ids) {
+			return ids.map((id) => [id, id]);
+		}
+		function changeRow(update, list, index, key, value) {
+			update((draft) => {
+				draft[list][index][key] = value;
+			});
+		}
+		function removeRow(update, list, index) {
+			update((draft) => {
+				draft[list].splice(index, 1);
+			});
+		}
+		function addRow(update, list, item) {
+			update((draft) => {
+				draft[list].push(item);
+			});
+		}
+		function rowField(d, onUpdate, list, index, key, label, attrs) {
+			return field(label, d[list][index][key] ?? "", (value) => changeRow(onUpdate, list, index, key, value), attrs);
+		}
+		function Workers({ view, draft: d, update }) {
+			const workerIds = d.workers.map((item) => item.id);
+			const workspaces = new Map(view.workers.map((item) => [item.id, item.cwd]));
+			const groupIds = d.executionProfiles.map((item) => item.id);
+			return e$5(react.default.Fragment, null, title("执行额度"), e$5("div", { className: "lts-row" }, field("同时运行的任务数", d.maxConcurrentTasks, (value) => update((x) => {
+				x.maxConcurrentTasks = value;
+			}), { numeric: true }), field("默认执行组", d.defaultExecutionProfile, (value) => update((x) => {
+				x.defaultExecutionProfile = value;
+			}), { options: options([.../* @__PURE__ */ new Set([...groupIds, ...workerIds])]) })), title("已登记的执行器", e$5(Button, {
+				label: "添加 DSH 执行器",
+				onClick: () => addRow(update, "workers", {
+					id: nextId("dsh", workerIds),
+					kind: "dsh",
+					maxConcurrent: 1
+				})
+			})), ...d.workers.map((item, index) => e$5("div", {
+				className: "lts-card lts-worker",
+				key: index
+			}, e$5("div", null, e$5("strong", null, item.id), e$5("small", null, workerNames[item.kind]), workspaces.get(item.id) ? e$5("div", {
+				className: "lts-path",
+				title: workspaces.get(item.id)
+			}, workspaces.get(item.id)) : null), rowField(d, update, "workers", index, "maxConcurrent", "并发上限", { numeric: true }), item.kind === "dsh" && item.id !== "dsh" ? e$5(Button, {
+				label: "移除 " + item.id,
+				onClick: () => removeRow(update, "workers", index)
+			}) : null)), e$5("p", { className: "lts-help" }, "Codex、Claude Code 和自定义命令从宿主配置登记，登记后可在这里调整并发。"), title("执行组", e$5(Button, {
+				label: "添加执行组",
+				onClick: () => addRow(update, "executionProfiles", {
+					id: nextId("group", [...groupIds, ...workerIds]),
+					workerIds: []
+				})
+			})), ...d.executionProfiles.map((item, index) => e$5("div", {
+				className: "lts-card",
+				key: index
+			}, e$5("div", { className: "lts-line" }, e$5("strong", null, item.id), d.executionProfiles.length > 1 ? e$5(Button, {
+				label: "移除执行组 " + item.id,
+				onClick: () => removeRow(update, "executionProfiles", index)
+			}) : null), e$5(ChoiceList, {
+				label: "组内执行器（留空使用 DSH）",
+				values: item.workerIds,
+				options: workerIds,
+				onChange: (value) => changeRow(update, "executionProfiles", index, "workerIds", value)
+			}), field("DSH 模型职责", item.modelRole ?? "", (value) => update((x) => {
+				if (value === "") delete x.executionProfiles[index].modelRole;
+				else x.executionProfiles[index].modelRole = value;
+			}), { options: [["", "execution（默认）"], ...options([...new Set(d.modelEndpoints.flatMap((route) => route.roles))].filter((role) => role !== "execution"))] }))));
+		}
+		function Limits({ draft: d, update }) {
+			return e$5(react.default.Fragment, null, title("模型端点", e$5(Button, {
+				label: "添加模型端点",
+				onClick: () => addRow(update, "modelEndpoints", {
+					id: nextId("model", d.modelEndpoints.map((row) => row.id)),
+					provider: "",
+					model: "",
+					roles: ["execution"],
+					maxConcurrent: 1
+				})
+			})), e$5("p", { className: "lts-help" }, "填写 DSH「模型」中已登记的提供方和模型 ID。API 密钥在「模型」管理。"), ...d.modelEndpoints.map((item, index) => e$5("div", {
+				className: "lts-card",
+				key: index
+			}, e$5("div", { className: "lts-line" }, e$5("strong", null, item.id), e$5(Button, {
+				label: "移除端点 " + item.id,
+				onClick: () => removeRow(update, "modelEndpoints", index)
+			})), e$5("div", { className: "lts-row" }, rowField(d, update, "modelEndpoints", index, "provider", "提供方 ID"), rowField(d, update, "modelEndpoints", index, "model", "模型 ID"), field("职责（逗号分隔）", item.roles.join(","), (value) => changeRow(update, "modelEndpoints", index, "roles", value.split(","))), rowField(d, update, "modelEndpoints", index, "maxConcurrent", "模型并发", { numeric: true })))), title("工具额度", e$5(Button, {
+				label: "添加工具额度",
+				onClick: () => addRow(update, "toolConcurrency", {
+					name: "",
+					maxConcurrent: 1
+				})
+			})), e$5("p", { className: "lts-help" }, "按 DSH 工具的注册名限制并发调用。"), ...d.toolConcurrency.map((_item, index) => e$5("div", {
+				className: "lts-card lts-row",
+				key: index
+			}, rowField(d, update, "toolConcurrency", index, "name", "工具名"), rowField(d, update, "toolConcurrency", index, "maxConcurrent", "工具并发", { numeric: true }), e$5(Button, {
+				label: "移除工具额度",
+				onClick: () => removeRow(update, "toolConcurrency", index)
+			}))));
+		}
+		function Workflow({ draft, update }) {
+			const [selected, select] = react.default.useState("");
+			const ids = Object.keys(draft.workflowTemplates);
+			const id = ids.includes(selected) ? selected : ids[0];
+			const spec = id === void 0 ? void 0 : draft.workflowTemplates[id];
+			const profiles = options([.../* @__PURE__ */ new Set([...draft.executionProfiles.map((item) => item.id), ...draft.workers.map((item) => item.id)])]);
+			const addTemplate = (mode) => {
+				const next = nextId(mode === "workflow" ? "workflow" : "discussion", ids);
+				const profile = draft.defaultExecutionProfile;
+				update((x) => {
+					x.workflowTemplates[next] = mode === "workflow" ? {
+						mode,
+						entry: "stage-1",
+						stages: [{
+							id: "stage-1",
+							objective: "",
+							profile
+						}]
+					} : {
+						mode,
+						rounds: 3,
+						participants: [{
+							id: "A",
+							profile
+						}, {
+							id: "B",
+							profile
+						}],
+						moderator: profile
+					};
+				});
+				select(next);
+			};
+			const changeSpec = (change) => update((x) => change(x.workflowTemplates[id]));
+			const removeTemplate = () => update((x) => {
+				delete x.workflowTemplates[id];
+				if (x.defaultWorkflow === id) x.defaultWorkflow = "dynamic";
+			});
+			return e$5(react.default.Fragment, null, title("默认编排"), field("新任务使用", draft.defaultWorkflow, (value) => update((x) => {
+				x.defaultWorkflow = value;
+			}), { options: [["dynamic", "动态任务子图"], ...options(ids)] }), title("流程模板", e$5("div", { className: "lts-actions" }, e$5(Button, {
+				label: "添加工作流",
+				onClick: () => addTemplate("workflow")
+			}), e$5(Button, {
+				label: "添加讨论",
+				onClick: () => addTemplate("discussion")
+			}))), spec === void 0 ? e$5("p", { className: "lts-help" }, "添加模板后，可在聊天或 Skill 中按名称使用。") : e$5(react.default.Fragment, null, e$5("div", { className: "lts-row" }, field("编辑模板", id, select, { options: options(ids) }), e$5(Button, {
+				label: "移除模板 " + id,
+				onClick: removeTemplate
+			})), spec.mode === "workflow" ? e$5(Stages, {
+				spec,
+				change: changeSpec,
+				profiles
+			}) : e$5(Discussion, {
+				spec,
+				change: changeSpec,
+				profiles
+			})));
+		}
+		function Stages({ spec, change, profiles }) {
+			const ids = spec.stages.map((stage) => stage.id);
+			const [active, activate] = react.default.useState("");
+			const selected = ids.includes(active) ? active : spec.entry;
+			const index = ids.indexOf(selected);
+			const stage = spec.stages[index];
+			if (stage === void 0) return null;
+			const set = (key, value) => change((x) => {
+				if (value === "") delete x.stages[index][key];
+				else x.stages[index][key] = value;
+			});
+			const add = () => {
+				const id = nextId("stage", ids);
+				change((x) => {
+					const last = x.stages.at(-1);
+					if (!last.next) last.next = id;
+					x.stages.push({
+						id,
+						objective: "",
+						profile: profiles[0]?.[0] ?? "default"
+					});
+				});
+				activate(id);
+			};
+			const swap = (offset) => change((x) => {
+				const target = index + offset;
+				const ordered = x.stages.map((item, i, array) => i === index ? array[target] : i === target ? array[index] : item);
+				const linear = x.stages.every((item, i, array) => item.next === array[i + 1]?.id);
+				if (linear) ordered.forEach((item, i) => {
+					if (ordered[i + 1]) item.next = ordered[i + 1].id;
+					else delete item.next;
+				});
+				if (linear) x.entry = ordered[0].id;
+				x.stages = ordered;
+			});
+			const remove = () => change((x) => {
+				x.stages.splice(index, 1);
+				if (x.entry === selected) x.entry = stage.next ?? x.stages[0].id;
+				for (const item of x.stages) {
+					if (item.next === selected) {
+						if (stage.next && stage.next !== item.id) item.next = stage.next;
+						else delete item.next;
+					}
+					if (item.onChangesRequested === selected) delete item.onChangesRequested;
+				}
+			});
+			return e$5("div", { className: "lts-workflow" }, e$5("div", { className: "lts-stages" }, ...spec.stages.map((item) => e$5("button", {
+				type: "button",
+				key: item.id,
+				className: "lts-stage",
+				"aria-pressed": item.id === selected,
+				onClick: () => activate(item.id)
+			}, e$5("strong", null, item.objective || item.id), e$5("small", null, item.profile))), e$5(Button, {
+				label: "添加阶段",
+				onClick: add
+			})), e$5("div", { className: "lts-card lts-stage-editor" }, e$5("div", { className: "lts-line" }, e$5("strong", null, selected), e$5("div", { className: "lts-actions" }, e$5(Button, {
+				label: "上移",
+				disabled: index === 0,
+				onClick: () => swap(-1)
+			}), e$5(Button, {
+				label: "下移",
+				disabled: index === ids.length - 1,
+				onClick: () => swap(1)
+			}), e$5(Button, {
+				label: "移除阶段",
+				disabled: ids.length === 1,
+				onClick: remove
+			}))), field("阶段说明", stage.objective, (value) => change((x) => {
+				x.stages[index].objective = value;
+			}), { multiline: true }), field("由谁执行", stage.profile, (value) => set("profile", value), { options: profiles }), e$5("div", { className: "lts-row" }, field("通过后", stage.next ?? "", (value) => set("next", value), { options: [["", "结束"], ...options(ids)] }), field("评审退回到", stage.onChangesRequested ?? "", (value) => set("onChangesRequested", value), { options: [["", "无评审分支"], ...options(ids)] })), e$5("div", { className: "lts-row" }, field("最多执行次数", stage.maxVisits ?? 1, (value) => set("maxVisits", value), {
+				numeric: true,
+				max: 20
+			}), field("执行权限", stage.sideEffectClass ?? "read_only", (value) => set("sideEffectClass", value), { options: [
+				["read_only", "只读"],
+				["idempotent", "可重复写入"],
+				["external_effect", "外部操作"]
+			] })), field("起始阶段", spec.entry, (value) => change((x) => {
+				x.entry = value;
+			}), { options: options(ids) })));
+		}
+		function Discussion({ spec, change, profiles }) {
+			const moderator = typeof spec.moderator === "string" ? spec.moderator : spec.moderator.profile;
+			return e$5("div", { className: "lts-card" }, e$5("div", { className: "lts-row" }, field("讨论轮数", spec.rounds, (value) => change((x) => {
+				x.rounds = value;
+			}), {
+				numeric: true,
+				max: 30
+			}), field("主持人执行组", moderator, (value) => change((x) => {
+				x.moderator = typeof x.moderator === "string" ? value : {
+					...x.moderator,
+					profile: value
+				};
+			}), { options: profiles })), field("提前收敛条件", spec.convergence ?? "", (value) => change((x) => {
+				if (value.trim() === "") delete x.convergence;
+				else x.convergence = value;
+			}), { multiline: true }), title("发言顺序", e$5(Button, {
+				label: "添加成员",
+				onClick: () => change((x) => {
+					const ids = x.participants.map((item, index) => typeof item === "string" ? "member-" + (index + 1) : item.id);
+					x.participants.push({
+						id: nextId("member", ids),
+						profile: profiles[0]?.[0] ?? "default"
+					});
+				})
+			})), ...spec.participants.map((item, index) => {
+				const participant = typeof item === "string" ? {
+					id: "member-" + (index + 1),
+					profile: item
+				} : item;
+				const set = (key, value) => change((x) => {
+					const updated = {
+						...participant,
+						[key]: value
+					};
+					if (updated.instruction === "") delete updated.instruction;
+					x.participants[index] = updated;
+				});
+				return e$5("div", {
+					className: "lts-row lts-discussion-row",
+					key: index
+				}, field("成员", participant.id, (value) => set("id", value)), field("由谁执行", participant.profile, (value) => set("profile", value), { options: profiles }), field("发言要求", participant.instruction ?? "", (value) => set("instruction", value)), e$5(Button, {
+					label: "上移成员",
+					disabled: index === 0,
+					onClick: () => change((x) => {
+						[x.participants[index - 1], x.participants[index]] = [x.participants[index], x.participants[index - 1]];
+					})
+				}), e$5(Button, {
+					label: "移除成员",
+					disabled: spec.participants.length <= 2,
+					onClick: () => change((x) => {
+						x.participants.splice(index, 1);
+					})
+				}));
+			}));
+		}
+		function toDraft(view) {
+			const { revision: _revision, editable: _editable, busy: _busy, warning: _warning, workers, ...rest } = view;
+			return {
+				...rest,
+				workers: workers.map(({ id, kind, maxConcurrent }) => ({
+					id,
+					kind,
+					maxConcurrent
+				}))
+			};
+		}
+		function LongTaskSettingsPage({ remote }) {
+			const [section, choose] = react.default.useState("workers");
+			const [view, setView] = react.default.useState(void 0);
+			const [draft, setDraft] = react.default.useState(void 0);
+			const [saving, setSaving] = react.default.useState(false);
+			const [message, show] = react.default.useState(null);
+			const [dirty, setDirty] = react.default.useState(false);
+			const load = react.default.useCallback(async () => {
+				try {
+					const current = remoteValue(await remote.getLongTaskSettings());
+					setView(current);
+					setDraft(current === null ? void 0 : toDraft(current));
+					setDirty(false);
+					show(null);
+				} catch (error) {
+					show({
+						error: true,
+						text: String(error.message ?? error)
+					});
+				}
+			}, [remote]);
+			react.default.useEffect(() => {
+				load();
+			}, [load]);
+			const update = (change) => {
+				setDraft((current) => {
+					const editable = structuredClone(current);
+					change(editable);
+					return editable;
+				});
+				setDirty(true);
+				show(null);
+			};
+			const save = async (event) => {
+				event.preventDefault();
+				if (view?.editable !== true || saving) return;
+				setSaving(true);
+				show(null);
+				try {
+					const result = remoteValue(await remote.saveLongTaskSettings({
+						expectedRevision: view.revision,
+						draft
+					}));
+					setView({
+						...view,
+						revision: result.revision
+					});
+					setDirty(false);
+					show({
+						error: false,
+						text: "配置已保存。DSH 正在重新加载。"
+					});
+				} catch (error) {
+					show({
+						error: true,
+						text: String(error.message ?? error)
+					});
+				} finally {
+					setSaving(false);
+				}
+			};
+			const content = draft === void 0 ? null : section === "workers" ? e$5(Workers, {
+				view,
+				draft,
+				update
+			}) : section === "limits" ? e$5(Limits, {
+				draft,
+				update
+			}) : e$5(Workflow, {
+				draft,
+				update
+			});
+			return e$5("form", {
+				className: "lts-root",
+				onSubmit: save
+			}, e$5("div", { className: "lts-heading" }, e$5("h2", null, "长任务"), view?.busy ? e$5("span", null, "任务执行中，空闲后可保存") : null), view?.warning ? e$5("p", {
+				role: "alert",
+				className: "lts-error"
+			}, view.warning) : null, e$5("nav", {
+				"aria-label": "长任务设置分类",
+				className: "lts-nav"
+			}, ...tabs.map(([id, label]) => e$5("button", {
+				key: id,
+				type: "button",
+				"aria-pressed": id === section,
+				onClick: () => choose(id)
+			}, label))), e$5("fieldset", {
+				className: "lts-content",
+				disabled: view?.editable !== true || saving
+			}, content ?? e$5("p", { className: "lts-help" }, view === null ? "当前运行时未提供设置。" : "正在读取设置…")), e$5("footer", { className: "lts-footer" }, message ? e$5("span", {
+				role: message.error ? "alert" : "status",
+				className: message.error ? "lts-error" : ""
+			}, message.text) : view?.editable === false ? e$5("span", null, "当前 Web 实例以只读方式展示配置。") : null, e$5(Button, {
+				label: "重新加载",
+				onClick: load,
+				disabled: saving
+			}), e$5("button", {
+				type: "submit",
+				className: "lts-button lts-primary",
+				disabled: view?.editable !== true || !dirty || saving || view.busy
+			}, saving ? "正在保存…" : "保存配置")));
+		}
+		const longTaskSettingsCss = `
+.lts-root{font:inherit;color:var(--dsw-alias-label-primary);max-width:820px;padding:0 2px;min-width:0}
+.lts-heading,.lts-line,.lts-footer{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.lts-heading h2{margin:0;font-size:21px;font-weight:650}.lts-heading span{font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.lts-nav{margin:14px 0 4px;display:flex;gap:18px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.lts-nav button{border:0;border-bottom:2px solid transparent;background:none;color:var(--dsw-alias-label-secondary);padding:7px 2px 9px;font:inherit;cursor:pointer}
+.lts-nav button[aria-pressed=true]{border-color:var(--dsw-alias-label-primary);color:var(--dsw-alias-label-primary);font-weight:600}
+.lts-content{padding:0;margin:0;border:0;min-width:0}.lts-line h3{font-weight:620;font-size:14px;margin:13px 0 7px}
+.lts-card{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px 12px;margin:7px 0;min-width:0}
+.lts-row,.lts-worker{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));align-items:end;gap:8px}
+.lts-worker{grid-template-columns:minmax(150px,1fr) minmax(110px,145px) auto;align-items:center}
+.lts-worker strong{font-size:13px;margin-right:12px}.lts-worker small,.lts-stage small,.lts-path,.lts-help{font-size:12px;color:var(--dsw-alias-label-secondary)}
+.lts-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:310px}.lts-help{margin:7px 0 10px;line-height:1.4}
+.lts-field{display:grid;gap:4px;font-size:12px;min-width:0}.lts-field input,.lts-field select,.lts-field textarea{box-sizing:border-box;padding:5px 7px;min-height:29px;width:100%;min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base);color:inherit;font:inherit}.lts-field textarea{resize:vertical}
+.lts-choices{margin:7px 0;border:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px}.lts-choices legend{padding:0;margin-bottom:4px}.lts-choices label{display:inline-flex;gap:5px;align-items:center}
+.lts-button{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base);padding:4px 9px;color:inherit;font:inherit;font-size:12px;min-height:28px;cursor:pointer}
+.lts-button:disabled{opacity:.46;cursor:default}.lts-actions{display:flex;flex-wrap:wrap;gap:5px}.lts-primary{font-weight:700;border-color:var(--dsw-alias-label-primary)}
+.lts-workflow{display:grid;grid-template-columns:minmax(110px,1fr) minmax(230px,2fr);gap:8px;align-items:start}.lts-stages{display:grid;gap:5px;margin-top:7px}.lts-stage{display:grid;gap:3px;align-items:center;text-align:left;min-width:0;padding:7px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-base);color:inherit;font:inherit;font-size:12px;cursor:pointer}.lts-stage strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lts-stage[aria-pressed=true]{border-color:var(--dsw-alias-label-primary)}
+.lts-stage-editor{display:grid;gap:7px}.lts-discussion-row{margin-top:7px}
+.lts-footer{justify-content:flex-end;position:sticky;bottom:0;padding:9px 0;margin-top:6px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);z-index:1;font-size:12px}.lts-footer span{margin-right:auto}.lts-error{color:var(--dsw-alias-state-error-primary)}
+@media(max-width:540px){.lts-worker,.lts-workflow{grid-template-columns:1fr}.lts-footer{flex-wrap:wrap}.lts-line{flex-wrap:wrap}}
+`;
 		/** Text in SVG does not naturally ellipsize, so clip labels before rendering. */
 		function truncateGraphText(value, maxCharacters) {
 			return value.length <= maxCharacters ? value : `${value.slice(0, Math.max(0, maxCharacters - 1))}…`;
@@ -4036,8 +4649,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		/** Prevent a folded two-node graph from being auto-enlarged to fill the SVG. */
 		function stableCanvasSize({ width, height }) {
 			return {
-				width: 1100,
-				height: 640
+				width: Math.max(760, width),
+				height: Math.max(360, height)
 			};
 		}
 		/**
@@ -4410,9 +5023,37 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		* so a selected pending node can not be mistaken for a running one.
 		*/
 		const dagToneCss = ".ltr-node.tone-done>rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error>rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning>rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing>rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted>rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}";
+		function goalObjectivePresentation(objective) {
+			return {
+				className: "ltr-goal-objective",
+				singleLine: true,
+				title: objective
+			};
+		}
+		function taskAreaPresentation() {
+			return {
+				panelClassName: "ltr-task-area-panel",
+				cockpitPanelClassName: "ltr-task-cockpit-panel"
+			};
+		}
+		/** Bounded panel geometry follows the host conversation column, never the viewport. */
+		const taskAreaPanelCss = "box-sizing:border-box;width:100%;max-width:1160px;max-height:min(55vh,430px);margin:0 auto;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:0 0 16px 16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)";
+		/** The cockpit is a task workspace, not a modal that must preserve transcript height. */
+		const cockpitPanelCss = "height:calc(100vh - 76px);max-height:none;overflow:hidden";
+		function cockpitLayoutPresentation() {
+			return {
+				identityClassName: "ltr-cockpit-identity",
+				actionsClassName: "ltr-cockpit-actions",
+				mainClassName: "ltr-cockpit-main",
+				inspectorClassName: "ltr-inspector ltr-cockpit-inspector",
+				eventListClassName: "ltr-event-list ltr-cockpit-events",
+				mainSizing: "fill-remaining-height",
+				inspectorMode: "collapsible-below-topology"
+			};
+		}
 		function taskStripPresentation(task) {
 			const state = taskStatePresentation(task.state);
-			const waitingForDriver = task.state === "RUNNING" && task.currentOrLastNode?.state !== void 0 && task.currentOrLastNode.state !== "RUNNING";
+			const waitingForDriver = task.requiresSessionDriver === true || task.requiresSessionDriver === void 0 && task.state === "RUNNING" && task.currentOrLastNode?.state !== void 0 && task.currentOrLastNode.state !== "RUNNING";
 			const current = task.currentOrLastNode?.objective;
 			return {
 				...state,
@@ -4424,6 +5065,18 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const objective = node?.objective;
 			const compactObjective = objective && objective.length > 33 ? `${objective.slice(0, 33)}…` : objective;
 			return `${progress?.settled ?? progress?.succeeded ?? 0}/${progress?.total ?? 0}${compactObjective ? ` · 当前：${compactObjective}` : ""}`;
+		}
+		function formatRuntimeMetrics(metrics) {
+			const duration = (value) => {
+				const seconds = Math.floor(Math.max(0, value ?? 0) / 1e3);
+				const minutes = Math.floor(seconds / 60);
+				const remainder = seconds % 60;
+				return minutes > 0 ? `${minutes} 分 ${remainder} 秒` : `${remainder} 秒`;
+			};
+			return {
+				summary: `第 ${metrics?.runRoundCount ?? 0} 轮 · 已运行 ${duration(metrics?.activeRunTimeMs)}`,
+				detail: `自然经过 ${duration(metrics?.elapsedRunTimeMs)}`
+			};
 		}
 		//#endregion
 		//#region client/TaskDag.js
@@ -4608,6 +5261,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (graph === null) return "no-plan";
 			return "ready";
 		}
+		/** Original-goal revisions require a live, non-terminal task. */
+		function canEditOriginalGoal(task) {
+			return task != null && task.orchestration === void 0 && ![
+				"SUCCEEDED",
+				"FAILED",
+				"CANCELLED"
+			].includes(task.state);
+		}
 		/**
 		* Build the message injected into the bound session after a web-side resume.
 		* The session's model receives it as its next prompt and drives the DAG with
@@ -4615,7 +5276,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		* has to type a second message.
 		*/
 		function resumeDriverMessage(taskId, objective) {
-			return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ""}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认。`;
+			return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ""}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认；若该任务已被用户暂停（状态为 PAUSED），请不要恢复，直接告知用户。`;
 		}
 		/**
 		* Decide how a web resume hands execution to a live parent session.
@@ -4631,23 +5292,126 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			if (bound === currentSessionId) return "inject";
 			return "open";
 		}
-		/** A durable RUNNING state still needs a live session parent before it can dispatch child work. */
+		/** Use the runtime lease signal when available; retain the old derivation only for an older host during rollout. */
 		function waitingForSessionDriver(task) {
+			if (typeof task?.requiresSessionDriver === "boolean") return task.requiresSessionDriver;
 			return task?.state === "RUNNING" && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some((node) => node.state === "RUNNING");
 		}
-		/** Both the current and a bound background session can accept a driver prompt. */
-		function shouldDriveBoundSession(mode) {
-			return mode === "inject" || mode === "open";
-		}
 		//#endregion
-		//#region client/remote-value.js
-		function remoteValue(result) {
-			if (result && result.ok === false) throw new Error(result.error?.message ?? "远程调用失败");
-			return result && result.ok === true ? result.value : result;
+		//#region client/task-driver.js
+		/**
+		* 单一会话驱动入口。
+		*
+		* 长任务在 Web 侧恢复后仍需要一条「请调用 long_task_resume」的驱动消息才能
+		* 真正派发节点。历史上这个动作由三处独立实现：Cockpit 的显式恢复路径、
+		* Cockpit 的自动驱动 effect、任务条的自动驱动 effect，各自持有一份组件内
+		* 去重集合，导致一次点击会注入 2~3 条完全相同的排队消息。
+		*
+		* 这里把「同一会话 + 同一任务 + 同一控制版本只自动驱动一次」收敛为一个模块级
+		* 状态机：所有入口共用同一份状态，跨组件、跨重挂载、跨轮询周期都生效；真实
+		* 注入失败允许立即重试，成功之后只在宽限期外才允许人工重发。
+		*/
+		const DRIVER_REDRIVE_GRACE_MS = 6e4;
+		const DRIVER_STATE_TTL_MS = 18e5;
+		const MAX_TRACKED_DRIVERS = 512;
+		const drivers = /* @__PURE__ */ new Map();
+		/** 去重键：同一任务的不同控制版本是不同意图，绑定到不同会话也是不同意图。 */
+		function sessionDriverKey(sessionId, taskId, controlRevision) {
+			return `${sessionId}::${taskId}::${controlRevision}`;
+		}
+		/** 读取当前驱动状态；undefined 表示从未尝试过。 */
+		function sessionDriverStatus(sessionId, taskId, controlRevision) {
+			return drivers.get(sessionDriverKey(sessionId, taskId, controlRevision));
+		}
+		/**
+		* 判断此刻是否还允许发送驱动消息。
+		* - 从未尝试：允许。
+		* - 注入进行中：禁止，避免并发重复。
+		* - 注入失败：允许重试。
+		* - 注入成功：宽限期内禁止（防止人工连点），超过宽限期允许重新发送。
+		*/
+		function canDriveSessionDriver(status, now = Date.now(), graceMs = DRIVER_REDRIVE_GRACE_MS) {
+			if (status === void 0) return true;
+			if (status.outcome === "pending") return false;
+			if (status.outcome === "failed") return true;
+			return now - status.at >= graceMs;
+		}
+		/**
+		* 向绑定会话至多注入一次驱动消息。
+		* @param input.sessionId 目标会话。
+		* @param input.taskId 任务 ID。
+		* @param input.controlRevision 该任务被推进到的控制版本。
+		* @param input.objective 任务目标，用于拼装驱动消息。
+		* @param input.drive 实际注入函数，签名 (sessionId, taskId, objective) => Promise<boolean>。
+		* @param input.now 可选时钟，便于确定性测试。
+		* @param input.graceMs 可选宽限期覆盖值。
+		* @returns 结果为 'injected' | 'failed' | 'skipped'，并附带最终状态。
+		*/
+		async function driveBoundSessionOnce(input) {
+			const graceMs = input.graceMs ?? 6e4;
+			const clock = () => input.now === void 0 ? Date.now() : input.now;
+			const key = sessionDriverKey(input.sessionId, input.taskId, input.controlRevision);
+			const existing = drivers.get(key);
+			if (!canDriveSessionDriver(existing, clock(), graceMs)) return {
+				outcome: "skipped",
+				status: existing
+			};
+			remember(key, {
+				outcome: "pending",
+				at: clock()
+			});
+			try {
+				const status = await input.drive(input.sessionId, input.taskId, input.objective) === true ? {
+					outcome: "injected",
+					at: clock()
+				} : {
+					outcome: "failed",
+					at: clock(),
+					reason: "绑定会话拒绝了驱动消息"
+				};
+				remember(key, status);
+				return {
+					outcome: status.outcome,
+					status
+				};
+			} catch (error) {
+				const status = {
+					outcome: "failed",
+					at: clock(),
+					reason: error instanceof Error ? error.message : String(error)
+				};
+				remember(key, status);
+				return {
+					outcome: status.outcome,
+					status
+				};
+			}
+		}
+		function remember(key, status) {
+			drivers.set(key, status);
+			if (drivers.size <= MAX_TRACKED_DRIVERS) return;
+			const cutoff = status.at - DRIVER_STATE_TTL_MS;
+			for (const [existingKey, existing] of drivers) if (existing.at < cutoff) drivers.delete(existingKey);
+			while (drivers.size > MAX_TRACKED_DRIVERS) {
+				let oldestKey;
+				let oldestAt = Number.POSITIVE_INFINITY;
+				for (const [existingKey, existing] of drivers) if (existing.at < oldestAt) {
+					oldestAt = existing.at;
+					oldestKey = existingKey;
+				}
+				if (oldestKey === void 0) return;
+				drivers.delete(oldestKey);
+			}
 		}
 		//#endregion
 		//#region client/task-events.js
 		const labels = {
+			WorkflowConfigured: "已保存编排流程",
+			WorkflowAdvanced: "已展开下一流程步骤",
+			WorkflowChangeProposed: "等待确认的流程变更",
+			WorkflowLimitReached: "已达到流程轮次上限",
+			WorkerAssigned: "已分配 Worker",
+			WorkerSessionLinked: "已记录外部会话",
 			GoalCreated: "已创建任务",
 			GoalObjectiveRevised: "已修改原始目标",
 			PlanProposed: "等待确认的重规划",
@@ -4684,9 +5448,14 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const payload = event.payload ?? {};
 			const revision = typeof payload.revision === "number" ? `修订 ${payload.revision}` : "";
 			const reason = typeof payload.reason === "string" ? payload.reason : typeof payload.retryAfter === "string" ? `预计 ${payload.retryAfter} 后重试` : typeof payload.trigger?.reason === "string" ? payload.trigger.reason : "";
+			const worker = typeof payload.workerId === "string" ? payload.workerId : "";
 			return {
 				label: labels[event.type] ?? event.type,
-				detail: [revision, reason].filter(Boolean).join(" · ") || "已记录",
+				detail: [
+					revision,
+					reason,
+					worker
+				].filter(Boolean).join(" · ") || "已记录",
 				tone: event.type.includes("Failed") ? "error" : event.type.includes("Paused") || event.type.includes("Proposed") ? "warning" : "neutral"
 			};
 		}
@@ -4700,7 +5469,40 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const [editing, setEditing] = react.default.useState(false);
 			const [objective, setObjective] = react.default.useState("");
 			const [reason, setReason] = react.default.useState("");
+			const [, setDriverTick] = react.default.useState(0);
 			react.default.useEffect(() => setSelectedId((previous) => previous !== void 0 && graph?.nodes.some((node) => node.id === previous) ? previous : initialSelectedNode(graph?.nodes ?? [])), [task?.id, graph]);
+			react.default.useEffect(() => {
+				if (!task?.requiresSessionDriver || !sessionId || typeof driveInSession !== "function") return;
+				let live = true;
+				Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
+					if (resumeDriverMode(remoteValue(result), sessionId) !== "inject") return void 0;
+					return driveBoundSessionOnce({
+						sessionId,
+						taskId: task.id,
+						controlRevision: task.controlRevision,
+						objective: task.objective,
+						drive: driveInSession
+					});
+				}).then((outcome) => {
+					if (!live || outcome === void 0) return;
+					setDriverTick((tick) => tick + 1);
+					if (outcome.outcome === "failed") setError(`未能向绑定会话发送继续指令：${outcome.status?.reason ?? "未知原因"}；请点击“继续执行会话”重试。`);
+				}).catch(() => {
+					if (live) setError("无法读取绑定会话；请点击“继续执行会话”重试。");
+				});
+				return () => {
+					live = false;
+				};
+			}, [
+				task?.id,
+				task?.controlRevision,
+				task?.requiresSessionDriver,
+				task?.objective,
+				sessionId,
+				remote,
+				driveInSession
+			]);
+			const layout = cockpitLayoutPresentation();
 			const dataState = cockpitDataState(task, graph);
 			if (dataState === "loading") return e$3("p", null, "正在加载任务…");
 			if (dataState === "missing") return e$3("section", { className: "ltr-cockpit" }, e$3("button", {
@@ -4712,10 +5514,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "button",
 				className: "ltr-btn",
 				onClick: onBack
-			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
+			}, "← 全部任务"), e$3("div", { className: layout.identityClassName }, e$3("div", { className: "ltr-cockpit-identity-row" }, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("span", { className: `ltr-state tone-${taskStatePresentation(task.state).tone}` }, taskStatePresentation(task.state).label)), e$3("small", null, `${task.id} · 修订 ${task.revision}`))), e$3("p", { className: "ltr-warning" }, "此历史任务在生成计划前结束，因此没有可展示的 DAG。"), e$3("h4", null, "近期事件"), e$3("ol", null, ...events.slice(-8).map((event, index) => e$3("li", { key: `${event.seq ?? index}-${event.type}` }, event.type))));
 			const selected = graph.nodes.find((node) => node.id === selectedId);
 			const activeAttempt = selected ? task.attempts?.find((attempt) => attempt.taskId === selected.id && attempt.state === "RUNNING") : void 0;
 			const waitingForDriver = waitingForSessionDriver(task);
+			const driverAvailable = canDriveSessionDriver(sessionId ? sessionDriverStatus(sessionId, task.id, task.controlRevision) : void 0);
 			const state = waitingForDriver ? {
 				label: "等待会话继续",
 				tone: "warning"
@@ -4727,28 +5530,46 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				return Promise.resolve(remote[method](input)).then((result) => {
 					const value = remoteValue(result);
 					onTaskChanged(value.kind === "conflict" ? value.current : value.task);
+					if (value.kind === "conflict") setError("任务已被其他操作更新，界面已刷新为最新状态；如需继续操作请再点一次。");
 					if (method === "attachCurrentSession" || method === "setCurrentSession" || method === "acceptReplan" || method === "updateTask" && ["confirm", "resume"].includes(input?.action)) onCurrentChanged?.(task.id);
-					if (method === "updateTask" && input?.action === "resume" && value.kind === "applied") return guideAfterResume();
+					if (method === "updateTask" && input?.action === "resume" && value.kind === "applied") return guideAfterResume(value.task);
 				}).catch((reason) => setError(String(reason))).finally(() => setPending(false));
 			};
-			const guideAfterResume = () => Promise.resolve(remote.getTaskNavigation({ taskId: task.id })).then((result) => {
-				const navigation = remoteValue(result);
-				const mode = resumeDriverMode(navigation, sessionId);
-				if (shouldDriveBoundSession(mode)) {
-					if (typeof driveInSession !== "function") {
-						setError("任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。");
+			const driveSession = (nextTask) => driveBoundSessionOnce({
+				sessionId,
+				taskId: nextTask.id,
+				controlRevision: nextTask.controlRevision,
+				objective: nextTask.objective,
+				drive: driveInSession
+			}).then((outcome) => {
+				setDriverTick((tick) => tick + 1);
+				if (outcome.outcome === "injected") setError("已向绑定会话发送继续执行指令。");
+				else if (outcome.outcome === "skipped") setError("继续指令已发送，正在等待绑定会话执行；如需再次发送请稍候再点。");
+				else setError(`未能注入继续指令：${outcome.status?.reason ?? "未知原因"}；可再次点击“继续执行会话”重试。`);
+				return outcome;
+			});
+			const guideAfterResume = (nextTask) => {
+				const target = nextTask ?? task;
+				return Promise.resolve(remote.getTaskNavigation({ taskId: target.id })).then((result) => {
+					const navigation = remoteValue(result);
+					const mode = resumeDriverMode(navigation, sessionId);
+					if (mode === "inject") {
+						if (typeof driveInSession !== "function") {
+							setError("任务正在等待绑定会话继续：当前 DSH 槽无法注入驱动消息，请让模型调用 long_task_resume。");
+							return;
+						}
+						return driveSession(target);
+					}
+					if (mode === "open" && navigation.currentSessionId && typeof openSession === "function") {
+						openSession(navigation.currentSessionId);
+						setError("已打开绑定会话，请在该会话继续执行。");
 						return;
 					}
-					setError(null);
-					const targetSessionId = mode === "inject" ? sessionId : navigation.currentSessionId;
-					Promise.resolve(driveInSession(targetSessionId, task.id, task.objective)).then((driven) => {
-						if (mode === "open" && typeof openSession === "function") openSession(targetSessionId);
-						setError(driven ? "已向绑定会话发送继续执行指令。" : "绑定会话未能注入继续指令，请直接让模型调用 long_task_resume。");
-					}).catch(() => setError("向绑定会话注入继续指令失败，请直接让模型调用 long_task_resume。"));
-					return;
-				}
-				setError("任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。");
-			}).catch((value) => setError(String(value)));
+					setError("任务正在等待会话继续：先点击“附加到当前会话”绑定本会话，再让模型调用 long_task_resume。");
+				}).catch((value) => {
+					setError(`无法读取绑定会话：${String(value)}`);
+				});
+			};
 			const action = (label, recoveryResolution) => invoke("updateTask", {
 				taskId: task.id,
 				expectedRevision: task.controlRevision,
@@ -4784,6 +5605,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				else if (target && typeof openSession === "function") openSession(target);
 				else setError(target ? "当前 DSH 槽未提供会话跳转能力。" : "此任务尚未关联可跳转的会话：先点击“附加到当前会话”绑定本会话，或从创建它的会话继续运行。");
 			}).catch((value) => setError(String(value)));
+			const orchestration = task.proposedOrchestration ?? task.orchestration;
 			const labels = {
 				confirm: "确认执行",
 				pause: "暂停任务",
@@ -4793,11 +5615,42 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const externalResolutionRequired = task.state === "PAUSED" && task.tasks?.some((node) => node.state === "BLOCKED" && node.sideEffectClass === "external_effect");
 			const latestQuotaRecovery = [...task.recentEvents ?? []].reverse().find((event) => event.type === "QuotaRecoveryResumed");
 			const quotaRecovery = quotaRecoveryPresentation(task.quotaRecovery, /* @__PURE__ */ new Date(), latestQuotaRecovery);
+			const editableOriginalGoal = canEditOriginalGoal(task);
+			const runtimeMetrics = formatRuntimeMetrics(task.runtimeMetrics);
+			const eventRows = events.filter((event) => !event.taskId || event.taskId === selected?.id).slice(-8).map((event, index) => {
+				const item = formatTaskEvent(event);
+				return e$3("li", {
+					key: `${event.seq ?? index}-${event.type}`,
+					className: `tone-${item.tone}`
+				}, e$3("strong", null, item.label), e$3("small", null, item.detail), event.createdAt ? e$3("time", null, new Date(event.createdAt).toLocaleString()) : null);
+			});
+			const actionButtons = (task.availableActions ?? []).filter((name) => labels[name]).flatMap((name) => name === "resume" && externalResolutionRequired ? [e$3("button", {
+				key: "resume-retry",
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: () => action("resume", "retry")
+			}, "重试外部操作"), e$3("button", {
+				key: "resume-confirmed",
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: () => action("resume", "confirmed_succeeded")
+			}, "外部操作已完成")] : [e$3("button", {
+				key: name,
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending,
+				onClick: () => action(name)
+			}, labels[name])]);
 			return e$3("section", { className: "ltr-cockpit" }, e$3("header", { className: "ltr-cockpit-header" }, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				onClick: onBack
-			}, "← 全部任务"), e$3("div", null, e$3("strong", null, task.objective), e$3("small", null, `${task.id} · 修订 ${task.revision}`)), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label), sessionId ? e$3("button", {
+			}, "← 全部任务"), e$3("div", { className: layout.identityClassName }, e$3("div", { className: "ltr-cockpit-identity-row" }, e$3("strong", goalObjectivePresentation(task.objective), task.objective), e$3("span", { className: `ltr-state tone-${state.tone}` }, state.label)), e$3("small", { title: runtimeMetrics.detail }, `${task.id} · 修订 ${task.revision} · ${runtimeMetrics.summary}`))), e$3("nav", {
+				className: layout.actionsClassName,
+				"aria-label": "任务操作"
+			}, sessionId ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending || isCurrent,
@@ -4819,7 +5672,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					expectedRevision: task.controlRevision,
 					...sessionId ? { sessionId } : {}
 				})
-			}, "接受重规划") : null, e$3("button", {
+			}, task.proposedOrchestration ? "确认流程变更" : "接受重规划") : null, editableOriginalGoal ? e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
@@ -4828,38 +5681,31 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					setObjective(task.objective);
 					setReason("");
 				}
-			}, "修改原始目标"), e$3("button", {
+			}, "修改原始目标") : null, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
 				onClick: jump
-			}, "当前会话"), e$3("button", {
+			}, "当前会话"), waitingForDriver ? e$3("button", {
+				type: "button",
+				className: "ltr-btn",
+				disabled: pending || !driverAvailable,
+				title: driverAvailable ? "向绑定会话发送继续执行指令" : "继续指令已发送，正在等待绑定会话执行",
+				onClick: () => {
+					guideAfterResume(task);
+				}
+			}, driverAvailable ? "继续执行会话" : "驱动已发送，等待执行") : null, e$3("button", {
 				type: "button",
 				className: "ltr-btn",
 				disabled: pending,
 				onClick: task.archivedAt ? restore : archive
-			}, task.archivedAt ? "恢复归档任务" : "删除"), ...(task.availableActions ?? []).filter((name) => labels[name]).flatMap((name) => name === "resume" && externalResolutionRequired ? [e$3("button", {
-				key: "resume-retry",
-				type: "button",
-				className: "ltr-btn",
-				disabled: pending,
-				onClick: () => action("resume", "retry")
-			}, "重试外部操作"), e$3("button", {
-				key: "resume-confirmed",
-				type: "button",
-				className: "ltr-btn",
-				disabled: pending,
-				onClick: () => action("resume", "confirmed_succeeded")
-			}, "外部操作已完成")] : [e$3("button", {
-				key: name,
-				type: "button",
-				className: "ltr-btn",
-				disabled: pending,
-				onClick: () => action(name)
-			}, labels[name])])), error ? e$3("p", {
+			}, task.archivedAt ? "恢复归档任务" : "删除"), ...actionButtons), orchestration ? e$3("details", {
+				className: "ltr-workflow-definition",
+				open: task.state === "AWAITING_CONFIRMATION"
+			}, e$3("summary", null, orchestration.mode === "discussion" ? "讨论流程" : "工作流定义"), orchestration.mode === "discussion" ? e$3("p", null, orchestration.rounds + " 轮 · " + orchestration.participants.map((item) => typeof item === "string" ? item : item.id).join(" → ") + " · 总结 " + (typeof orchestration.moderator === "string" ? orchestration.moderator : orchestration.moderator.id)) : e$3("ul", null, ...orchestration.stages.map((stage) => e$3("li", { key: stage.id }, stage.id + " · " + stage.profile + " · " + stage.objective + (stage.next ? " · 下一步 " + stage.next : "") + (stage.onChangesRequested ? " · 退回 " + stage.onChangesRequested : ""))))) : null, error ? e$3("p", {
 				className: "ltr-error",
 				role: "alert"
-			}, error) : null, editing ? e$3("form", {
+			}, error) : null, editing && editableOriginalGoal ? e$3("form", {
 				className: "ltr-goal-edit",
 				onSubmit: (event) => {
 					event.preventDefault();
@@ -4875,17 +5721,11 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				type: "submit",
 				className: "ltr-btn",
 				disabled: pending || !objective.trim() || !reason.trim()
-			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: "ltr-cockpit-body" }, e$3(TaskDag, {
+			}, "生成重规划")) : null, e$3("p", { className: "ltr-plan-hint" }, quotaRecovery ? quotaRecovery.label : waitingForDriver ? "任务已标记为运行，但尚未派发节点：请在绑定的会话中让模型继续执行（long_task_resume），由代理会话驱动调度。" : orchestration ? "流程按已保存定义执行。暂停后可以在会话中提出流程修订。" : "修改原始目标会生成可确认的计划修订；低风险执行失败可自动局部重规划。"), e$3("div", { className: layout.mainClassName }, e$3(TaskDag, {
 				nodes: graph.nodes,
 				selectedId,
 				onSelect: setSelectedId
-			}), e$3("aside", { className: "ltr-inspector" }, selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: "ltr-event-list" }, ...events.filter((event) => !event.taskId || event.taskId === selected.id).slice(-8).map((event, index) => {
-				const item = formatTaskEvent(event);
-				return e$3("li", {
-					key: `${event.seq ?? index}-${event.type}`,
-					className: `tone-${item.tone}`
-				}, e$3("strong", null, item.label), e$3("small", null, item.detail), event.createdAt ? e$3("time", null, new Date(event.createdAt).toLocaleString()) : null);
-			}))) : e$3("p", null, "选择一个节点查看详情"))));
+			}), e$3("details", { className: `${layout.inspectorClassName} ltr-cockpit-inspector-details` }, e$3("summary", null, "节点详情"), selected ? e$3(react.default.Fragment, null, e$3("h3", null, selected.objective), e$3("p", null, `节点 ${selected.id} · ${taskStatePresentation(selected.state).label}`), e$3("p", null, selected.completionCriteria ?? "未声明完成条件"), activeAttempt ? e$3("section", { className: "ltr-attempt-liveness" }, e$3("h4", null, "执行活动"), e$3("p", null, `${activeAttempt.latestProgress?.phase ?? "执行中"}：${activeAttempt.latestProgress?.message ?? "等待子会话进度"}`), activeAttempt.lastActivityAt ? e$3("time", null, `最近活动：${new Date(activeAttempt.lastActivityAt).toLocaleString()}`) : null, activeAttempt.maxWallExpiresAt ? e$3("time", null, `最长运行至：${new Date(activeAttempt.maxWallExpiresAt).toLocaleString()}`) : null) : null, e$3("h4", null, "近期事件"), e$3("ol", { className: layout.eventListClassName }, ...eventRows)) : e$3("p", null, "选择一个节点查看详情"))));
 		}
 		//#endregion
 		//#region client/TaskArea.js
@@ -4999,6 +5839,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				sessionId
 			]);
 			if (!open) return null;
+			const presentation = taskAreaPresentation();
 			const overview = e$2("section", null, e$2("h2", null, "任务区"), e$2("p", null, showAll ? "跨会话长任务" : "当前会话任务"), e$2("div", { className: "ltr-task-filter" }, e$2("input", {
 				value: query,
 				placeholder: "搜索任务 ID 或目标",
@@ -5025,14 +5866,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				return e$2("li", { key: item.id }, e$2("button", {
 					type: "button",
 					onClick: () => setSelectedId(item.id)
-				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)}`)));
+				}, e$2("span", { className: `ltr-state tone-${presentation.tone}` }, presentation.label), e$2("strong", null, item.objective), e$2("small", null, `${item.id} · ${formatTaskProgress(item.progress, item.currentOrLastNode)} · 第 ${item.runtimeMetrics?.runRoundCount ?? 0} 轮 · 已运行 ${Math.floor((item.runtimeMetrics?.activeRunTimeMs ?? 0) / 1e3)} 秒`)));
 			})));
-			return e$2("div", { className: "ltr-modal-layer" }, e$2("div", {
-				className: "ltr-mask",
-				onClick: onClose
-			}), e$2("section", {
-				className: "ltr-modal",
-				role: "dialog",
+			return e$2("section", {
+				className: selectedId ? `${presentation.panelClassName} ${presentation.cockpitPanelClassName}` : presentation.panelClassName,
 				"aria-label": "任务区"
 			}, e$2("button", {
 				className: "ltr-btn ltr-close",
@@ -5050,7 +5887,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onCurrentChanged: setCurrentTaskId,
 				onTaskChanged: setTask,
 				onBack: () => setSelectedId(null)
-			}) : overview));
+			}) : overview);
 		}
 		//#endregion
 		//#region client/TaskStrip.js
@@ -5059,6 +5896,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		function TaskStrip({ sessionId, remote, onOpen, openSession, driveInSession }) {
 			const [task, setTask] = react.default.useState(null);
 			const [pending, setPending] = react.default.useState(false);
+			const [driverNotice, setDriverNotice] = react.default.useState(null);
+			const [, setDriverTick] = react.default.useState(0);
 			react.default.useEffect(() => {
 				if (!sessionId) return;
 				let live = true;
@@ -5074,27 +5913,81 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 					clearInterval(timer);
 				};
 			}, [sessionId, remote]);
+			const driveTask = (freshTask) => Promise.resolve(remote.getTaskNavigation({ taskId: freshTask.id })).then((value) => {
+				const navigation = remoteValue(value);
+				const mode = resumeDriverMode(navigation, sessionId);
+				if (mode === "attach") {
+					setDriverNotice("任务尚未绑定可继续的会话，请先在任务区附加当前会话。");
+					return { outcome: "attach" };
+				}
+				if (mode === "open") {
+					openSession?.(navigation.currentSessionId);
+					setDriverNotice("已打开绑定会话，请在该会话继续执行。");
+					return { outcome: "opened" };
+				}
+				if (typeof driveInSession !== "function") {
+					setDriverNotice("当前页面无法向绑定会话发送继续指令。");
+					return { outcome: "unsupported" };
+				}
+				return driveBoundSessionOnce({
+					sessionId,
+					taskId: freshTask.id,
+					controlRevision: freshTask.controlRevision,
+					objective: freshTask.objective,
+					drive: driveInSession
+				}).then((result) => {
+					setDriverTick((tick) => tick + 1);
+					if (result.outcome === "injected") setDriverNotice("已向绑定会话发送继续执行指令。");
+					else if (result.outcome === "skipped") setDriverNotice("继续指令已发送，正在等待绑定会话执行。");
+					else setDriverNotice(`继续指令发送失败：${result.status?.reason ?? "未知原因"}，可再次点击重试。`);
+					return result;
+				});
+			}).catch(() => {
+				setDriverNotice("无法读取绑定会话，可再次点击重试。");
+				return { outcome: "failed" };
+			});
+			const continueInBoundSession = () => task === null || task === void 0 ? Promise.resolve({ outcome: "none" }) : driveTask(task);
+			react.default.useEffect(() => {
+				if (!task?.requiresSessionDriver || !sessionId) return;
+				continueInBoundSession();
+			}, [
+				task?.id,
+				task?.controlRevision,
+				task?.requiresSessionDriver,
+				sessionId
+			]);
 			if (!task) return null;
 			const view = taskStripPresentation(task);
+			const actionLabel = (action) => ({
+				pause: "暂停",
+				resume: "继续",
+				cancel: "取消",
+				confirm: "确认"
+			})[action] ?? action;
+			const reasonText = (reason) => String(reason?.message ?? reason ?? "未知原因");
 			const update = (action) => {
 				setPending(true);
+				setDriverNotice(null);
 				Promise.resolve(remote.updateTask({
 					taskId: task.id,
 					expectedRevision: task.controlRevision,
 					action,
 					sessionId
-				})).catch(() => void 0).then(() => remote.getCurrentTaskForSession({ sessionId })).then((value) => setTask(remoteValue(value))).then(() => action === "resume" ? remote.getTaskNavigation({ taskId: task.id }) : null).then((nav) => {
-					if (action !== "resume") return;
-					const navigation = remoteValue(nav);
-					const mode = resumeDriverMode(navigation, sessionId);
-					if (mode === "inject" && typeof driveInSession === "function") driveInSession(sessionId, task.id, task.objective);
-					else if (mode === "open" && navigation?.currentSessionId && typeof openSession === "function") openSession(navigation.currentSessionId);
-				}).catch(() => void 0).finally(() => setPending(false));
+				})).then((result) => {
+					const value = remoteValue(result);
+					if (value !== null && typeof value === "object" && value.kind === "conflict") setDriverNotice(`任务已被其他操作更新，已刷新为最新状态；如需${actionLabel(action)}请再操作一次。`);
+					return remote.getCurrentTaskForSession({ sessionId });
+				}).then((value) => {
+					const fresh = remoteValue(value);
+					setTask(fresh);
+					return fresh;
+				}).then((fresh) => action === "resume" && fresh !== null && fresh !== void 0 ? driveTask(fresh) : void 0).catch((reason) => setDriverNotice(`${actionLabel(action)}失败：${reasonText(reason)}，可重试。`)).finally(() => setPending(false));
 			};
 			const clear = () => {
 				setPending(true);
 				Promise.resolve(remote.clearCurrentSession({ sessionId })).then(() => setTask(null)).finally(() => setPending(false));
 			};
+			const driverAvailable = canDriveSessionDriver(sessionDriverStatus(sessionId, task.id, task.controlRevision));
 			return e$1("div", {
 				className: `ltr-strip tone-${view.tone}`,
 				"data-testid": "long-task-strip"
@@ -5109,7 +6002,10 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			}, task.objective), e$1("span", {
 				className: "ltr-strip-progress",
 				title: view.detail || task.objective
-			}, view.progress), e$1("div", { className: "ltr-strip-actions" }, (task.availableActions ?? []).includes("pause") ? e$1("button", {
+			}, `${view.progress} · ${task.runtimeMetrics ? taskStripRuntime(task.runtimeMetrics) : ""}`), driverNotice ? e$1("span", {
+				className: "ltr-strip-progress",
+				role: "status"
+			}, driverNotice) : null, e$1("div", { className: "ltr-strip-actions" }, (task.availableActions ?? []).includes("pause") ? e$1("button", {
 				type: "button",
 				className: "ltr-icon-button",
 				disabled: pending,
@@ -5123,6 +6019,15 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onClick: () => update("resume"),
 				"aria-label": "继续长任务",
 				title: "继续长任务"
+			}, "▶") : null, task.requiresSessionDriver ? e$1("button", {
+				type: "button",
+				className: "ltr-icon-button",
+				disabled: pending || !driverAvailable,
+				onClick: () => {
+					continueInBoundSession();
+				},
+				"aria-label": driverAvailable ? "继续执行会话" : "继续指令已发送",
+				title: driverAvailable ? "继续执行会话" : "继续指令已发送，等待绑定会话执行"
 			}, "▶") : null, e$1("button", {
 				type: "button",
 				className: "ltr-icon-button",
@@ -5139,6 +6044,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				title: "隐藏当前任务条"
 			}, "×")));
 		}
+		function taskStripRuntime(metrics) {
+			return `第 ${metrics.runRoundCount} 轮 · 已运行 ${Math.floor(metrics.activeRunTimeMs / 1e3)} 秒`;
+		}
 		//#endregion
 		//#region client/index.js
 		const inject = [
@@ -5148,13 +6056,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		];
 		const e = react.default.createElement;
 		const CSS = `
-.ltr-modal-layer{position:absolute;inset:0;z-index:50}.ltr-mask{position:absolute;inset:0;background:rgb(15 23 42 / .26)}
-.ltr-modal{position:relative;margin:24px auto;width:min(1160px,calc(100vw - 48px));height:calc(100vh - 48px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:20px;box-shadow:0 20px 60px rgb(15 23 42 / .18)}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
+.ltr-task-area-panel{${taskAreaPanelCss}}.ltr-close{float:right}.ltr-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:6px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:18px;color:var(--dsw-alias-label-primary);background:transparent;font-family:var(--dsw-font-family);font-size:13px;font-weight:400;line-height:20px;white-space:nowrap;cursor:pointer}.ltr-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ltr-btn:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}.ltr-header-btn{min-width:111px}
 .ltr-task-filter{display:flex;align-items:center;gap:8px;margin:16px 0}.ltr-task-filter input,.ltr-task-filter select{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.ltr-task-filter input{min-width:260px}.ltr-task-filter .ltr-check{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px}.ltr-task-filter .ltr-check input{min-width:0;margin:0}
 .ltr-task-list{display:flex;flex-direction:column;list-style:none;margin:0;padding:0;border-top:1px solid var(--dsw-alias-border-l1)}.ltr-task-list button{display:grid;grid-template-columns:92px minmax(220px,1fr) 170px;gap:12px;align-items:center;width:100%;min-height:54px;padding:10px 4px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;text-align:left}.ltr-task-list button:hover{background:var(--dsw-alias-interactive-bg-hover)}.ltr-task-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.ltr-task-list small{overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-empty-task-list{margin:0;padding:18px 4px;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .ltr-strip{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));height:36px;margin:0 auto 8px;padding:4px 5px 4px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-specific-tip);color:var(--dsw-alias-label-primary)}.ltr-strip-glyph{color:var(--dsw-alias-label-tertiary)}.ltr-strip-label{flex:none;font-size:13px;font-weight:500}.ltr-strip-objective{flex:1;min-width:0;overflow:hidden;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;text-align:left;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.ltr-strip-progress{flex:0 1 auto;min-width:0;max-width:38%;overflow:hidden;color:var(--dsw-alias-label-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.ltr-strip-actions{display:flex;gap:3px}.ltr-icon-button{display:inline-grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.ltr-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.ltr-icon-button:disabled{opacity:.4;cursor:default}
-.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:15px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-header>div{flex:1}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
-.ltr-cockpit-body{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;margin-top:16px}.ltr-dag-wrap{min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;width:100%;height:570px;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-body{grid-template-columns:1fr}.ltr-modal{width:calc(100vw - 20px);height:calc(100vh - 20px);margin:10px}.ltr-dag{height:420px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
+.ltr-cockpit-header{display:flex;gap:12px;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-cockpit-identity{flex:1;min-width:0}.ltr-cockpit-identity-row{display:flex;align-items:center;gap:8px;min-width:0}.ltr-cockpit-identity-row .ltr-goal-objective{flex:1;min-width:0}.ltr-goal-objective{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}.ltr-cockpit small{display:block;margin-top:7px;color:var(--dsw-alias-label-tertiary)}.ltr-state{flex:none;padding:4px 8px;border-radius:99px;font-size:12px}.tone-ongoing{color:var(--dsw-alias-state-business-primary)}.tone-done{color:var(--dsw-alias-state-success-primary)}.tone-warning{color:var(--dsw-alias-state-warning-primary)}.tone-error{color:var(--dsw-alias-state-error-primary)}.tone-muted{color:var(--dsw-alias-label-tertiary)}.tone-neutral{color:var(--dsw-alias-label-secondary)}.tone-selected{color:var(--dsw-alias-label-primary)}.ltr-cockpit-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-plan-hint{margin:12px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.ltr-workflow-definition{margin:8px 0;font-size:12px;color:var(--dsw-alias-label-secondary)}.ltr-workflow-definition ul{margin:6px 0;padding-inline-start:20px}
+.ltr-cockpit-main{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;height:320px;margin-top:16px}.ltr-dag-wrap{display:flex;flex-direction:column;min-width:0;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}.ltr-dag-tools{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}.ltr-dag-tools button{margin-right:6px}.ltr-dag{display:block;flex:1;min-height:0;width:100%;height:auto;background:var(--dsw-alias-bg-base);touch-action:none}.ltr-edge{fill:none;stroke:var(--dsw-alias-border-l2);stroke-width:2}.ltr-edge.is-selected{stroke:var(--dsw-alias-label-primary);stroke-width:3}.ltr-node rect{fill:var(--dsw-alias-bg-base);stroke:var(--dsw-alias-border-l2);stroke-width:1.5}.ltr-node.tone-done rect{stroke:var(--dsw-alias-state-success-primary)}.ltr-node.tone-error rect{stroke:var(--dsw-alias-state-error-primary)}.ltr-node.tone-warning rect{stroke:var(--dsw-alias-state-warning-primary)}.ltr-node.tone-ongoing rect{stroke:var(--dsw-alias-state-business-primary)}.ltr-node.tone-muted rect{stroke:var(--dsw-alias-label-tertiary);stroke-dasharray:5 4}.ltr-node.is-selected>rect{stroke:var(--dsw-alias-label-primary);stroke-width:2.5}.ltr-node-title,.ltr-node-objective,.ltr-node-state{fill:var(--dsw-alias-label-primary)}.ltr-node-title{font-size:13px;font-weight:600}.ltr-node-objective{font-size:12px}.ltr-node-state{font-size:11px;fill:var(--dsw-alias-label-tertiary)}.ltr-collapse-control rect{fill:var(--dsw-specific-tip);stroke:var(--dsw-alias-border-l2)}.ltr-collapse-control text{fill:var(--dsw-alias-label-secondary);font-size:11px}.ltr-inspector{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px}.ltr-cockpit-inspector{display:flex;flex-direction:column;min-height:0;overflow:hidden}.ltr-inspector ol{padding-left:18px;font-size:12px}.ltr-cockpit-events{flex:1;min-height:0;overflow-y:auto}.ltr-warning,.ltr-error{color:var(--dsw-alias-state-error-primary)}@media(max-width:800px){.ltr-cockpit-main{grid-template-columns:1fr;height:420px}.ltr-cockpit-inspector{display:none}.ltr-modal{width:calc(100vw - 20px);margin:0 10px}.ltr-task-list button{grid-template-columns:80px 1fr}.ltr-task-list small{grid-column:2}.ltr-task-filter input{min-width:0;flex:1}}
 `;
 		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime\"]")) {
 			const tag = document.createElement("style");
@@ -5178,6 +6085,30 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "long-task-runtime-controls";
 			tag.textContent = `.ltr-dag-legend{display:flex;flex-wrap:wrap;gap:10px;padding:7px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);font-size:11px}.ltr-dag-legend span{display:inline-flex;gap:5px;align-items:center}.ltr-legend-swatch{width:9px;height:9px;border:2px solid currentColor;border-radius:3px}.ltr-goal-edit{display:grid;gap:8px;margin:12px 0;padding:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px}.ltr-goal-edit label{display:grid;gap:4px;font-size:12px}.ltr-goal-edit input,.ltr-goal-edit textarea{padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base);color:inherit}.ltr-goal-edit textarea{min-height:64px;resize:vertical}.ltr-event-list{display:grid;gap:8px;padding-left:18px}.ltr-event-list li{display:grid;gap:2px}.ltr-event-list small,.ltr-event-list time{font-size:11px;color:var(--dsw-alias-label-tertiary)}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-layout\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-runtime-layout";
+			tag.textContent = `.ltr-task-cockpit-panel{position:relative;display:flex;flex-direction:column;height:min(55vh,430px);overflow:hidden}.ltr-task-cockpit-panel>.ltr-close{position:absolute;z-index:1;top:20px;right:20px}.ltr-task-cockpit-panel>.ltr-cockpit{display:flex;flex:1;flex-direction:column;min-height:0}.ltr-task-cockpit-panel .ltr-cockpit-header{padding:0 52px 8px 0}.ltr-task-cockpit-panel .ltr-cockpit small{margin-top:4px}.ltr-task-cockpit-panel .ltr-cockpit-actions{padding:8px 0}.ltr-task-cockpit-panel .ltr-plan-hint{margin:6px 0}.ltr-task-cockpit-panel .ltr-cockpit-main{flex:1;min-height:0;height:auto;margin-top:8px}@media(max-width:800px){.ltr-task-cockpit-panel .ltr-cockpit-main{height:auto}}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-topology-priority\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-runtime-topology-priority";
+			tag.textContent = `.ltr-task-cockpit-panel .ltr-plan-hint{display:none}.ltr-task-cockpit-panel .ltr-cockpit-main{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;gap:8px}.ltr-task-cockpit-panel .ltr-dag-legend{padding:4px 10px;font-size:10px}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details{display:block;flex:none;max-height:92px;padding:6px 10px;overflow:auto}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details:not([open]){height:20px;min-height:20px}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary)}.ltr-task-cockpit-panel .ltr-cockpit-inspector-details h3,.ltr-task-cockpit-panel .ltr-cockpit-inspector-details h4,.ltr-task-cockpit-panel .ltr-cockpit-inspector-details p{margin:6px 0}@media(max-width:800px){.ltr-task-cockpit-panel .ltr-cockpit-inspector-details{display:none}}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-runtime-full-height\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-runtime-full-height";
+			tag.textContent = `.ltr-task-cockpit-panel{${cockpitPanelCss}}`;
+			document.head.appendChild(tag);
+		}
+		if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=\"long-task-settings\"]")) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "long-task-settings";
+			tag.textContent = longTaskSettingsCss;
 			document.head.appendChild(tag);
 		}
 		let opened = false;
@@ -5207,13 +6138,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				onClick: () => open ? closeTaskArea() : openTaskArea()
 			}, "任务区");
 		}
-		function Overlay({ props, remote, openSession, driveInSession }) {
+		function SessionTop({ useSessions, remote, openSession, driveInSession }) {
 			return e(TaskArea, {
 				open: useOpen(),
 				onClose: closeTaskArea,
 				remote,
 				initialTaskId: selectedTaskId,
-				useSessions: props?.useSessions,
+				useSessions,
 				openSession,
 				driveInSession
 			});
@@ -5229,102 +6160,15 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				driveInSession
 			}) : null;
 		}
-		const descriptor = (method, schema) => ({
-			id: `@deepseek-ai/dsh-long-task-runtime#longTasks/${method}`,
-			service: "longTasks",
-			namespace: "longTasks",
-			method,
-			invocation: { kind: "direct" },
-			parameters: [{
-				name: "input",
-				wire: "input",
-				source: "json",
-				codec: {
-					mode: "strict",
-					typeSymbol: method,
-					schema
-				}
-			}],
-			result: {
-				mode: "strict",
-				typeSymbol: method,
-				schema: unknown()
-			}
-		});
-		const longTaskRemote = {
-			package: "@deepseek-ai/dsh-long-task-runtime",
-			descriptors: [
-				descriptor("listTasks", object({
-					cursor: number().optional(),
-					filter: object({
-						state: string().optional(),
-						query: string().optional(),
-						archived: boolean().optional(),
-						sessionId: string().optional()
-					}).optional()
-				}).optional()),
-				descriptor("getTask", object({ taskId: string() })),
-				descriptor("getTaskGraph", object({
-					taskId: string(),
-					revision: number().optional()
-				})),
-				descriptor("listTaskEvents", object({
-					taskId: string(),
-					cursor: number().optional(),
-					taskNodeId: string().optional()
-				})),
-				descriptor("getCurrentTaskForSession", object({ sessionId: string() })),
-				descriptor("updateTask", object({
-					taskId: string(),
-					expectedRevision: number(),
-					action: _enum([
-						"confirm",
-						"resume",
-						"pause",
-						"cancel"
-					]),
-					sessionId: string().optional(),
-					workspaceScope: string().optional(),
-					recoveryResolution: _enum(["retry", "confirmed_succeeded"]).optional()
-				})),
-				descriptor("attachCurrentSession", object({
-					taskId: string(),
-					sessionId: string(),
-					workspaceScope: string().optional()
-				})),
-				descriptor("setCurrentSession", object({
-					taskId: string(),
-					sessionId: string(),
-					workspaceScope: string().optional()
-				})),
-				descriptor("clearCurrentSession", object({ sessionId: string() })),
-				descriptor("rejectReplan", object({
-					taskId: string(),
-					expectedRevision: number()
-				})),
-				descriptor("editTaskGoal", object({
-					taskId: string(),
-					expectedRevision: number(),
-					objective: string(),
-					reason: string(),
-					sessionId: string().optional()
-				})),
-				descriptor("acceptReplan", object({
-					taskId: string(),
-					expectedRevision: number(),
-					sessionId: string().optional()
-				})),
-				descriptor("archiveTask", object({
-					taskId: string(),
-					expectedRevision: number()
-				})),
-				descriptor("restoreTask", object({ taskId: string() })),
-				descriptor("getTaskNavigation", object({ taskId: string() }))
-			]
-		};
+		function ensureSessionTopSlot(slots) {
+			const spec = typeof slots?.spec === "function" ? slots.spec("conversation.session.top") : void 0;
+			if (spec?.kind !== "list" || spec.scope !== "session") throw new Error("当前 DSH 缺少会话顶部插槽 conversation.session.top；请升级 DSH 后再加载 long-task-runtime 插件。");
+		}
 		async function apply(ctx) {
+			ensureSessionTopSlot(ctx.slots);
 			await ctx.remote.$mount(longTaskRemote);
 			const remote = ctx.get("remote.longTasks");
+			registerLongTaskSettings(ctx.slots, remote);
 			const openSession = (sessionId) => {
 				ctx.sessions.open(sessionId);
 			};
@@ -5352,12 +6196,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 				openSession,
 				driveInSession
 			})));
-			ctx.slots.inject("shell.overlay", () => ctx.slots.register({
-				name: "shell.overlay",
-				id: "long-task-overlay",
+			ctx.slots.inject("conversation.session.top", () => ctx.slots.register({
+				name: "conversation.session.top",
+				id: "long-task-top",
 				order: 90
-			}, (props) => e(Overlay, {
-				props,
+			}, (props) => e(SessionTop, {
+				...props,
 				remote,
 				openSession,
 				driveInSession
@@ -5365,6 +6209,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		}
 		//#endregion
 		exports.apply = apply;
+		exports.ensureSessionTopSlot = ensureSessionTopSlot;
 		exports.inject = inject;
 		return module.exports;
 	}

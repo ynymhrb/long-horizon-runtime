@@ -2,8 +2,9 @@ import type { GoalView, CreateGoalRequest, LongTaskRuntime, RecoveryResolution }
 import type { InterruptionCause, RecoveryPolicyOutcome } from './domain.js'
 import type { GraphMutation } from './domain.js'
 import type { RuntimeEvent } from './event-store.js'
+import type { BudgetLimit } from './budgets.js'
 
-export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal }
+export interface TaskInvocation { readonly sessionId?: string; readonly workspaceScope?: string; readonly parent?: unknown; readonly signal?: AbortSignal; readonly authority?: 'operator' | 'agent' }
 export interface CreateTaskRequest extends CreateGoalRequest { readonly workspaceScope?: string }
 export type TaskUpdateAction = 'confirm' | 'resume' | 'pause' | 'cancel'
 export type TaskUpdateResult = { readonly kind: 'applied'; readonly task: GoalView } | { readonly kind: 'conflict'; readonly current: GoalView }
@@ -77,11 +78,12 @@ export class TaskControlApi {
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
     let task: GoalView
+    const authority = invocation.authority ?? 'agent'
     switch (request.action) {
-      case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal); break
-      case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal); break
+      case 'confirm': task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal, authority); break
+      case 'resume': task = await this.runtime.resumeGoal(request.taskId, invocation.parent, request.recoveryResolution, invocation.signal, authority); break
       case 'cancel': task = this.runtime.cancelGoal(request.taskId); break
-      case 'pause': task = this.pause(request.taskId); break
+      case 'pause': task = this.pause(request.taskId, authority); break
     }
     const bound = this.bindOnContinue(request.taskId, request.action, invocation)
     return { kind: 'applied', task: this.advance(request.taskId, (bound ?? task).controlRevision) }
@@ -94,13 +96,35 @@ export class TaskControlApi {
     const task = await this.runtime.editOriginalGoal(request.taskId, { objective: request.objective, reason: request.reason }, invocation.parent, invocation.signal)
     return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
   }
+  proposeWorkflow(request: { readonly taskId: string; readonly expectedRevision: number; readonly spec: unknown; readonly reason: string }, invocation: TaskInvocation): TaskUpdateResult {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    return { kind: 'applied', task: this.runtime.proposeWorkflow(request.taskId, request.spec, request.reason, request.expectedRevision) }
+  }
+
   async acceptReplan(request: { readonly taskId: string; readonly expectedRevision: number }, invocation: TaskInvocation): Promise<TaskUpdateResult> {
     const current = this.requireTask(request.taskId)
     this.assertScope(current.workspaceScope, invocation.workspaceScope)
     if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
-    const task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal)
+    const task = await this.runtime.confirmGoal(request.taskId, invocation.parent, invocation.signal, invocation.authority ?? 'agent')
     const bound = this.bindOnContinue(request.taskId, 'confirm', invocation)
     return { kind: 'applied', task: this.advance(request.taskId, (bound ?? task).controlRevision) }
+  }
+  extendBudget(request: { readonly taskId: string; readonly expectedRevision: number; readonly limit: BudgetLimit }, invocation: Pick<TaskInvocation, 'workspaceScope'>): TaskUpdateResult {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    const task = this.runtime.extendGoalBudget(request.taskId, request.limit)
+    return { kind: 'applied', task: this.advance(request.taskId, task.controlRevision) }
+  }
+  recordMemoryRetrievalFeedback(request: { readonly taskId: string; readonly expectedRevision: number; readonly memoryId: string; readonly helpful: boolean; readonly reason: string }, invocation: Pick<TaskInvocation, 'workspaceScope'>): TaskUpdateResult {
+    const current = this.requireTask(request.taskId)
+    this.assertScope(current.workspaceScope, invocation.workspaceScope)
+    if (request.expectedRevision !== current.controlRevision) return { kind: 'conflict', current }
+    if (request.memoryId.trim().length === 0 || request.reason.trim().length === 0) throw new Error('memory feedback requires a memory ID and reason')
+    this.runtime.store.transaction(() => this.runtime.store.append([{ type: 'MemoryRetrievalFeedbackRecorded', goalId: request.taskId, payload: { memoryId: request.memoryId, helpful: request.helpful, reason: request.reason } }]))
+    return { kind: 'applied', task: this.advance(request.taskId, current.controlRevision) }
   }
 
   get(taskId: string, invocation?: Pick<TaskInvocation, 'workspaceScope'>): GoalView | undefined {
@@ -146,8 +170,8 @@ export class TaskControlApi {
     return { kind: 'applied', task: this.advance(taskId, task.controlRevision) }
   }
 
-  private pause(taskId: string): GoalView {
-    return this.runtime.pauseGoal(taskId)
+  private pause(taskId: string, authority: 'operator' | 'agent'): GoalView {
+    return this.runtime.pauseGoal(taskId, authority)
   }
 
   /**

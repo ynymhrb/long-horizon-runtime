@@ -1,0 +1,55 @@
+# 配置示例。将该设置覆盖条目加入 Web 用户配置。
+# 路径、DSH provider 名称和 model 名称应替换为本机实际值。
+- id: long-task-settings-overlay
+  config:
+    maxConcurrentTasks: 4
+    defaultWorkflow: dynamic
+    workers:
+      - { id: api-analysis, kind: dsh, modelRole: analysis, maxConcurrent: 2 }
+      - id: codex
+        kind: codex-cli
+        executable: D:/tools/codex/codex.exe
+        cwd: D:/work/project
+        scratchDirectory: D:/ai_tmp/long-task-workers
+        maxConcurrent: 1
+        capabilities: [code]
+      - id: claude
+        kind: claude-cli
+        executable: D:/tools/claude/claude.exe
+        cwd: D:/work/project
+        maxConcurrent: 1
+        capabilities: [code]
+      - id: local-validator
+        kind: custom-exec
+        executable: D:/tools/node/node.exe
+        args: [D:/tools/custom-worker/runner.mjs]
+        cwd: D:/work/project
+        maxConcurrent: 1
+    executionProfiles:
+      - { id: default, providerName: spawn }
+      - { id: coding, providerName: spawn, workerIds: [codex, claude], capabilities: [code] }
+    defaultExecutionProfile: default
+    modelEndpoints:
+      - { id: planner, provider: planning-provider, model: planning-model, roles: [planner], maxConcurrent: 1 }
+      - { id: api-one, provider: api-provider-one, model: analysis-model, roles: [analysis, execution], maxConcurrent: 2 }
+      - { id: api-two, provider: api-provider-two, model: analysis-model, roles: [analysis, execution], maxConcurrent: 1 }
+    toolConcurrency:
+      - { name: read_file, maxConcurrent: 2 }
+    workflowTemplates:
+      code-delivery:
+        mode: workflow
+        entry: design
+        stages:
+          - { id: design, objective: 为目标生成设计方案, profile: claude, maxVisits: 3, next: review }
+          - { id: review, objective: 评审设计并指出返工要求, profile: codex, maxVisits: 3, next: develop, onChangesRequested: design }
+          - { id: develop, objective: 根据通过的设计开发, profile: coding, sideEffectClass: idempotent, next: code-review }
+          - { id: code-review, objective: 对照设计评审代码和测试范围, profile: api-analysis }
+      roundtable:
+        mode: discussion
+        rounds: 10
+        participants:
+          - { id: A, profile: claude, instruction: 提出方案与依据 }
+          - { id: B, profile: codex, instruction: 寻找反例与实现风险 }
+          - { id: C, profile: api-analysis, instruction: 比较证据和可验证性 }
+        moderator: { id: host, profile: api-analysis, instruction: 区分共识和未解决的分歧 }
+        convergence: 核心判断达成一致且剩余分歧已经记录

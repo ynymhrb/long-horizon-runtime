@@ -13,6 +13,11 @@ export function cockpitDataState(task, graph) {
   return 'ready'
 }
 
+/** Original-goal revisions require a live, non-terminal task. */
+export function canEditOriginalGoal(task) {
+  return task != null && task.orchestration === undefined && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.state)
+}
+
 /**
  * Build the message injected into the bound session after a web-side resume.
  * The session's model receives it as its next prompt and drives the DAG with
@@ -20,7 +25,7 @@ export function cockpitDataState(task, graph) {
  * has to type a second message.
  */
 export function resumeDriverMessage(taskId, objective) {
-  return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ''}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认。`
+  return `任务区已把长任务 ${taskId} 标记为运行（${objective ?? ''}）。请立即调用 long_task_resume 工具以当前会话为执行父级驱动该任务执行，无需再向我确认；若该任务已被用户暂停（状态为 PAUSED），请不要恢复，直接告知用户。`
 }
 
 /**
@@ -38,9 +43,15 @@ export function resumeDriverMode(navigation, currentSessionId) {
   return 'open'
 }
 
-/** A durable RUNNING state still needs a live session parent before it can dispatch child work. */
+/** Use the runtime lease signal when available; retain the old derivation only for an older host during rollout. */
 export function waitingForSessionDriver(task) {
+  if (typeof task?.requiresSessionDriver === 'boolean') return task.requiresSessionDriver
   return task?.state === 'RUNNING' && Array.isArray(task.tasks) && task.tasks.length > 0 && !task.tasks.some(node => node.state === 'RUNNING')
+}
+
+/** Combine the durable driver requirement with the session-routing decision. */
+export function sessionDriverMode(task, navigation, currentSessionId) {
+  return waitingForSessionDriver(task) ? resumeDriverMode(navigation, currentSessionId) : 'none'
 }
 
 /** Both the current and a bound background session can accept a driver prompt. */
